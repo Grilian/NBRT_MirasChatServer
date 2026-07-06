@@ -3,13 +3,13 @@ const path = require('path');
 
 const db = new Database(path.join(__dirname, 'messenger.db'));
 
-// Оптимизация для производительности
+// Оптимизация
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.pragma('cache_size = -64000');
 db.pragma('busy_timeout = 5000');
 
-// 1. Сначала создаём таблицы
+// Создаём таблицы
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,7 +17,7 @@ db.exec(`
     password TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
-  
+
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id TEXT NOT NULL,
@@ -50,14 +50,14 @@ db.exec(`
   );
 `);
 
-// 2. Миграция: добавляем колонку status, если БД уже существовала раньше
+// Миграция: добавляем колонку status, если БД старая
 try {
   db.exec(`ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'sent'`);
 } catch (e) {
-  // Колонка уже есть — игнорируем
+  // Колонка уже есть
 }
 
-// 3. Создаём индексы (строго после создания таблиц!)
+// Индексы
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
   CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);

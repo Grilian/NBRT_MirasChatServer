@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import api from '../api/client';
 
 interface LoginProps {
-  onLogin: (user: { id: number; username: string; token: string }) => void;
+  onLogin: (user: { id: number; username: string; token: string; source: string }) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [isRegister, setIsRegister] = useState(false);
+  const [useMiras, setUseMiras] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -16,16 +17,30 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setError('');
 
     try {
-      const endpoint = isRegister ? '/auth/register' : '/auth/login';
-      const { data } = await api.post(endpoint, { username, password });
+      let endpoint = '';
+      let body = {};
 
-      if (isRegister) {
+      if (useMiras) {
+        endpoint = '/auth/login-miras';
+        body = { login: username, password };
+      } else if (isRegister) {
+        endpoint = '/auth/register';
+        body = { username, password };
+      } else {
+        endpoint = '/auth/login';
+        body = { username, password };
+      }
+
+      const { data } = await api.post(endpoint, body);
+
+      if (isRegister && !useMiras) {
         setIsRegister(false);
         alert('Регистрация успешна! Теперь войдите.');
       } else {
         localStorage.setItem('token', data.token);
         localStorage.setItem('userId', data.id);
         localStorage.setItem('username', data.username);
+        localStorage.setItem('source', data.source || 'local');
         onLogin(data);
       }
     } catch (err: any) {
@@ -37,10 +52,35 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>MirasChat</h1>
+        
+        {/* Переключатель МИРАС / Локальный */}
+        <div style={styles.sourceToggle}>
+          <button
+            type="button"
+            onClick={() => setUseMiras(false)}
+            style={{
+              ...styles.toggleBtn,
+              ...(!useMiras ? styles.toggleBtnActive : {})
+            }}
+          >
+            Локальный
+          </button>
+          <button
+            type="button"
+            onClick={() => setUseMiras(true)}
+            style={{
+              ...styles.toggleBtn,
+              ...(useMiras ? styles.toggleBtnActive : {})
+            }}
+          >
+            МИРАС
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} style={styles.form}>
           <input
             type="text"
-            placeholder="Имя пользователя"
+            placeholder={useMiras ? 'Логин МИРАС' : 'Имя пользователя'}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             style={styles.input}
@@ -56,15 +96,17 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           />
           {error && <p style={styles.error}>{error}</p>}
           <button type="submit" style={styles.button}>
-            {isRegister ? 'Зарегистрироваться' : 'Войти'}
+            {useMiras ? 'Войти через МИРАС' : (isRegister ? 'Зарегистрироваться' : 'Войти')}
           </button>
-          <button
-            type="button"
-            onClick={() => setIsRegister(!isRegister)}
-            style={styles.switchButton}
-          >
-            {isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}
-          </button>
+          {!useMiras && (
+            <button
+              type="button"
+              onClick={() => setIsRegister(!isRegister)}
+              style={styles.switchButton}
+            >
+              {isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}
+            </button>
+          )}
         </form>
       </div>
     </div>
@@ -95,6 +137,27 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: '32px',
     fontWeight: 'bold',
   },
+  sourceToggle: {
+    display: 'flex',
+    gap: '12px',
+    marginBottom: '20px',
+  },
+  toggleBtn: {
+    flex: 1,
+    padding: '12px',
+    background: '#f5f5dc',
+    color: '#6b7b6e',
+    border: '1px solid #4a7c59',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: 'bold',
+  },
+  toggleBtnActive: {
+    background: '#c9a227',
+    color: '#ffffff',
+    border: '1px solid #c9a227',
+  },
   form: {
     display: 'flex',
     flexDirection: 'column',
@@ -118,7 +181,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontWeight: 'bold',
     cursor: 'pointer',
     marginTop: '10px',
-    transition: 'background 0.3s',
   },
   switchButton: {
     padding: '10px',
@@ -127,7 +189,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     border: '1px solid #2d5a3d',
     borderRadius: '8px',
     cursor: 'pointer',
-    transition: 'all 0.3s',
   },
   error: {
     color: '#c0392b',

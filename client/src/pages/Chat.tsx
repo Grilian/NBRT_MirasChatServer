@@ -6,6 +6,7 @@ import MessageInput from '../components/MessageInput';
 import api from '../api/client';
 
 interface User { id: number; username: string; }
+interface MirasAdmin { id: number; login: string; role: string; zone_id: number | null; }
 interface Message {
   id: number;
   chat_id?: string;
@@ -20,12 +21,19 @@ interface LastMessage {
   text: string;
   created_at: string;
 }
+interface AllUser {
+  id: number;
+  username: string;
+  source: 'local' | 'miras';
+  mirasLogin?: string;
+}
 
 const GENERAL_CHAT_ID = 'general';
 
 const Chat: React.FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [mirasAdmins, setMirasAdmins] = useState<MirasAdmin[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [activeChatName, setActiveChatName] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -34,11 +42,10 @@ const Chat: React.FC = () => {
   const [lastMessages, setLastMessages] = useState<Record<string, LastMessage>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-  const [comments, setComments] = useState<Record<number, { username: string; comment: string }>>({});
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [comments, setComments] = useState<Record<number, { username: string; comment: string }>>({});
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentUserId = Number(localStorage.getItem('userId'));
@@ -57,7 +64,21 @@ const Chat: React.FC = () => {
     setSocket(newSocket);
 
     newSocket.emit('user_online', currentUserId);
+
+    // Загружаем локальных пользователей
     api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
+    
+    // Загружаем админов из МИРАС
+    api.get('/miras-admins').then(({ data }) => setMirasAdmins(data)).catch(console.error);
+    
+    // Загружаем непрочитанные
+    api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
+    
+    // Загружаем избранное
+    api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
+    
+    // Загружаем комментарии
+    api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
 
     newSocket.on('online_users', (userIds: number[]) => setOnlineUsers(userIds));
 
@@ -92,17 +113,6 @@ const Chat: React.FC = () => {
     return () => { newSocket.disconnect(); };
   }, [currentUserId]);
 
-  // Загрузка комментариев при старте
-  useEffect(() => {
-    api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
-    api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
-  }, []);
-
-  // Загрузка непрочитанных при старте
-  useEffect(() => {
-    api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
-  }, []);
-
   // Единый обработчик новых сообщений
   useEffect(() => {
     if (!socket) return;
@@ -129,7 +139,9 @@ const Chat: React.FC = () => {
         if (!isChatActive || !isWindowFocused) {
           const chatName = message.chat_id === GENERAL_CHAT_ID 
             ? 'Общий чат' 
-            : users.find(u => getChatId(u.id) === message.chat_id)?.username || 'Чат';
+            : message.chat_id?.startsWith('miras_admin_')
+              ? message.chat_id.replace('miras_admin_', '') + ' [МИРАС]'
+              : allUsers.find(u => getChatId(u.id) === message.chat_id)?.username || 'Чат';
           
           showNotification(message, chatName);
         }
@@ -138,17 +150,22 @@ const Chat: React.FC = () => {
 
     socket.on('chat_message', handler);
     return () => { socket.off('chat_message', handler); };
-  }, [socket, activeChat, currentUserId, users]);
+  }, [socket, activeChat, currentUserId]);
 
-  // Загрузка истории при смене чата (с пагинацией)
+  // Загрузка истории при смене чата
   useEffect(() => {
     if (activeChat) {
       setMessages([]);
       setHasMore(true);
       api.get(`/messages/${activeChat}?limit=50&offset=0`)
         .then(({ data }) => {
-          setMessages(data.messages);
-          setHasMore(data.hasMore);
+          if (data.messages) {
+            setMessages(data.messages);
+            setHasMore(data.hasMore);
+          } else {
+            setMessages(data);
+            setHasMore(false);
+          }
         })
         .catch(console.error);
       setUnreadCounts(prev => ({ ...prev, [activeChat]: 0 }));
@@ -157,21 +174,6 @@ const Chat: React.FC = () => {
     }
   }, [activeChat]);
 
-  const updateComment = async (targetUserId: number, comment: string) => {
-    try {
-      await api.post('/comments', { target_user_id: targetUserId, comment });
-      const user = users.find(u => u.id === targetUserId);
-      if (user) {
-        setComments(prev => ({
-          ...prev,
-          [targetUserId]: { username: user.username, comment }
-        }));
-      }
-    } catch (e) {
-      console.error('Ошибка:', e);
-    }
-  };
-
   // Подгрузка старых сообщений
   const loadMoreMessages = async () => {
     if (!activeChat || loadingMore || !hasMore) return;
@@ -179,21 +181,16 @@ const Chat: React.FC = () => {
     setLoadingMore(true);
     try {
       const { data } = await api.get(`/messages/${activeChat}?limit=50&offset=${messages.length}`);
-      setMessages(prev => [...data.messages, ...prev]);
-      setHasMore(data.hasMore);
+      if (data.messages) {
+        setMessages(prev => [...data.messages, ...prev]);
+        setHasMore(data.hasMore);
+      }
     } catch (e) {
       console.error('Ошибка загрузки:', e);
     } finally {
       setLoadingMore(false);
     }
   };
-
-  // Сброс непрочитанных при открытии чата
-  useEffect(() => {
-    if (activeChat && unreadCounts[activeChat] > 0) {
-      setUnreadCounts(prev => ({ ...prev, [activeChat]: 0 }));
-    }
-  }, [activeChat]);
 
   // Отметка прочитанных
   useEffect(() => {
@@ -207,26 +204,6 @@ const Chat: React.FC = () => {
       socket.emit('message_read', { chatId: activeChat, messageIds: unreadIds });
     }
   }, [messages, activeChat, socket, currentUserId]);
-
-  // Загрузка избранного при старте
-  useEffect(() => {
-    api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
-  }, []);
-
-  // Функции для работы с избранным
-  const toggleFavorite = async (chatId: string) => {
-    try {
-      if (favorites.includes(chatId)) {
-        await api.delete(`/favorites/${chatId}`);
-        setFavorites(prev => prev.filter(id => id !== chatId));
-      } else {
-        await api.post('/favorites', { chat_id: chatId });
-        setFavorites(prev => [...prev, chatId]);
-      }
-    } catch (e) {
-      console.error('Ошибка:', e);
-    }
-  };
 
   // Показ уведомления
   const showNotification = (message: Message, chatName: string) => {
@@ -250,12 +227,58 @@ const Chat: React.FC = () => {
     return `chat_${ids[0]}_${ids[1]}`;
   };
 
+  // Избранное
+  const toggleFavorite = async (chatId: string) => {
+    try {
+      if (favorites.includes(chatId)) {
+        await api.delete(`/favorites/${chatId}`);
+        setFavorites(prev => prev.filter(id => id !== chatId));
+      } else {
+        await api.post('/favorites', { chat_id: chatId });
+        setFavorites(prev => [...prev, chatId]);
+      }
+    } catch (e) {
+      console.error('Ошибка:', e);
+    }
+  };
+
+  // Комментарии
+  const updateComment = async (targetUserId: number, comment: string) => {
+    try {
+      await api.post('/comments', { target_user_id: targetUserId, comment });
+      const user = allUsers.find(u => u.id === targetUserId);
+      if (user) {
+        setComments(prev => ({
+          ...prev,
+          [targetUserId]: { username: user.username, comment }
+        }));
+      }
+    } catch (e) {
+      console.error('Ошибка:', e);
+    }
+  };
+
+  // Объединение локальных пользователей и админов МИРАС
+  const allUsers: AllUser[] = [
+    ...users.map(u => ({ id: u.id, username: u.username, source: 'local' as const })),
+    ...mirasAdmins.map(a => ({ 
+      id: 10000 + a.id, 
+      username: a.login, 
+      source: 'miras' as const,
+      mirasLogin: a.login 
+    }))
+  ];
+
   const handleSelectChat = (chatId: string) => {
     if (chatId === GENERAL_CHAT_ID) {
       setActiveChat(GENERAL_CHAT_ID);
-      setActiveChatName('Общий чат');
+      setActiveChatName('📢 Общий чат');
+    } else if (chatId.startsWith('miras_admin_')) {
+      const login = chatId.replace('miras_admin_', '');
+      setActiveChat(chatId);
+      setActiveChatName(`${login} [МИРАС]`);
     } else {
-      const user = users.find(u => getChatId(u.id) === chatId);
+      const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === chatId);
       if (user) {
         setActiveChat(chatId);
         setActiveChatName(user.username);
@@ -268,6 +291,7 @@ const Chat: React.FC = () => {
       socket.emit('chat_message', {
         chatId: activeChat,
         senderId: currentUserId,
+        senderUsername: currentUsername,
         text,
       });
       socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
@@ -294,23 +318,29 @@ const Chat: React.FC = () => {
     window.location.reload();
   };
 
+  // Формирование списка чатов
   const chats = [
-    { id: GENERAL_CHAT_ID, name: ' Общий чат' },
-    ...users.map(u => {
+    { id: GENERAL_CHAT_ID, name: '📢 Общий чат' },
+    ...allUsers.map(u => {
       const commentData = comments[u.id];
-      const displayName = commentData?.comment 
-        ? `${commentData.username} (${commentData.comment})` 
-        : commentData?.username || u.username;
+      let displayName = u.username;
+      
+      if (commentData?.comment) {
+        displayName = `${commentData.username} (${commentData.comment})`;
+      }
+      
+      if (u.source === 'miras') {
+        displayName = `${displayName} [МИРАС]`;
+      }
       
       return {
-        id: getChatId(u.id),
+        id: u.source === 'miras' ? `miras_admin_${u.mirasLogin}` : getChatId(u.id),
         name: displayName,
-        online: onlineUsers.includes(u.id),
+        online: u.source === 'local' ? onlineUsers.includes(u.id) : true,
         userId: u.id,
       };
     })
-  ]
-    .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+  ].filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
       const aFav = favorites.includes(a.id) ? 1 : 0;
       const bFav = favorites.includes(b.id) ? 1 : 0;
