@@ -60,8 +60,8 @@ const Chat: React.FC = () => {
 
   // Подключение сокета
   useEffect(() => {
-    const newSocket = io('http://192.168.24.2:3010', {
-      path: '/MirasChatServer/socket.io',
+    const newSocket = io('http://192.168.24.2', {
+        path: '/MirasChatServer/socket.io'
     });
     setSocket(newSocket);
 
