@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:3010/api',
+  baseURL: 'http://192.168.24.2:3010/MirasChatServer/api',
 });
 
 api.interceptors.request.use((config) => {

@@ -32,7 +32,12 @@ app.use('/api/miras-admins', mirasAdminsRoutes);
 app.use('/api/miras-users', mirasUsersRoutes);
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  path: '/MirasChatServer/socket.io',
+  cors: {
+    origin: '*'
+  }
+});
 app.set('io', io);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
