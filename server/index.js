@@ -93,7 +93,7 @@ app.post('/api/chat/receive', (req, res) => {
     // Получили сообщение из общего чата МИРАС
     if (recipient_key === "__public__") {
 
-      const localUsername = `miras_${sender_key.replace("admin:", "")}`;
+      const localUsername = `miras_${sender_login}`;
 
       let localAdmin = db.prepare(`
           SELECT id
@@ -286,10 +286,24 @@ io.on('connection', (socket) => {
   });
 
   socket.on('message_read', ({ chatId, messageIds }) => {
-    if (!messageIds || messageIds.length === 0) return;
-    const placeholders = messageIds.map(() => '?').join(',');
-    db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${placeholders})`).run(...messageIds);
-    io.emit('message_status_bulk', { chatId, messageIds, status: 'read' });
+
+    if (!messageIds || messageIds.length === 0)
+      return;
+
+    const placeholders = messageIds.map(() => "?").join(",");
+
+    db.prepare(`
+        UPDATE messages
+        SET status='read'
+        WHERE id IN (${placeholders})
+    `).run(...messageIds);
+
+    io.emit("message_status_bulk", {
+        chatId,
+        messageIds,
+        status: "read"
+    });
+
   });
 
   socket.on('message_delivered', (messageId) => {

@@ -10,10 +10,13 @@ router.get('/', verifyToken, (req, res) => {
     
     // Получаем все чаты где есть сообщения от других пользователей не прочитанные нами
     const unread = db.prepare(`
-      SELECT chat_id, COUNT(*) as count
+      SELECT
+        chat_id,
+        COUNT(*) AS count
       FROM messages
-      WHERE sender_id != ? 
-        AND (status IS NULL OR status != 'read')
+      WHERE
+          sender_id != ?
+          AND status = 'delivered'
       GROUP BY chat_id
     `).all(currentUserId);
     

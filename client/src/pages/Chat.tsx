@@ -170,7 +170,15 @@ const Chat: React.FC = () => {
           }
         })
         .catch(console.error);
-      setUnreadCounts(prev => ({ ...prev, [activeChat]: 0 }));
+      setUnreadCounts(prev => {
+          const next = { ...prev };
+          delete next[activeChat];
+          return next;
+      });
+
+      api.get("/unread")
+        .then(({ data }) => setUnreadCounts(data))
+        .catch(console.error);
     } else {
       setMessages([]);
     }
