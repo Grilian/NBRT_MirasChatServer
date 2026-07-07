@@ -64,7 +64,11 @@ app.post('/api/chat/receive', (req, res) => {
         sent_at
     } = req.body;
 
-    if (sender_key && sender_key.startsWith('admin:')) {
+    if (
+        sender_key &&
+        sender_key.startsWith("admin:") &&
+        recipient_key !== "__public__"
+    ) {
       const adminLogin = sender_key.replace('admin:', '');
       const virtualAdminId = Math.abs(hashCode(adminLogin)) % 10000 + 10000;
       const chatId = `miras_admin_${adminLogin}`;
@@ -89,8 +93,32 @@ app.post('/api/chat/receive', (req, res) => {
     // Получили сообщение из общего чата МИРАС
     if (recipient_key === "__public__") {
 
-      const virtualSenderId =
-        Math.abs(hashCode(sender_login)) % 10000 + 20000;
+      const localUsername = `miras_${sender_key.replace("admin:", "")}`;
+
+      let localAdmin = db.prepare(`
+          SELECT id
+          FROM users
+          WHERE username = ?
+      `).get(localUsername);
+
+      if (!localAdmin) {
+
+          const insert = db.prepare(`
+              INSERT INTO users (username, password)
+              VALUES (?, ?)
+          `);
+
+          const result = insert.run(
+              localUsername,
+              "miras_admin"
+          );
+
+          localAdmin = {
+              id: result.lastInsertRowid
+          };
+      }
+
+      const senderId = localAdmin.id;
 
       const stmt = db.prepare(`
         INSERT INTO messages (
@@ -104,16 +132,16 @@ app.post('/api/chat/receive', (req, res) => {
       `);
 
       const result = stmt.run(
-        "general",
-        virtualSenderId,
-        message,
-        sent_at || new Date().toISOString()
+          "general",
+          senderId,
+          message,
+          sent_at || new Date().toISOString()
       );
 
       io.emit("chat_message", {
         id: result.lastInsertRowid,
         chat_id: "general",
-        sender_id: virtualSenderId,
+        sender_id: senderId,
         username: sender_login,
         text: message,
         created_at: sent_at || new Date().toISOString(),
