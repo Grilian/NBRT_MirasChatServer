@@ -53,7 +53,14 @@ app.post('/api/chat/receive', (req, res) => {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
   }
 
-  const { sender_key, sender_login, message, sent_at } = req.body;
+  const {
+      origin,
+      sender_key,
+      sender_login,
+      recipient_key,
+      message,
+      sent_at
+  } = req.body;
 
   if (sender_key && sender_key.startsWith('admin:')) {
     const adminLogin = sender_key.replace('admin:', '');
@@ -74,6 +81,41 @@ app.post('/api/chat/receive', (req, res) => {
       text: message,
       created_at: sent_at || new Date().toISOString(),
       status: 'delivered'
+    });
+  }
+
+  // Получили сообщение из общего чата МИРАС
+  if (recipient_key === "__public__") {
+
+    const virtualSenderId =
+      Math.abs(hashCode(sender_login)) % 10000 + 20000;
+
+    const stmt = db.prepare(`
+      INSERT INTO messages (
+        chat_id,
+        sender_id,
+        text,
+        created_at,
+        status
+      )
+      VALUES (?, ?, ?, ?, 'delivered')
+    `);
+
+    const result = stmt.run(
+      "general",
+      virtualSenderId,
+      message,
+      sent_at || new Date().toISOString()
+    );
+
+    io.emit("chat_message", {
+      id: result.lastInsertRowid,
+      chat_id: "general",
+      sender_id: virtualSenderId,
+      username: sender_login,
+      text: message,
+      created_at: sent_at || new Date().toISOString(),
+      status: "delivered"
     });
   }
 
@@ -103,7 +145,31 @@ io.on('connection', (socket) => {
   });
 
   socket.on('chat_message', async (data) => {
+    if (data.origin === "miras") {
+        return;
+    }
     try {
+      // Общий чат → общий чат МИРАС
+      if (data.chatId === "general") {
+        try {
+          await axios.post(`${MIRAS_URL}/api/chat/receive`, {
+            origin: "miras_chat",
+            sender_key: `miras_chat:${data.senderUsername}`,
+            sender_login: data.senderUsername,
+            recipient_key: "__public__",
+            message: data.text,
+            sent_at: new Date().toISOString()
+          }, {
+            headers: {
+              "Content-Type": "application/json",
+              "X-NBRT-Chat-Token": CHAT_SHARED_SECRET
+            },
+            timeout: 5000
+          });
+        } catch (e) {
+          console.error("Ошибка отправки общего чата в МИРАС:", e.message);
+        }
+      }
       // Если это чат с админом МИРАС — пересылаем в МИРАС
       if (data.chatId && data.chatId.startsWith('miras_admin_')) {
         const adminLogin = data.chatId.replace('miras_admin_', '');
@@ -124,6 +190,21 @@ io.on('connection', (socket) => {
         } catch (e) {
           console.error('Ошибка отправки в МИРАС:', e.message);
         }
+      }
+
+      if (data.chatId === "general") {
+          await axios.post(`${MIRAS_URL}/api/chat/receive`, {
+              sender_key: `miras_chat:${data.senderUsername}`,
+              sender_login: data.senderUsername,
+              recipient_key: "__public__",
+              message: data.text,
+              sent_at: new Date().toISOString()
+          }, {
+              headers: {
+                  "Content-Type": "application/json",
+                  "X-NBRT-Chat-Token": CHAT_SHARED_SECRET
+              }
+          });
       }
 
       // Сохраняем в локальную БД
