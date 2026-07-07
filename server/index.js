@@ -192,21 +192,6 @@ io.on('connection', (socket) => {
         }
       }
 
-      if (data.chatId === "general") {
-          await axios.post(`${MIRAS_URL}/api/chat/receive`, {
-              sender_key: `miras_chat:${data.senderUsername}`,
-              sender_login: data.senderUsername,
-              recipient_key: "__public__",
-              message: data.text,
-              sent_at: new Date().toISOString()
-          }, {
-              headers: {
-                  "Content-Type": "application/json",
-                  "X-NBRT-Chat-Token": CHAT_SHARED_SECRET
-              }
-          });
-      }
-
       // Сохраняем в локальную БД
       const stmt = db.prepare(
         'INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, ?)'
