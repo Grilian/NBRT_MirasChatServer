@@ -48,79 +48,89 @@ const CHAT_SHARED_SECRET = process.env.CHAT_SHARED_SECRET || '';
 
 // ===== Endpoint для приёма сообщений ОТ МИРАС =====
 app.post('/api/chat/receive', (req, res) => {
-  console.log("CHAT RECEIVE:", req.body);
-  const receivedSecret = req.headers['x-nbrt-chat-token'];
-  if (receivedSecret !== CHAT_SHARED_SECRET) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized' });
-  }
+  try {
+    console.log("CHAT RECEIVE:", req.body);
+    const receivedSecret = req.headers['x-nbrt-chat-token'];
+    if (receivedSecret !== CHAT_SHARED_SECRET) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
 
-  const {
-      origin,
-      sender_key,
-      sender_login,
-      recipient_key,
-      message,
-      sent_at
-  } = req.body;
+    const {
+        origin,
+        sender_key,
+        sender_login,
+        recipient_key,
+        message,
+        sent_at
+    } = req.body;
 
-  if (sender_key && sender_key.startsWith('admin:')) {
-    const adminLogin = sender_key.replace('admin:', '');
-    const virtualAdminId = Math.abs(hashCode(adminLogin)) % 10000 + 10000;
-    const chatId = `miras_admin_${adminLogin}`;
+    if (sender_key && sender_key.startsWith('admin:')) {
+      const adminLogin = sender_key.replace('admin:', '');
+      const virtualAdminId = Math.abs(hashCode(adminLogin)) % 10000 + 10000;
+      const chatId = `miras_admin_${adminLogin}`;
 
-    const stmt = db.prepare(`
-      INSERT INTO messages (chat_id, sender_id, text, created_at, status)
-      VALUES (?, ?, ?, ?, 'delivered')
-    `);
-    const result = stmt.run(chatId, virtualAdminId, message, sent_at || new Date().toISOString());
+      const stmt = db.prepare(`
+        INSERT INTO messages (chat_id, sender_id, text, created_at, status)
+        VALUES (?, ?, ?, ?, 'delivered')
+      `);
+      const result = stmt.run(chatId, virtualAdminId, message, sent_at || new Date().toISOString());
 
-    io.emit('chat_message', {
-      id: result.lastInsertRowid,
-      chat_id: chatId,
-      sender_id: virtualAdminId,
-      username: sender_login,
-      text: message,
-      created_at: sent_at || new Date().toISOString(),
-      status: 'delivered'
+      io.emit('chat_message', {
+        id: result.lastInsertRowid,
+        chat_id: chatId,
+        sender_id: virtualAdminId,
+        username: sender_login,
+        text: message,
+        created_at: sent_at || new Date().toISOString(),
+        status: 'delivered'
+      });
+    }
+
+    // Получили сообщение из общего чата МИРАС
+    if (recipient_key === "__public__") {
+
+      const virtualSenderId =
+        Math.abs(hashCode(sender_login)) % 10000 + 20000;
+
+      const stmt = db.prepare(`
+        INSERT INTO messages (
+          chat_id,
+          sender_id,
+          text,
+          created_at,
+          status
+        )
+        VALUES (?, ?, ?, ?, 'delivered')
+      `);
+
+      const result = stmt.run(
+        "general",
+        virtualSenderId,
+        message,
+        sent_at || new Date().toISOString()
+      );
+
+      io.emit("chat_message", {
+        id: result.lastInsertRowid,
+        chat_id: "general",
+        sender_id: virtualSenderId,
+        username: sender_login,
+        text: message,
+        created_at: sent_at || new Date().toISOString(),
+        status: "delivered"
+      });
+    }
+
+    res.json({ ok: true });
+
+  } catch (e) {
+    console.error("CHAT RECEIVE ERROR:", e);
+    res.status(500).json({
+      ok: false,
+      error: e.message,
+      stack: e.stack
     });
   }
-
-  // Получили сообщение из общего чата МИРАС
-  if (recipient_key === "__public__") {
-
-    const virtualSenderId =
-      Math.abs(hashCode(sender_login)) % 10000 + 20000;
-
-    const stmt = db.prepare(`
-      INSERT INTO messages (
-        chat_id,
-        sender_id,
-        text,
-        created_at,
-        status
-      )
-      VALUES (?, ?, ?, ?, 'delivered')
-    `);
-
-    const result = stmt.run(
-      "general",
-      virtualSenderId,
-      message,
-      sent_at || new Date().toISOString()
-    );
-
-    io.emit("chat_message", {
-      id: result.lastInsertRowid,
-      chat_id: "general",
-      sender_id: virtualSenderId,
-      username: sender_login,
-      text: message,
-      created_at: sent_at || new Date().toISOString(),
-      status: "delivered"
-    });
-  }
-
-  res.json({ ok: true });
 });
 
 function hashCode(str) {
