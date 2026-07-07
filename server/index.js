@@ -48,6 +48,7 @@ const CHAT_SHARED_SECRET = process.env.CHAT_SHARED_SECRET || '';
 
 // ===== Endpoint для приёма сообщений ОТ МИРАС =====
 app.post('/api/chat/receive', (req, res) => {
+  console.log("CHAT RECEIVE:", req.body);
   const receivedSecret = req.headers['x-nbrt-chat-token'];
   if (receivedSecret !== CHAT_SHARED_SECRET) {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
