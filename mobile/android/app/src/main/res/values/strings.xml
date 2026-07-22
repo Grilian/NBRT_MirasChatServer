@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MirasChat</string>
+    <string name="title_activity_main">MirasChat</string>
+    <string name="package_name">ru.miras.mirasChat</string>
+    <string name="custom_url_scheme">ru.miras.mirasChat</string>
+</resources>

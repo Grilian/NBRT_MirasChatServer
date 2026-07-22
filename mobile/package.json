@@ -1,0 +1,20 @@
+{
+  "name": "miraschat-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MirasChat — Android-клиент (Capacitor)",
+  "scripts": {
+    "build:client": "node scripts/build-client.js",
+    "sync": "npx cap sync android",
+    "prepare-app": "npm run build:client && npm run sync",
+    "open:android": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0",
+    "sharp": "^0.33.5"
+  }
+}

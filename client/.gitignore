@@ -11,6 +11,7 @@
 # production
 /build
 /build-desktop
+/build-mobile
 
 # misc
 .DS_Store
