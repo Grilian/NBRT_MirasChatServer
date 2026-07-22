@@ -57,7 +57,6 @@ const mirasHttpAgent = new (require('http').Agent)({ keepAlive: false });
 // ===== Endpoint для приёма сообщений ОТ МИРАС =====
 app.post('/api/chat/receive', (req, res) => {
   try {
-    console.log("CHAT RECEIVE:", req.body);
     const receivedSecret = req.headers['x-nbrt-chat-token'];
     if (receivedSecret !== CHAT_SHARED_SECRET) {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -96,7 +95,9 @@ app.post('/api/chat/receive', (req, res) => {
         `);
         const result = stmt.run(chatId, senderId, message, sent_at || new Date().toISOString());
 
-        io.emit('chat_message', {
+        // Личное сообщение от админа — уходит только этому сотруднику,
+        // а не всем подключённым (иначе содержимое личной переписки увидели бы все).
+        io.to('user:' + recipientUser.id).emit('chat_message', {
           id: result.lastInsertRowid,
           chat_id: chatId,
           sender_id: senderId,
@@ -174,6 +175,41 @@ function parseAdminChatId(chatId) {
   };
 }
 
+// Личные чаты (1:1 между сотрудниками и переписка с админом) должны доходить
+// только реальным участникам треда, а не всем подключённым — иначе текст
+// личных сообщений и индикатор "печатает" были бы видны всем в сети.
+// null означает общий чат — его действительно транслируем всем.
+function participantsForChatId(chatId) {
+  if (chatId === 'general') return null;
+  if (!chatId) return []; // нет chat_id — не транслируем никому, а не всем подряд
+
+  const adminChat = parseAdminChatId(chatId);
+  if (adminChat) return [Number(adminChat.employeeId)];
+
+  const match = String(chatId).match(/^chat_(\d+)_(\d+)$/);
+  if (match) return [Number(match[1]), Number(match[2])];
+
+  return []; // неизвестный формат chat_id — на всякий случай никому, а не всем
+}
+
+function emitToChat(chatId, event, payload) {
+  const participants = participantsForChatId(chatId);
+  if (participants === null) {
+    io.emit(event, payload);
+  } else if (participants.length) {
+    io.to(participants.map((id) => 'user:' + id)).emit(event, payload);
+  }
+}
+
+function broadcastToChat(socket, chatId, event, payload) {
+  const participants = participantsForChatId(chatId);
+  if (participants === null) {
+    socket.broadcast.emit(event, payload);
+  } else if (participants.length) {
+    socket.to(participants.map((id) => 'user:' + id)).emit(event, payload);
+  }
+}
+
 // ===== WebSocket =====
 const onlineUsers = new Map();
 
@@ -183,6 +219,7 @@ io.on('connection', (socket) => {
   socket.on('user_online', (userId) => {
     onlineUsers.set(userId, socket.id);
     socket.userId = userId;
+    socket.join('user:' + userId);
     io.emit('online_users', Array.from(onlineUsers.keys()));
   });
 
@@ -252,7 +289,7 @@ io.on('connection', (socket) => {
         created_at: new Date().toISOString()
       };
 
-      io.emit('chat_message', message);
+      emitToChat(data.chatId, 'chat_message', message);
 
       // Проверяем, есть ли получатель онлайн
       let recipientOnline = false;
@@ -269,7 +306,7 @@ io.on('connection', (socket) => {
       if (recipientOnline) {
         db.prepare('UPDATE messages SET status = ? WHERE id = ?').run('delivered', result.lastInsertRowid);
         message.status = 'delivered';
-        io.emit('message_status', { id: result.lastInsertRowid, status: 'delivered' });
+        emitToChat(data.chatId, 'message_status', { id: result.lastInsertRowid, status: 'delivered' });
       }
     } catch (e) {
       console.error('Ошибка:', e);
@@ -277,7 +314,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('typing', (data) => {
-    socket.broadcast.emit('typing', {
+    broadcastToChat(socket, data.chatId, 'typing', {
       chatId: data.chatId,
       userId: data.userId,
       username: data.username
@@ -285,7 +322,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('stop_typing', (data) => {
-    socket.broadcast.emit('stop_typing', {
+    broadcastToChat(socket, data.chatId, 'stop_typing', {
       chatId: data.chatId,
       userId: data.userId
     });
@@ -304,7 +341,7 @@ io.on('connection', (socket) => {
         WHERE id IN (${placeholders})
     `).run(...messageIds);
 
-    io.emit("message_status_bulk", {
+    emitToChat(chatId, "message_status_bulk", {
         chatId,
         messageIds,
         status: "read"
@@ -317,7 +354,8 @@ io.on('connection', (socket) => {
       const stmt = db.prepare('UPDATE messages SET status = ? WHERE id = ? AND status = ?');
       const result = stmt.run('delivered', messageId, 'sent');
       if (result.changes > 0) {
-        io.emit('message_status', { id: messageId, status: 'delivered' });
+        const row = db.prepare('SELECT chat_id FROM messages WHERE id = ?').get(messageId);
+        emitToChat(row ? row.chat_id : null, 'message_status', { id: messageId, status: 'delivered' });
       }
     } catch (e) {
       console.error('Ошибка обновления статуса:', e);
