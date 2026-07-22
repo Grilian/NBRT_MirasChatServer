@@ -1,0 +1,7 @@
+node_modules
+renderer
+release
+assets/icon.png
+assets/icon-*.png
+assets/icon.ico
+assets/tray*.png

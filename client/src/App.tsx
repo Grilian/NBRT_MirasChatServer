@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import Login from './pages/Login';
 import Chat from './pages/Chat';
+import TitleBar from './components/TitleBar';
+
+const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -9,7 +12,7 @@ function App() {
     const token = localStorage.getItem('token');
     const userId = localStorage.getItem('userId');
     const username = localStorage.getItem('username');
-    
+
     if (token && userId && username) {
       setUser({ token, id: userId, username });
     }
@@ -19,23 +22,12 @@ function App() {
     setUser(userData);
   };
 
-  const handleLogout = () => {
-    localStorage.clear();
-    setUser(null);
-  };
-
   return (
-    <div>
-      {user ? (
-        <>
-          <button onClick={handleLogout} style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000 }}>
-            Выйти
-          </button>
-          <Chat />
-        </>
-      ) : (
-        <Login onLogin={handleLogin} />
-      )}
+    <div className={isElectron ? 'electron-frame' : undefined}>
+      {isElectron && <TitleBar />}
+      <div className="app-shell">
+        {user ? <Chat /> : <Login onLogin={handleLogin} />}
+      </div>
     </div>
   );
 }

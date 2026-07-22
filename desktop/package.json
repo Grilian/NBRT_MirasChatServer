@@ -1,0 +1,52 @@
+{
+  "name": "miraschat-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MirasChat — десктопный клиент для Windows",
+  "main": "src/main.js",
+  "author": "MIRAS",
+  "scripts": {
+    "gen-icons": "node scripts/gen-icons.js",
+    "build:client": "node scripts/build-client.js",
+    "prepare-app": "npm run gen-icons && npm run build:client",
+    "start": "electron .",
+    "dist:win": "npm run prepare-app && electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "sharp": "^0.33.5",
+    "to-ico": "^1.1.5"
+  },
+  "build": {
+    "appId": "ru.miras.mirasChat",
+    "productName": "MirasChat",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MirasChat"
+    }
+  }
+}

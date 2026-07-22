@@ -7,6 +7,8 @@ module.exports = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_super_secret_key');
     req.userId = decoded.id;
+    req.tokenSource = decoded.source || 'local';
+    req.mirasRole = decoded.mirasRole || null;
     next();
   } catch (e) {
     res.status(401).json({ error: 'Неверный токен' });

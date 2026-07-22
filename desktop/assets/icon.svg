@@ -1,0 +1,15 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a472a"/>
+      <stop offset="100%" stop-color="#0e2e1b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ddb64f"/>
+      <stop offset="100%" stop-color="#b58f1f"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="248" fill="url(#g)" stroke="url(#gold)" stroke-width="14"/>
+  <text x="256" y="300" font-family="Georgia, 'Iowan Old Style', serif" font-size="230" font-weight="600"
+        text-anchor="middle" fill="url(#gold)">M</text>
+</svg>

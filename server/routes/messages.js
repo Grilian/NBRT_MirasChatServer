@@ -3,6 +3,33 @@ const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const router = express.Router();
 
+// Последнее сообщение по каждому chat_id — для превью в списке диалогов.
+// Не сузили выборку до "чатов текущего пользователя": id чатов (chat_<a>_<b>,
+// miras_admin_<login>_<id>) и так завязаны на конкретного пользователя, так что
+// лишние записи просто не находят соответствия в списке на клиенте.
+router.get('/meta/last', verifyToken, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT m.chat_id, m.text, m.created_at
+      FROM messages m
+      INNER JOIN (
+        SELECT chat_id, MAX(id) AS max_id
+        FROM messages
+        GROUP BY chat_id
+      ) latest ON latest.chat_id = m.chat_id AND latest.max_id = m.id
+    `).all();
+
+    const result = {};
+    rows.forEach(row => {
+      result[row.chat_id] = { chat_id: row.chat_id, text: row.text, created_at: row.created_at };
+    });
+
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Получить историю чата с пагинацией
 router.get('/:chatId', verifyToken, (req, res) => {
   try {

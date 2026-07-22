@@ -10,9 +10,13 @@ router.get('/', (req, res) => {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
 
+    // miras_* — служебные зеркала админов МИРАС (создаются для маршрутизации
+    // сообщений), а не реальные сотрудники MirasChat — в списке для Мираса
+    // им делать нечего, иначе админ увидит "диалоги" сам с собой.
     const users = db.prepare(`
       SELECT id, username, created_at
       FROM users
+      WHERE username NOT LIKE 'miras\_%' ESCAPE '\\'
       ORDER BY username ASC
     `).all();
 

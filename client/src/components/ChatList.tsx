@@ -1,10 +1,15 @@
 import React, { useState } from 'react';
+import { colorForName, initialsForName } from '../utils/avatar';
+
+export type ChatSection = 'general' | 'admin' | 'staff';
 
 interface Chat {
   id: string;
   name: string;
+  section: ChatSection;
   online?: boolean;
   userId?: number;
+  deletable?: boolean;
 }
 
 interface LastMessage {
@@ -18,6 +23,7 @@ interface Comment {
 }
 
 interface ChatListProps {
+  username: string;
   chats: Chat[];
   activeChat: string | null;
   onSelectChat: (chatId: string) => void;
@@ -29,11 +35,38 @@ interface ChatListProps {
   onToggleFavorite: (chatId: string) => void;
   onUpdateComment: (userId: number, comment: string) => void;
   comments: Record<number, Comment>;
+  isAdmin?: boolean;
+  onDeleteUser?: (userId: number) => void;
+}
+
+const SECTION_LABELS: Record<ChatSection, string | null> = {
+  general: null,
+  admin: 'Администрация',
+  staff: 'Сотрудники',
+};
+
+function renderAvatar(chat: Chat) {
+  if (chat.section === 'general') {
+    return (
+      <div className="avatar avatar-general">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <div className="avatar" style={{ background: colorForName(chat.name) }}>
+      {initialsForName(chat.name)}
+      {chat.online !== undefined && <span className={'dot' + (chat.online ? '' : ' offline')} />}
+    </div>
+  );
 }
 
 const ChatList: React.FC<ChatListProps> = ({
-  chats, activeChat, onSelectChat, searchQuery, onSearchChange,
-  lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments
+  username, chats, activeChat, onSelectChat, searchQuery, onSearchChange,
+  lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
+  isAdmin, onDeleteUser
 }) => {
   const [editingComment, setEditingComment] = useState<number | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -45,308 +78,129 @@ const ChatList: React.FC<ChatListProps> = ({
   };
 
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+  const filtered = chats.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  let lastSection: ChatSection | null = null;
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h2 style={styles.title}>MirasChat</h2>
-        {totalUnread > 0 && (
-          <span style={styles.totalUnread}>{totalUnread}</span>
-        )}
+    <aside className="roster">
+      <div className="roster-head">
+        {/* Заготовка под кнопку аккаунта (аватар + имя) — пока некликабельная, логика будет позже */}
+        <div className="roster-account">
+          <div className="avatar avatar-sm" style={{ background: colorForName(username) }}>
+            {initialsForName(username)}
+          </div>
+          <div className="roster-account-name">{username}</div>
+          {totalUnread > 0 && <span className="row-unread" style={{ marginLeft: 'auto' }}>{totalUnread}</span>}
+        </div>
+        <div className="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          <input
+            type="text"
+            placeholder="Поиск"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
+        </div>
       </div>
-      <div style={styles.searchBox}>
-        <input
-          type="text"
-          placeholder="🔍 Поиск..."
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          style={styles.searchInput}
-        />
-      </div>
-      <div style={styles.list}>
-        {chats.map((chat) => {
+
+      <div className="roster-list">
+        {filtered.length === 0 && <div className="roster-empty">Ничего не найдено</div>}
+        {filtered.map((chat) => {
+          const showLabel = chat.section !== lastSection && SECTION_LABELS[chat.section];
+          lastSection = chat.section;
           const last = lastMessages[chat.id];
           const unreadCount = unreadCounts[chat.id] || 0;
           const isFavorite = favorites.includes(chat.id);
-          
+
           return (
-            <div
-              key={chat.id}
-              onClick={() => onSelectChat(chat.id)}
-              style={{
-                ...styles.chatItem,
-                ...(activeChat === chat.id ? styles.chatItemActive : {})
-              }}
-            >
-              <div style={styles.chatTop}>
-                <div style={styles.chatNameRow}>
-                  {chat.online !== undefined && (
-                    <span style={chat.online ? styles.online : styles.offline} />
-                  )}
-                  {isFavorite && <span style={styles.star}>★</span>}
-                  <span style={styles.chatName}>{chat.name}</span>
-                </div>
-                <div style={styles.actions}>
-                  {last && (
-                    <span style={styles.time}>
-                      {new Date(last.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
-                  {chat.userId && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingComment(chat.userId!);
-                        setCommentText(comments[chat.userId!]?.comment || '');
-                      }}
-                      style={styles.commentBtn}
-                      title="Добавить комментарий"
-                    >
-                      ✎
-                    </button>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleFavorite(chat.id);
-                    }}
-                    style={{
-                      ...styles.favoriteBtn,
-                      color: isFavorite ? '#c9a227' : '#6b7b6e'
-                    }}
-                  >
-                    {isFavorite ? '★' : '☆'}
-                  </button>
-                </div>
-              </div>
-              <div style={styles.chatBottom}>
-                {last && (
-                  <div style={styles.lastMessage}>{last.text}</div>
-                )}
-                {unreadCount > 0 && (
-                  <span style={styles.unreadBadge}>{unreadCount}</span>
-                )}
-              </div>
-              
-              {editingComment === chat.userId && (
-                <div style={styles.commentModal} onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="text"
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Комментарий..."
-                    style={styles.commentInput}
-                    autoFocus
-                  />
-                  <div style={styles.commentButtons}>
-                    <button 
-                      onClick={() => handleCommentSubmit(chat.userId!)}
-                      style={styles.commentSaveBtn}
-                    >
-                      ✓
-                    </button>
-                    <button 
-                      onClick={() => setEditingComment(null)}
-                      style={styles.commentCancelBtn}
-                    >
-                      ✕
-                    </button>
+            <React.Fragment key={chat.id}>
+              {showLabel && <div className="roster-section">{SECTION_LABELS[chat.section]}</div>}
+              <div
+                tabIndex={0}
+                role="button"
+                aria-current={activeChat === chat.id}
+                className={'row' + (activeChat === chat.id ? ' is-active' : '')}
+                onClick={() => onSelectChat(chat.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChat(chat.id); } }}
+              >
+                {renderAvatar(chat)}
+                <div className="row-body">
+                  <div className="row-top">
+                    <div className="row-name">
+                      <span>{chat.name}</span>
+                      {chat.section === 'admin' && <span className="badge-admin">МИРАС</span>}
+                    </div>
+                    {last && (
+                      <div className="row-time">
+                        {new Date(last.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="row-bottom">
+                    <div className="row-preview">{last ? last.text : ''}</div>
+                    <div className="row-actions">
+                      {unreadCount > 0 && <span className="row-unread">{unreadCount}</span>}
+                      {chat.userId && (
+                        <button
+                          type="button"
+                          className="icon-btn-ghost"
+                          title="Добавить комментарий"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingComment(chat.userId!);
+                            setCommentText(comments[chat.userId!]?.comment || '');
+                          }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                        </button>
+                      )}
+                      {isAdmin && chat.deletable && chat.userId && onDeleteUser && (
+                        <button
+                          type="button"
+                          className="icon-btn-ghost danger"
+                          title="Удалить аккаунт сотрудника"
+                          onClick={(e) => { e.stopPropagation(); onDeleteUser(chat.userId!); }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={'icon-btn-ghost star' + (isFavorite ? ' is-fav' : '')}
+                        title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+                        onClick={(e) => { e.stopPropagation(); onToggleFavorite(chat.id); }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
+                          <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
+
+                {editingComment === chat.userId && (
+                  <div className="comment-popover" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="text"
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      placeholder="Комментарий..."
+                      autoFocus
+                    />
+                    <div className="comment-popover-actions">
+                      <button type="button" className="save" onClick={() => handleCommentSubmit(chat.userId!)}>Сохранить</button>
+                      <button type="button" className="cancel" onClick={() => setEditingComment(null)}>Отмена</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
           );
         })}
       </div>
-    </div>
+    </aside>
   );
-};
-
-const styles: { [key: string]: React.CSSProperties } = {
-  container: {
-    width: '320px',
-    background: '#1a472a',
-    borderRight: '2px solid #c9a227',
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 20px',
-    borderBottom: '1px solid #2d5a3d',
-  },
-  title: {
-    margin: 0,
-    color: '#c9a227',
-    fontSize: '22px',
-    fontWeight: 'bold',
-  },
-  totalUnread: {
-    background: '#c9a227',
-    color: '#ffffff',
-    borderRadius: '16px',
-    padding: '4px 12px',
-    fontSize: '14px',
-    fontWeight: 'bold',
-    minWidth: '28px',
-    textAlign: 'center',
-  },
-  searchBox: {
-    padding: '12px 16px',
-    borderBottom: '1px solid #2d5a3d',
-  },
-  searchInput: {
-    width: '100%',
-    padding: '10px 14px',
-    border: '1px solid #4a7c59',
-    borderRadius: '8px',
-    background: '#0D3310',
-    color: '#ffffff',
-    fontSize: '14px',
-  },
-  list: {
-    flex: 1,
-    overflowY: 'auto',
-  },
-  chatItem: {
-    padding: '14px 20px',
-    borderBottom: '1px solid #2d5a3d',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  chatItemActive: {
-    background: '#2d5a3d',
-    borderLeft: '4px solid #c9a227',
-  },
-  chatTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '4px',
-  },
-  chatNameRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  online: {
-    width: '10px',
-    height: '10px',
-    borderRadius: '50%',
-    background: '#4caf50',
-    display: 'inline-block',
-  },
-  offline: {
-    width: '10px',
-    height: '10px',
-    borderRadius: '50%',
-    background: '#6b7b6e',
-    display: 'inline-block',
-  },
-  chatName: {
-    fontWeight: 'bold',
-    color: '#ffffff',
-    fontSize: '15px',
-  },
-  time: {
-    fontSize: '12px',
-    color: '#8fae98',
-  },
-  chatBottom: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  lastMessage: {
-    flex: 1,
-    fontSize: '13px',
-    color: '#b8d4c4',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    paddingLeft: '18px',
-  },
-  unreadBadge: {
-    background: '#c9a227',
-    color: '#ffffff',
-    borderRadius: '12px',
-    padding: '2px 8px',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    minWidth: '20px',
-    textAlign: 'center',
-  },
-  star: {
-    color: '#c9a227',
-    fontSize: '14px',
-    marginRight: '4px',
-  },
-  actions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  commentBtn: {
-    background: 'transparent',
-    border: 'none',
-    color: '#6b7b6e',
-    cursor: 'pointer',
-    fontSize: '14px',
-    padding: '4px',
-  },
-  favoriteBtn: {
-    background: 'transparent',
-    border: 'none',
-    fontSize: '16px',
-    cursor: 'pointer',
-    padding: '4px',
-  },
-  commentModal: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    background: '#1a472a',
-    border: '2px solid #c9a227',
-    borderRadius: '8px',
-    padding: '16px',
-    zIndex: 1000,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-  },
-  commentInput: {
-    width: '100%',
-    padding: '8px 12px',
-    border: '1px solid #4a7c59',
-    borderRadius: '6px',
-    background: '#0D3310',
-    color: '#ffffff',
-    fontSize: '14px',
-    marginBottom: '8px',
-  },
-  commentButtons: {
-    display: 'flex',
-    gap: '8px',
-    justifyContent: 'flex-end',
-  },
-  commentSaveBtn: {
-    background: '#c9a227',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '4px 12px',
-    cursor: 'pointer',
-  },
-  commentCancelBtn: {
-    background: 'transparent',
-    color: '#6b7b6e',
-    border: '1px solid #6b7b6e',
-    borderRadius: '4px',
-    padding: '4px 12px',
-    cursor: 'pointer',
-  },
 };
 
 export default ChatList;

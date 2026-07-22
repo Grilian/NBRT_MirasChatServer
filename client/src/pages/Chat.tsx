@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import ChatList from '../components/ChatList';
+import ChatList, { ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
 import MessageInput from '../components/MessageInput';
+import SettingsPanel from '../components/SettingsPanel';
+import ProfileEdit from '../components/ProfileEdit';
 import api from '../api/client';
+import { colorForName, initialsForName } from '../utils/avatar';
 
 interface User { id: number; username: string; }
 interface MirasAdmin { id: number; login: string; role: string; zone_id: number | null; }
@@ -29,13 +32,28 @@ interface AllUser {
 }
 
 const GENERAL_CHAT_ID = 'general';
+const ADMIN_CHAT_PREFIX = 'miras_admin_';
+
+// chat_id с админом — miras_admin_<login>_<myLocalUserId>, чтобы у каждого
+// сотрудника был свой отдельный тред с этим админом (а не общий на всех).
+function parseAdminChatId(chatId: string): { login: string; employeeId: string } | null {
+  if (!chatId.startsWith(ADMIN_CHAT_PREFIX)) return null;
+
+  const rest = chatId.slice(ADMIN_CHAT_PREFIX.length);
+  const lastUnderscore = rest.lastIndexOf('_');
+  if (lastUnderscore === -1) return null;
+
+  return {
+    login: rest.slice(0, lastUnderscore),
+    employeeId: rest.slice(lastUnderscore + 1)
+  };
+}
 
 const Chat: React.FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [mirasAdmins, setMirasAdmins] = useState<MirasAdmin[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
-  const [activeChatName, setActiveChatName] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<number[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
@@ -46,10 +64,17 @@ const Chat: React.FC = () => {
   const [comments, setComments] = useState<Record<number, { username: string; comment: string }>>({});
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [view, setView] = useState<'conversation' | 'settings' | 'profile'>('conversation');
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = Number(localStorage.getItem('userId'));
   const currentUsername = localStorage.getItem('username') || '';
+
+  // Кто вошёл через логин МИРАС — тому доступно удаление чужих аккаунтов
+  const isAdmin = localStorage.getItem('source') === 'miras';
 
   // Запрос разрешения на уведомления
   useEffect(() => {
@@ -58,39 +83,75 @@ const Chat: React.FC = () => {
     }
   }, []);
 
+  // Закрытие меню шапки по клику снаружи
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, []);
+
+  // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
+  // ни 'stop_typing' (вкладка закрылась, сеть оборвалась) — гасим индикатор сами,
+  // чтобы он не завис навечно.
+  const TYPING_EXPIRY_MS = 4000;
+  const typingExpiryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
   // Подключение сокета
   useEffect(() => {
-    const newSocket = io('http://192.168.24.2', {
-        path: '/MirasChatServer/socket.io'
+    const expiryTimers = typingExpiryTimers.current;
+
+    const newSocket = io(process.env.REACT_APP_SOCKET_URL || 'http://192.168.24.2', {
+        path: process.env.REACT_APP_SOCKET_PATH || '/MirasChatServer/socket.io'
     });
     setSocket(newSocket);
 
-    newSocket.emit('user_online', currentUserId);
+    // На 'connect' (в т.ч. при переподключении после разрыва сети) —
+    // заново объявляем себя онлайн и подтягиваем свежее состояние,
+    // чтобы после реконнекта не остаться с протухшими данными.
+    newSocket.on('connect', () => {
+      newSocket.emit('user_online', currentUserId);
 
-    // Загружаем локальных пользователей
-    api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
-    
-    // Загружаем админов из МИРАС
-    api.get('/miras-admins').then(({ data }) => setMirasAdmins(data)).catch(console.error);
-    
-    // Загружаем непрочитанные
-    api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
-    
-    // Загружаем избранное
-    api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
-    
-    // Загружаем комментарии
-    api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
+      api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
+      api.get('/miras-admins').then(({ data }) => setMirasAdmins(data)).catch(console.error);
+      api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
+      api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
+      api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
+      api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
+    });
+
+    // Список сотрудников/админов не приходит по сокету (нет событий
+    // "зарегистрировался"/"удалён") — подтягиваем его периодически, чтобы
+    // ростер не застревал в состоянии на момент открытия вкладки.
+    const rosterRefreshInterval = setInterval(() => {
+      api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
+      api.get('/miras-admins').then(({ data }) => setMirasAdmins(data)).catch(console.error);
+    }, 30000);
 
     newSocket.on('online_users', (userIds: number[]) => setOnlineUsers(userIds));
 
     newSocket.on('typing', (data: { chatId: string; userId: number; username: string }) => {
       if (data.userId !== currentUserId) {
         setTypingUsers(prev => ({ ...prev, [data.chatId]: data.username }));
+
+        clearTimeout(expiryTimers[data.chatId]);
+        expiryTimers[data.chatId] = setTimeout(() => {
+          setTypingUsers(prev => {
+            const next = { ...prev };
+            delete next[data.chatId];
+            return next;
+          });
+        }, TYPING_EXPIRY_MS);
       }
     });
 
     newSocket.on('stop_typing', (data: { chatId: string; userId: number }) => {
+      clearTimeout(expiryTimers[data.chatId]);
+      delete expiryTimers[data.chatId];
+
       setTypingUsers(prev => {
         const next = { ...prev };
         delete next[data.chatId];
@@ -98,21 +159,29 @@ const Chat: React.FC = () => {
       });
     });
 
-    newSocket.on('last_message', (data: LastMessage) => {
-      setLastMessages(prev => ({ ...prev, [data.chat_id]: data }));
-    });
-
     newSocket.on('message_status', (data: { id: number; status: 'sent' | 'delivered' | 'read' }) => {
       setMessages(prev => prev.map(m => m.id === data.id ? { ...m, status: data.status } : m));
     });
 
+    // Кто-то мог прочитать сообщения с другого устройства/вкладки того же
+    // аккаунта — сервер рассылает это всем, поэтому переспрашиваем счётчики
+    // непрочитанных заново, а не просто гасим их локально (надёжнее, чем
+    // вручную вычитать конкретные id).
     newSocket.on('message_status_bulk', (data: { chatId: string; messageIds: number[]; status: 'read' }) => {
-      setMessages(prev => prev.map(m => 
+      setMessages(prev => prev.map(m =>
         data.messageIds.includes(m.id) ? { ...m, status: data.status } : m
       ));
+
+      if (data.status === 'read') {
+        api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
+      }
     });
 
-    return () => { newSocket.disconnect(); };
+    return () => {
+      Object.values(expiryTimers).forEach(clearTimeout);
+      clearInterval(rosterRefreshInterval);
+      newSocket.disconnect();
+    };
   }, [currentUserId]);
 
   // Единый обработчик новых сообщений
@@ -123,6 +192,19 @@ const Chat: React.FC = () => {
       // Добавляем сообщение в список если это активный чат
       if (message.chat_id === activeChat) {
         setMessages(prev => [...prev, message]);
+      }
+
+      // Превью последнего сообщения в списке диалогов — обновляем сразу,
+      // не дожидаясь перезагрузки страницы.
+      if (message.chat_id) {
+        setLastMessages(prev => ({
+          ...prev,
+          [message.chat_id as string]: {
+            chat_id: message.chat_id as string,
+            text: message.text,
+            created_at: message.created_at
+          }
+        }));
       }
 
       // Если сообщение не от нас и чат не активен — увеличиваем счётчик
@@ -137,14 +219,16 @@ const Chat: React.FC = () => {
       if (message.sender_id !== currentUserId) {
         const isChatActive = message.chat_id === activeChat;
         const isWindowFocused = document.hasFocus();
-        
+
         if (!isChatActive || !isWindowFocused) {
-          const chatName = message.chat_id === GENERAL_CHAT_ID 
-            ? 'Общий чат' 
-            : message.chat_id?.startsWith('miras_admin_')
-              ? message.chat_id.replace('miras_admin_', '') + ' [МИРАС]'
+          const parsedAdminChat = message.chat_id ? parseAdminChatId(message.chat_id) : null;
+
+          const chatName = message.chat_id === GENERAL_CHAT_ID
+            ? 'Общий чат'
+            : parsedAdminChat
+              ? parsedAdminChat.login + ' (МИРАС)'
               : allUsers.find(u => getChatId(u.id) === message.chat_id)?.username || 'Чат';
-          
+
           showNotification(message, chatName);
         }
       }
@@ -187,7 +271,7 @@ const Chat: React.FC = () => {
   // Подгрузка старых сообщений
   const loadMoreMessages = async () => {
     if (!activeChat || loadingMore || !hasMore) return;
-    
+
     setLoadingMore(true);
     try {
       const { data } = await api.get(`/messages/${activeChat}?limit=50&offset=${messages.length}`);
@@ -268,32 +352,29 @@ const Chat: React.FC = () => {
     }
   };
 
-  // Объединение локальных пользователей и админов МИРАС
+  // Объединение локальных пользователей и админов МИРАС.
+  // a.id — это уже локальный users.id (сервер сам мапит логин админа на него),
+  // поэтому коллизий с id локальных пользователей быть не может.
   const allUsers: AllUser[] = [
     ...users.map(u => ({ id: u.id, username: u.username, source: 'local' as const })),
-    ...mirasAdmins.map(a => ({ 
-      id: 10000 + a.id, 
-      username: a.login, 
+    ...mirasAdmins.map(a => ({
+      id: a.id,
+      username: a.login,
       source: 'miras' as const,
-      mirasLogin: a.login 
+      mirasLogin: a.login
     }))
   ];
 
   const handleSelectChat = (chatId: string) => {
     if (chatId === GENERAL_CHAT_ID) {
       setActiveChat(GENERAL_CHAT_ID);
-      setActiveChatName('📢 Общий чат');
-    } else if (chatId.startsWith('miras_admin_')) {
-      const login = chatId.replace('miras_admin_', '');
+    } else if (chatId.startsWith(ADMIN_CHAT_PREFIX)) {
       setActiveChat(chatId);
-      setActiveChatName(`${login} [МИРАС]`);
     } else {
       const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === chatId);
-      if (user) {
-        setActiveChat(chatId);
-        setActiveChatName(user.username);
-      }
+      if (user) setActiveChat(chatId);
     }
+    setMobileView('chat');
   };
 
   const handleSendMessage = (text: string) => {
@@ -328,30 +409,60 @@ const Chat: React.FC = () => {
     window.location.reload();
   };
 
-  // Формирование списка чатов
+  const handleDeleteSelf = async () => {
+    if (!window.confirm('Удалить свой аккаунт без возможности восстановления? Вся переписка будет удалена.')) {
+      return;
+    }
+    try {
+      await api.delete('/users/me');
+    } catch (e) {
+      console.error('Ошибка удаления аккаунта:', e);
+    }
+    localStorage.clear();
+    window.location.reload();
+  };
+
+  const handleProfileSaved = (newUsername: string) => {
+    localStorage.setItem('username', newUsername);
+    window.location.reload();
+  };
+
+  const handleDeleteUser = async (userId: number) => {
+    if (!window.confirm('Удалить аккаунт этого сотрудника без возможности восстановления?')) {
+      return;
+    }
+    try {
+      await api.delete(`/users/${userId}`);
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (e) {
+      console.error('Ошибка удаления аккаунта:', e);
+      alert('Не удалось удалить аккаунт');
+    }
+  };
+
+  const SECTION_RANK: Record<ChatSection, number> = { general: 0, admin: 1, staff: 2 };
+
+  // Формирование списка чатов: сгруппированы по смыслу (Общий чат / Администрация /
+  // Сотрудники), а внутри своей группы избранные всплывают наверх.
   const chats = [
-    { id: GENERAL_CHAT_ID, name: '📢 Общий чат' },
+    { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection },
     ...allUsers.map(u => {
       const commentData = comments[u.id];
-      let displayName = u.username;
-      
-      if (commentData?.comment) {
-        displayName = `${commentData.username} (${commentData.comment})`;
-      }
-      
-      if (u.source === 'miras') {
-        displayName = `${displayName} [МИРАС]`;
-      }
-      
+      const displayName = commentData?.comment ? `${commentData.username} (${commentData.comment})` : u.username;
+
       return {
-        id: u.source === 'miras' ? `miras_admin_${u.mirasLogin}` : getChatId(u.id),
+        id: u.source === 'miras' ? `${ADMIN_CHAT_PREFIX}${u.mirasLogin}_${currentUserId}` : getChatId(u.id),
         name: displayName,
+        section: (u.source === 'miras' ? 'admin' : 'staff') as ChatSection,
+        deletable: u.source === 'local',
         online: u.source === 'local' ? onlineUsers.includes(u.id) : true,
         userId: u.id,
       };
     })
-  ].filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+  ]
+    .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
+      if (SECTION_RANK[a.section] !== SECTION_RANK[b.section]) return SECTION_RANK[a.section] - SECTION_RANK[b.section];
       const aFav = favorites.includes(a.id) ? 1 : 0;
       const bFav = favorites.includes(b.id) ? 1 : 0;
       return bFav - aFav;
@@ -359,9 +470,20 @@ const Chat: React.FC = () => {
 
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
 
+  // Данные для шапки переписки — независимо от текущего поискового фильтра списка
+  const activeChatMeta: { name: string; section: ChatSection; online?: boolean } | null = (() => {
+    if (!activeChat) return null;
+    if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
+    const parsed = parseAdminChatId(activeChat);
+    if (parsed) return { name: parsed.login, section: 'admin', online: true };
+    const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
+    return user ? { name: user.username, section: 'staff', online: onlineUsers.includes(user.id) } : null;
+  })();
+
   return (
-    <div style={styles.container}>
+    <div className={'chat-layout' + (mobileView === 'chat' ? ' is-conversation-view' : '')}>
       <ChatList
+        username={currentUsername}
         chats={chats}
         activeChat={activeChat}
         onSelectChat={handleSelectChat}
@@ -373,59 +495,93 @@ const Chat: React.FC = () => {
         onToggleFavorite={toggleFavorite}
         onUpdateComment={updateComment}
         comments={comments}
+        isAdmin={isAdmin}
+        onDeleteUser={handleDeleteUser}
       />
-      <div style={styles.rightPanel}>
-        <div style={styles.header}>
-          <h3 style={styles.headerTitle}>{activeChatName || 'Выберите чат'}</h3>
-          <button onClick={handleLogout} style={styles.logoutBtn}>Выйти</button>
-        </div>
-        <ChatWindow
-          chatId={activeChat}
-          messages={messages}
-          currentUserId={currentUserId}
-          typingUser={typingText}
-          onScrollTop={loadMoreMessages}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
-          isFavorite={activeChat ? favorites.includes(activeChat) : false}
-          onToggleFavorite={() => activeChat && toggleFavorite(activeChat)}
-          chatName={activeChatName}
-        />
-        <MessageInput
-          onSend={handleSendMessage}
-          onTyping={handleTyping}
-          disabled={!activeChat}
-        />
-      </div>
+      <main className="conversation">
+        {view === 'settings' ? (
+          <SettingsPanel
+            username={currentUsername}
+            isMirasAccount={isAdmin}
+            onClose={() => setView('conversation')}
+            onOpenProfile={() => setView('profile')}
+            onDeleteAccount={handleDeleteSelf}
+            onLogout={handleLogout}
+          />
+        ) : view === 'profile' ? (
+          <ProfileEdit
+            currentUsername={currentUsername}
+            onBack={() => setView('settings')}
+            onSaved={handleProfileSaved}
+          />
+        ) : (
+          <>
+            <div className="conv-head">
+              <button type="button" className="icon-btn back-btn" onClick={() => setMobileView('list')} aria-label="Назад к списку">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
+              </button>
+
+              {activeChatMeta ? (
+                <>
+                  {activeChatMeta.section === 'general' ? (
+                    <div className="avatar avatar-general avatar-sm">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                    </div>
+                  ) : (
+                    <div className="avatar avatar-sm" style={{ background: colorForName(activeChatMeta.name) }}>
+                      {initialsForName(activeChatMeta.name)}
+                    </div>
+                  )}
+                  <div className="conv-title">
+                    <div className="name">{activeChatMeta.name}</div>
+                    <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
+                      {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="conv-title"><div className="name">Выберите чат</div></div>
+              )}
+
+              <div className="menu-wrap" ref={menuRef}>
+                <button type="button" className="icon-btn" onClick={() => setMenuOpen(v => !v)} aria-label="Меню">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg>
+                </button>
+                {menuOpen && (
+                  <div className="menu">
+                    <button type="button" onClick={() => { setMenuOpen(false); setView('settings'); }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.98 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.36.1.68.3 1 1.55V11a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.6Z" /></svg>
+                      Настройки
+                    </button>
+                    <hr />
+                    <button type="button" onClick={() => { setMenuOpen(false); handleLogout(); }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
+                      Выйти
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <ChatWindow
+              chatId={activeChat}
+              messages={messages}
+              currentUserId={currentUserId}
+              typingUser={typingText}
+              onScrollTop={loadMoreMessages}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+            />
+            <MessageInput
+              onSend={handleSendMessage}
+              onTyping={handleTyping}
+              disabled={!activeChat}
+            />
+          </>
+        )}
+      </main>
     </div>
   );
-};
-
-const styles: { [key: string]: React.CSSProperties } = {
-  container: { display: 'flex', height: '100vh' },
-  rightPanel: { flex: 1, display: 'flex', flexDirection: 'column' },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 24px',
-    background: '#1a472a',
-    borderBottom: '2px solid #c9a227',
-  },
-  headerTitle: {
-    margin: 0,
-    color: '#c9a227',
-    fontSize: '18px',
-  },
-  logoutBtn: {
-    padding: '8px 16px',
-    background: 'transparent',
-    color: '#c9a227',
-    border: '1px solid #c9a227',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-  },
 };
 
 export default Chat;
