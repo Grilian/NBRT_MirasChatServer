@@ -196,6 +196,15 @@ button, input, textarea { font-family: inherit; }
 .roster-account { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .roster-account-name { font-weight: 600; font-size: 14.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.mark-all-read-btn {
+  flex: none; width: 22px; height: 22px; border-radius: 50%; border: none; padding: 0; margin-left: 4px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green);
+}
+[data-theme="dark"] .mark-all-read-btn { color: var(--gold-strong); background: color-mix(in srgb, var(--gold) 16%, transparent); }
+.mark-all-read-btn:hover { background: color-mix(in srgb, var(--green) 28%, transparent); }
+[data-theme="dark"] .mark-all-read-btn:hover { background: color-mix(in srgb, var(--gold) 26%, transparent); }
+
 .search { position: relative; }
 .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--ink-faint); pointer-events: none; }
 .search input {

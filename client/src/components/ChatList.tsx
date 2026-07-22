@@ -37,6 +37,7 @@ interface ChatListProps {
   comments: Record<number, Comment>;
   isAdmin?: boolean;
   onDeleteUser?: (userId: number) => void;
+  onMarkAllRead: () => void;
 }
 
 const SECTION_LABELS: Record<ChatSection, string | null> = {
@@ -66,7 +67,7 @@ function renderAvatar(chat: Chat) {
 const ChatList: React.FC<ChatListProps> = ({
   username, chats, activeChat, onSelectChat, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
-  isAdmin, onDeleteUser
+  isAdmin, onDeleteUser, onMarkAllRead
 }) => {
   const [editingComment, setEditingComment] = useState<number | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -91,7 +92,19 @@ const ChatList: React.FC<ChatListProps> = ({
             {initialsForName(username)}
           </div>
           <div className="roster-account-name">{username}</div>
-          {totalUnread > 0 && <span className="row-unread" style={{ marginLeft: 'auto' }}>{totalUnread}</span>}
+          {totalUnread > 0 && (
+            <>
+              <span className="row-unread" style={{ marginLeft: 'auto' }}>{totalUnread}</span>
+              <button
+                type="button"
+                className="mark-all-read-btn"
+                title="Прочитать всё"
+                onClick={onMarkAllRead}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 6 9 17l-5-5" /></svg>
+              </button>
+            </>
+          )}
         </div>
         <div className="search">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>

@@ -321,6 +321,14 @@ const Chat: React.FC = () => {
     return `chat_${ids[0]}_${ids[1]}`;
   };
 
+  // "Прочитать всё" — на случай застрявших счётчиков непрочитанного
+  // (например, после бага с рассылкой личных сообщений всем подряд).
+  const handleMarkAllRead = () => {
+    if (!socket) return;
+    socket.emit('mark_all_read');
+    setUnreadCounts({});
+  };
+
   // Избранное
   const toggleFavorite = async (chatId: string) => {
     try {
@@ -495,6 +503,7 @@ const Chat: React.FC = () => {
         onToggleFavorite={toggleFavorite}
         onUpdateComment={updateComment}
         comments={comments}
+        onMarkAllRead={handleMarkAllRead}
         isAdmin={isAdmin}
         onDeleteUser={handleDeleteUser}
       />

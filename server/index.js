@@ -15,6 +15,7 @@ const commentsRoutes = require('./routes/comments');
 const mirasAdminsRoutes = require('./routes/mirasAdmins');
 const mirasUsersRoutes = require('./routes/mirasUsers');
 const { ensureLocalUserForAdmin } = require('./services/mirasAdminUsers');
+const { parseAdminChatId, participantsForChatId } = require('./services/chatParticipants');
 
 const db = require('./db');
 
@@ -157,40 +158,6 @@ app.post('/api/chat/receive', (req, res) => {
     });
   }
 });
-
-// chat_id для переписки с админом имеет вид miras_admin_<login>_<localUserId>,
-// чтобы у каждого сотрудника был свой отдельный тред с админом, а не один
-// общий на всех, кто ему когда-либо писал.
-function parseAdminChatId(chatId) {
-  const prefix = 'miras_admin_';
-  if (!chatId || !chatId.startsWith(prefix)) return null;
-
-  const rest = chatId.slice(prefix.length);
-  const lastUnderscore = rest.lastIndexOf('_');
-  if (lastUnderscore === -1) return null;
-
-  return {
-    login: rest.slice(0, lastUnderscore),
-    employeeId: rest.slice(lastUnderscore + 1)
-  };
-}
-
-// Личные чаты (1:1 между сотрудниками и переписка с админом) должны доходить
-// только реальным участникам треда, а не всем подключённым — иначе текст
-// личных сообщений и индикатор "печатает" были бы видны всем в сети.
-// null означает общий чат — его действительно транслируем всем.
-function participantsForChatId(chatId) {
-  if (chatId === 'general') return null;
-  if (!chatId) return []; // нет chat_id — не транслируем никому, а не всем подряд
-
-  const adminChat = parseAdminChatId(chatId);
-  if (adminChat) return [Number(adminChat.employeeId)];
-
-  const match = String(chatId).match(/^chat_(\d+)_(\d+)$/);
-  if (match) return [Number(match[1]), Number(match[2])];
-
-  return []; // неизвестный формат chat_id — на всякий случай никому, а не всем
-}
 
 function emitToChat(chatId, event, payload) {
   const participants = participantsForChatId(chatId);
@@ -359,6 +326,43 @@ io.on('connection', (socket) => {
       }
     } catch (e) {
       console.error('Ошибка обновления статуса:', e);
+    }
+  });
+
+  // Разовая ручная "починка" застрявших счётчиков непрочитанного — например,
+  // если бейдж повис из-за прежнего бага с широковещательной рассылкой личных
+  // сообщений (см. приватность-фикс) или клиент просто не успел отметить
+  // прочитанным вовремя. Помечаем читанными только те чаты, где сокет
+  // реально участник — та же проверка, что и в emitToChat.
+  socket.on('mark_all_read', () => {
+    const userId = socket.userId;
+    if (!userId) return;
+
+    try {
+      const candidates = db.prepare(
+        "SELECT id, chat_id FROM messages WHERE sender_id != ? AND status != 'read'"
+      ).all(userId);
+
+      const byChat = {};
+      for (const row of candidates) {
+        const participants = participantsForChatId(row.chat_id);
+        const isParticipant = participants === null || participants.includes(Number(userId));
+        if (isParticipant) {
+          (byChat[row.chat_id] = byChat[row.chat_id] || []).push(row.id);
+        }
+      }
+
+      const allIds = Object.values(byChat).flat();
+      if (!allIds.length) return;
+
+      const placeholders = allIds.map(() => '?').join(',');
+      db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${placeholders})`).run(...allIds);
+
+      for (const [chatId, messageIds] of Object.entries(byChat)) {
+        emitToChat(chatId, 'message_status_bulk', { chatId, messageIds, status: 'read' });
+      }
+    } catch (e) {
+      console.error('Ошибка при массовой отметке прочитанного:', e);
     }
   });
 
