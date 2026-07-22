@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event, isMaximized) => callback(isMaximized);
     ipcRenderer.on('window:maximized', listener);
     return () => ipcRenderer.removeListener('window:maximized', listener);
-  }
+  },
+  getAutoLaunch: () => ipcRenderer.invoke('autostart:get'),
+  setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled)
 });

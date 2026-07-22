@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { initialsForName, colorForName } from '../utils/avatar';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
+
+const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
 interface SettingsPanelProps {
   username: string;
@@ -21,10 +23,22 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   username, isMirasAccount, onClose, onOpenProfile, onDeleteAccount, onLogout
 }) => {
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
+  const [autoLaunch, setAutoLaunch] = useState(false);
 
   const handleThemeChange = (value: ThemePreference) => {
     setTheme(value);
     applyThemePreference(value);
+  };
+
+  useEffect(() => {
+    if (isElectron) {
+      window.electronAPI!.getAutoLaunch().then(setAutoLaunch);
+    }
+  }, []);
+
+  const handleAutoLaunchChange = (checked: boolean) => {
+    setAutoLaunch(checked); // сразу отражаем в UI, не дожидаясь ответа ОС
+    window.electronAPI!.setAutoLaunch(checked).then(setAutoLaunch);
   };
 
   return (
@@ -64,6 +78,26 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </div>
         </div>
+
+        {isElectron && (
+          <>
+            <div className="settings-section-title">Приложение</div>
+            <div className="settings-group">
+              <div className="settings-row static">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v6" /><path d="M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>
+                <span className="label">Добавить в автозагрузку</span>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={autoLaunch}
+                    onChange={(e) => handleAutoLaunchChange(e.target.checked)}
+                  />
+                  <span className="switch-track"><span className="switch-thumb" /></span>
+                </label>
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="settings-section-title">Аккаунт</div>
         <div className="settings-group">
