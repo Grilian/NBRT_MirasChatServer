@@ -217,15 +217,20 @@ io.on('connection', (socket) => {
           console.error("Ошибка отправки общего чата в МИРАС:", e.message);
         }
       }
-      // Если это чат с админом МИРАС — пересылаем в МИРАС
-      if (data.chatId && data.chatId.startsWith('miras_admin_')) {
-        const parsedAdminChat = parseAdminChatId(data.chatId);
-        const adminLogin = parsedAdminChat ? parsedAdminChat.login : data.chatId.replace('miras_admin_', '');
+      // Пересылаем в МИРАС только если пишет реально сотрудник этого треда.
+      // Тот же chat_id (miras_admin_<login>_<employeeId>) используется и тогда,
+      // когда сам админ залогинен в MirasChat напрямую (см. Chat.tsx) — в этом
+      // случае пересылать через HTTP в МИРАС не нужно (админ и так там же,
+      // сообщение получателю-сотруднику и так уйдёт через emitToChat ниже),
+      // а старая логика форвардила и такие сообщения, адресуя админу его же
+      // реплику — именно это ломало переписку с админами МИРАС.
+      const parsedAdminChat = data.chatId ? parseAdminChatId(data.chatId) : null;
+      if (parsedAdminChat && Number(data.senderId) === Number(parsedAdminChat.employeeId)) {
         try {
           await axios.post(`${MIRAS_URL}/api/chat/receive`, {
             sender_key: `miras_chat:${data.senderUsername}`,
             sender_login: data.senderUsername,
-            recipient_key: `admin:${adminLogin}`,
+            recipient_key: `admin:${parsedAdminChat.login}`,
             message: data.text,
             sent_at: new Date().toISOString()
           }, {

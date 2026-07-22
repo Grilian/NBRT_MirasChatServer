@@ -7,6 +7,7 @@ import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import api from '../api/client';
 import { colorForName, initialsForName } from '../utils/avatar';
+import { ensureMobileNotificationPermission, showMobileNotification, isNativeMobile } from '../utils/mobileNotify';
 
 interface User { id: number; username: string; }
 interface MirasAdmin { id: number; login: string; role: string; zone_id: number | null; }
@@ -81,7 +82,14 @@ const Chat: React.FC = () => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
+    ensureMobileNotificationPermission();
   }, []);
+
+  // Красная точка в трее/оверлей на таскбаре (desktop) — пока есть непрочитанное
+  useEffect(() => {
+    const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+    window.electronAPI?.setUnreadBadge(totalUnread > 0);
+  }, [unreadCounts]);
 
   // Закрытие меню шапки по клику снаружи
   useEffect(() => {
@@ -189,9 +197,15 @@ const Chat: React.FC = () => {
     if (!socket) return;
 
     const handler = (message: Message) => {
-      // Добавляем сообщение в список если это активный чат
+      // Добавляем сообщение в список если это активный чат. Дедуп по id —
+      // при кратком провисании сети сокет переподключается и на сервере
+      // на секунды-две может остаться "зависшая" старая комната того же
+      // пользователя, из-за чего событие иногда прилетает дважды; полный
+      // перезапуск приложения сам себя чинил именно потому, что React-стейт
+      // просто пересоздавался с нуля — а на самом деле дублировалось само
+      // событие, а не запись в БД.
       if (message.chat_id === activeChat) {
-        setMessages(prev => [...prev, message]);
+        setMessages(prev => prev.some(m => m.id === message.id) ? prev : [...prev, message]);
       }
 
       // Превью последнего сообщения в списке диалогов — обновляем сразу,
@@ -226,7 +240,9 @@ const Chat: React.FC = () => {
           const chatName = message.chat_id === GENERAL_CHAT_ID
             ? 'Общий чат'
             : parsedAdminChat
-              ? parsedAdminChat.login + ' (МИРАС)'
+              ? (isAdmin
+                  ? users.find(u => u.id === Number(parsedAdminChat.employeeId))?.username || 'Сотрудник'
+                  : parsedAdminChat.login + ' (МИРАС)')
               : allUsers.find(u => getChatId(u.id) === message.chat_id)?.username || 'Чат';
 
           showNotification(message, chatName);
@@ -299,8 +315,15 @@ const Chat: React.FC = () => {
     }
   }, [messages, activeChat, socket, currentUserId]);
 
-  // Показ уведомления
+  // Показ уведомления. На Android WebView обычный Notification API не
+  // добирается до системного трея — там нужен нативный мост через Capacitor.
   const showNotification = (message: Message, chatName: string) => {
+    if (isNativeMobile) {
+      showMobileNotification(message.id, `MirasChat — ${chatName}`, message.text);
+      if (socket) socket.emit('message_delivered', message.id);
+      return;
+    }
+
     if ('Notification' in window && Notification.permission === 'granted') {
       const notification = new Notification(`MirasChat — ${chatName}`, {
         body: message.text,
@@ -458,8 +481,16 @@ const Chat: React.FC = () => {
       const commentData = comments[u.id];
       const displayName = commentData?.comment ? `${commentData.username} (${commentData.comment})` : u.username;
 
+      // Если сам залогинен как админ МИРАС — переписка с сотрудником должна
+      // использовать ту же схему id, что и сообщения, пришедшие из панели
+      // МИРАС (miras_admin_<свой login>_<id сотрудника>), иначе это два
+      // никак не связанных треда и переписка "теряется" для другой стороны.
       return {
-        id: u.source === 'miras' ? `${ADMIN_CHAT_PREFIX}${u.mirasLogin}_${currentUserId}` : getChatId(u.id),
+        id: u.source === 'miras'
+          ? `${ADMIN_CHAT_PREFIX}${u.mirasLogin}_${currentUserId}`
+          : isAdmin
+            ? `${ADMIN_CHAT_PREFIX}${currentUsername}_${u.id}`
+            : getChatId(u.id),
         name: displayName,
         section: (u.source === 'miras' ? 'admin' : 'staff') as ChatSection,
         deletable: u.source === 'local',
@@ -483,7 +514,14 @@ const Chat: React.FC = () => {
     if (!activeChat) return null;
     if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
     const parsed = parseAdminChatId(activeChat);
-    if (parsed) return { name: parsed.login, section: 'admin', online: true };
+    if (parsed) {
+      // Сам являюсь админом — собеседник тут сотрудник (id уже зашит в chatId), а не я сам.
+      if (isAdmin) {
+        const employee = users.find(u => u.id === Number(parsed.employeeId));
+        return employee ? { name: employee.username, section: 'staff', online: onlineUsers.includes(employee.id) } : null;
+      }
+      return { name: parsed.login, section: 'admin', online: true };
+    }
     const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
     return user ? { name: user.username, section: 'staff', online: onlineUsers.includes(user.id) } : null;
   })();

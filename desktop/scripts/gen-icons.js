@@ -31,6 +31,21 @@ async function main() {
   await sharp(svg, { density: 384 }).resize(32, 32).png().toFile(path.join(ASSETS, 'tray.png'));
   await sharp(svg, { density: 384 }).resize(64, 64).png().toFile(path.join(ASSETS, 'tray@2x.png'));
   console.log('wrote tray icons');
+
+  // Вариант с красной точкой — показываем в трее/оверлее таскбара, пока есть непрочитанное
+  const dot = `
+    <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="390" cy="130" r="90" fill="#e0413b" stroke="#101d17" stroke-width="18"/>
+    </svg>`;
+
+  for (const [size, name] of [[32, 'tray-unread.png'], [64, 'tray-unread@2x.png']]) {
+    const base = await sharp(svg, { density: 384 }).resize(size, size).png().toBuffer();
+    const dotOverlay = await sharp(Buffer.from(dot)).resize(size, size).png().toBuffer();
+    await sharp(base).composite([{ input: dotOverlay }]).png().toFile(path.join(ASSETS, name));
+  }
+  // Отдельная маленькая иконка только с точкой — для overlay поверх значка в таскбаре
+  await sharp(Buffer.from(dot)).resize(32, 32).png().toFile(path.join(ASSETS, 'overlay-unread.png'));
+  console.log('wrote unread badge variants');
 }
 
 main().catch((e) => {

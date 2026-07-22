@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -127,6 +127,20 @@ function createTray() {
   });
 }
 
+// Красная точка на иконке в трее + оверлей поверх значка в таскбаре, пока
+// есть непрочитанное сообщение — состояние присылает рендерер по IPC.
+function setUnreadBadge(hasUnread) {
+  if (tray) {
+    tray.setImage(path.join(ASSETS_DIR, hasUnread ? 'tray-unread.png' : 'tray.png'));
+  }
+  if (mainWindow) {
+    mainWindow.setOverlayIcon(
+      hasUnread ? nativeImage.createFromPath(path.join(ASSETS_DIR, 'overlay-unread.png')) : null,
+      hasUnread ? 'Есть непрочитанные сообщения' : ''
+    );
+  }
+}
+
 function createAppMenu() {
   const template = [
     {
@@ -211,3 +225,4 @@ ipcMain.on('window:maximize-toggle', () => {
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
+ipcMain.on('unread:set', (event, hasUnread) => setUnreadBadge(!!hasUnread));

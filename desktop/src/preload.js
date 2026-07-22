@@ -12,5 +12,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('window:maximized', listener);
   },
   getAutoLaunch: () => ipcRenderer.invoke('autostart:get'),
-  setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled)
+  setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
+  setUnreadBadge: (hasUnread) => ipcRenderer.send('unread:set', hasUnread)
 });
