@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { colorForName, initialsForName } from '../utils/avatar';
 
-export type ChatSection = 'general' | 'admin' | 'staff';
+export type ChatSection = 'general' | 'staff';
 
 interface Chat {
   id: string;
   name: string;
   section: ChatSection;
+  groupLabel: string | null;
   online?: boolean;
   userId?: number;
   deletable?: boolean;
@@ -35,8 +36,6 @@ interface ChatListProps {
   onToggleFavorite: (chatId: string) => void;
   onUpdateComment: (userId: number, comment: string) => void;
   comments: Record<number, Comment>;
-  isAdmin?: boolean;
-  onDeleteUser?: (userId: number) => void;
   onMarkAllRead: () => void;
 }
 
@@ -61,7 +60,7 @@ function renderAvatar(chat: Chat) {
 const ChatList: React.FC<ChatListProps> = ({
   username, chats, activeChat, onSelectChat, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
-  isAdmin, onDeleteUser, onMarkAllRead
+  onMarkAllRead
 }) => {
   const [editingComment, setEditingComment] = useState<number | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -74,6 +73,8 @@ const ChatList: React.FC<ChatListProps> = ({
 
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
   const filtered = chats.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  let lastGroupLabel: string | null = null;
 
 
   return (
@@ -116,9 +117,14 @@ const ChatList: React.FC<ChatListProps> = ({
           const last = lastMessages[chat.id];
           const unreadCount = unreadCounts[chat.id] || 0;
           const isFavorite = favorites.includes(chat.id);
+          const showLabel = chat.groupLabel !== lastGroupLabel;
+          lastGroupLabel = chat.groupLabel;
 
           return (
             <React.Fragment key={chat.id}>
+              {showLabel && chat.groupLabel && (
+                <div className="roster-section">{chat.groupLabel}</div>
+              )}
               <div
                 tabIndex={0}
                 role="button"
@@ -132,7 +138,6 @@ const ChatList: React.FC<ChatListProps> = ({
                   <div className="row-top">
                     <div className="row-name">
                       <span>{chat.name}</span>
-                      {chat.section === 'admin' && <span className="badge-admin">МИРАС</span>}
                     </div>
                     {last && (
                       <div className="row-time">
@@ -156,16 +161,6 @@ const ChatList: React.FC<ChatListProps> = ({
                           }}
                         >
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
-                        </button>
-                      )}
-                      {isAdmin && chat.deletable && chat.userId && onDeleteUser && (
-                        <button
-                          type="button"
-                          className="icon-btn-ghost danger"
-                          title="Удалить аккаунт сотрудника"
-                          onClick={(e) => { e.stopPropagation(); onDeleteUser(chat.userId!); }}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
                         </button>
                       )}
                       <button

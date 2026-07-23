@@ -2,11 +2,10 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const mirasService = require('../services/mirasService');
 const router = express.Router();
 
 // Полное удаление локального аккаунта: сообщения, избранное, комментарии,
-// сама учётная запись, плюс чистка истории на стороне МИРАС (см. mirasService).
+// сама учётная запись.
 function deleteLocalUserById(id) {
   const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id);
 
@@ -59,10 +58,11 @@ function deleteLocalUserById(id) {
 router.get('/', verifyToken, (req, res) => {
   try {
     const users = db.prepare(`
-      SELECT id, username
-      FROM users
-      WHERE id != ?
-        AND username NOT LIKE 'miras\_%' ESCAPE '\\'
+      SELECT u.id, u.username, u.group_id, g.name AS group_name
+      FROM users u
+      LEFT JOIN groups g ON g.id = u.group_id
+      WHERE u.id != ?
+        AND u.username NOT LIKE 'miras\_%' ESCAPE '\\'
     `).all(req.userId);
     res.json(users);
   } catch (e) {
@@ -142,35 +142,6 @@ router.delete('/me', verifyToken, (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
-
-    mirasService.purgeMirasChatUserHistory(user.username);
-
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-// Удалить чужой аккаунт — только для тех, кто вошёл через логин МИРАС
-router.delete('/:id', verifyToken, (req, res) => {
-  try {
-    if (req.tokenSource !== 'miras') {
-      return res.status(403).json({ error: 'Недостаточно прав' });
-    }
-
-    const targetId = Number(req.params.id);
-
-    if (!Number.isInteger(targetId) || targetId <= 0) {
-      return res.status(400).json({ error: 'Некорректный id' });
-    }
-
-    const user = deleteLocalUserById(targetId);
-
-    if (!user) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-
-    mirasService.purgeMirasChatUserHistory(user.username);
 
     res.json({ ok: true });
   } catch (e) {

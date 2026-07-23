@@ -7,7 +7,6 @@ interface LoginProps {
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [isRegister, setIsRegister] = useState(false);
-  const [useMiras, setUseMiras] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -17,23 +16,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setError('');
 
     try {
-      let endpoint = '';
-      let body = {};
-
-      if (useMiras) {
-        endpoint = '/auth/login-miras';
-        body = { login: username, password };
-      } else if (isRegister) {
-        endpoint = '/auth/register';
-        body = { username, password };
-      } else {
-        endpoint = '/auth/login';
-        body = { username, password };
-      }
+      const endpoint = isRegister ? '/auth/register' : '/auth/login';
+      const body = { username, password };
 
       const { data } = await api.post(endpoint, body);
 
-      if (isRegister && !useMiras) {
+      if (isRegister) {
         setIsRegister(false);
         alert('Регистрация успешна! Теперь войдите.');
       } else {
@@ -60,26 +48,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           </div>
         </div>
 
-        <div className="segmented">
-          <button
-            type="button"
-            className={!useMiras ? 'is-active' : ''}
-            onClick={() => setUseMiras(false)}
-          >
-            Локальный
-          </button>
-          <button
-            type="button"
-            className={useMiras ? 'is-active' : ''}
-            onClick={() => setUseMiras(true)}
-          >
-            Через МИРАС
-          </button>
-        </div>
-
         <form onSubmit={handleSubmit}>
           <div className="field">
-            <label>{useMiras ? 'Логин МИРАС' : 'Имя пользователя'}</label>
+            <label>Имя пользователя</label>
             <input
               type="text"
               value={username}
@@ -100,16 +71,14 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           {error && <p className="login-error">{error}</p>}
 
           <button type="submit" className="btn-primary">
-            {useMiras ? 'Войти через МИРАС' : (isRegister ? 'Зарегистрироваться' : 'Войти')}
+            {isRegister ? 'Зарегистрироваться' : 'Войти'}
           </button>
 
-          {!useMiras && (
-            <div className="login-foot">
-              <button type="button" onClick={() => setIsRegister(!isRegister)}>
-                {isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}
-              </button>
-            </div>
-          )}
+          <div className="login-foot">
+            <button type="button" onClick={() => setIsRegister(!isRegister)}>
+              {isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}
+            </button>
+          </div>
         </form>
       </div>
     </div>

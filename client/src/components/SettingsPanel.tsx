@@ -6,7 +6,6 @@ const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
 interface SettingsPanelProps {
   username: string;
-  isMirasAccount: boolean;
   onClose: () => void;
   onOpenProfile: () => void;
   onDeleteAccount: () => void;
@@ -20,7 +19,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 ];
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
-  username, isMirasAccount, onClose, onOpenProfile, onDeleteAccount, onLogout
+  username, onClose, onOpenProfile, onDeleteAccount, onLogout
 }) => {
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
@@ -54,7 +53,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="profile-card">
           <div className="avatar" style={{ background: colorForName(username) }}>{initialsForName(username)}</div>
           <div className="name">{username}</div>
-          {isMirasAccount && <div className="sub">Вход через МИРАС</div>}
         </div>
 
         <div className="settings-section-title">Оформление</div>
@@ -101,15 +99,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
         <div className="settings-section-title">Аккаунт</div>
         <div className="settings-group">
-          {isMirasAccount ? (
-            <div className="settings-note">Профиль и пароль этого аккаунта управляются на сервере МИРАС.</div>
-          ) : (
-            <button type="button" className="settings-row" onClick={onOpenProfile}>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" /></svg>
-              <span className="label">Редактировать профиль</span>
-              <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
-            </button>
-          )}
+          <button type="button" className="settings-row" onClick={onOpenProfile}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" /></svg>
+            <span className="label">Редактировать профиль</span>
+            <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
           <button type="button" className="settings-row danger" onClick={onDeleteAccount}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
             <span className="label">Удалить аккаунт</span>

@@ -1,9 +1,8 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const axios = require('axios');
 
 const authRoutes = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
@@ -12,11 +11,8 @@ const userRoutes = require('./routes/users');
 const unreadRoutes = require('./routes/unread');
 const favoritesRoutes = require('./routes/favorites');
 const commentsRoutes = require('./routes/comments');
-const mirasAdminsRoutes = require('./routes/mirasAdmins');
-const mirasUsersRoutes = require('./routes/mirasUsers');
 const superadminRoutes = require('./routes/superadmin');
-const { ensureLocalUserForAdmin } = require('./services/mirasAdminUsers');
-const { parseAdminChatId, participantsForChatId } = require('./services/chatParticipants');
+const { participantsForChatId } = require('./services/chatParticipants');
 
 const db = require('./db');
 
@@ -31,8 +27,6 @@ app.use('/api/users', userRoutes);
 app.use('/api/unread', unreadRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/comments', commentsRoutes);
-app.use('/api/miras-admins', mirasAdminsRoutes);
-app.use('/api/miras-users', mirasUsersRoutes);
 app.use('/api/superadmin', superadminRoutes);
 
 const server = http.createServer(app);
@@ -51,126 +45,8 @@ app.set('io', io);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// ===== Настройки интеграции с МИРАС =====
-const MIRAS_URL = process.env.MIRAS_URL || 'http://localhost:3000';
-const CHAT_SHARED_SECRET = process.env.CHAT_SHARED_SECRET || '';
-
-// Без keep-alive: путь до Мираса идёт через обратный SSH-туннель, который
-// периодически переустанавливается (сеть, перезапуск) — переиспользованное
-// закешированное соединение может молча "успешно" отвечать, не долетая до
-// реального приложения. Для редких, некрупных сообщений чата разумнее каждый
-// раз открывать свежее соединение, чем экономить на хендшейке.
-const mirasHttpAgent = new (require('http').Agent)({ keepAlive: false });
-
-// ===== Endpoint для приёма сообщений ОТ МИРАС =====
-app.post('/api/chat/receive', (req, res) => {
-  try {
-    const receivedSecret = req.headers['x-nbrt-chat-token'];
-    if (receivedSecret !== CHAT_SHARED_SECRET) {
-      return res.status(401).json({ ok: false, error: 'Unauthorized' });
-    }
-
-    const {
-        origin,
-        sender_key,
-        sender_login,
-        recipient_key,
-        message,
-        sent_at
-    } = req.body;
-
-    if (
-        sender_key &&
-        sender_key.startsWith("admin:") &&
-        recipient_key !== "__public__"
-    ) {
-      const adminLogin = sender_key.replace('admin:', '');
-      const senderId = ensureLocalUserForAdmin(adminLogin);
-
-      // recipient_key приходит как miras_chat:<username> — нужно найти локального
-      // сотрудника, иначе сообщение некуда положить (и его увидели бы все подряд).
-      const recipientUsername = String(recipient_key || '').replace('miras_chat:', '');
-      const recipientUser = db.prepare('SELECT id FROM users WHERE username = ?').get(recipientUsername);
-
-      if (!recipientUser) {
-        console.error('MirasChat: получатель не найден локально:', recipientUsername);
-      } else {
-        const chatId = `miras_admin_${adminLogin}_${recipientUser.id}`;
-
-        const stmt = db.prepare(`
-          INSERT INTO messages (chat_id, sender_id, text, created_at, status)
-          VALUES (?, ?, ?, ?, 'delivered')
-        `);
-        const result = stmt.run(chatId, senderId, message, sent_at || new Date().toISOString());
-
-        // Личное сообщение от админа — уходит только этому сотруднику,
-        // а не всем подключённым (иначе содержимое личной переписки увидели бы все).
-        io.to('user:' + recipientUser.id).emit('chat_message', {
-          id: result.lastInsertRowid,
-          chat_id: chatId,
-          sender_id: senderId,
-          username: sender_login,
-          text: message,
-          created_at: sent_at || new Date().toISOString(),
-          status: 'delivered'
-        });
-      }
-    }
-
-    // Получили сообщение из общего чата МИРАС
-    if (recipient_key === "__public__") {
-
-      // Раньше тут была своя схема (miras_<login>), отдельная от
-      // ensureLocalUserForAdmin (miras_admin_<login>) — один и тот же админ
-      // получал два разных зеркала. Используем общую функцию.
-      const senderId = ensureLocalUserForAdmin(sender_login);
-
-      const stmt = db.prepare(`
-        INSERT INTO messages (
-          chat_id,
-          sender_id,
-          text,
-          created_at,
-          status
-        )
-        VALUES (?, ?, ?, ?, 'delivered')
-      `);
-
-      const result = stmt.run(
-          "general",
-          senderId,
-          message,
-          sent_at || new Date().toISOString()
-      );
-
-      io.emit("chat_message", {
-        id: result.lastInsertRowid,
-        chat_id: "general",
-        sender_id: senderId,
-        username: sender_login,
-        text: message,
-        created_at: sent_at || new Date().toISOString(),
-        status: "delivered"
-      });
-    }
-
-    res.json({ ok: true });
-
-  } catch (e) {
-    console.error("CHAT RECEIVE ERROR:", e);
-    res.status(500).json({
-      ok: false,
-      error: e.message,
-      stack: e.stack
-    });
-  }
-});
-
-// extraUserId — участник, который может не входить в "фиксированный" список
-// (например, сам админ, когда он написал в miras_admin_<login>_<employeeId>
-// напрямую из MirasChat: комната по chat_id знает только про сотрудника,
-// а не про то, кто сейчас логинится под этим login'ом). Без этого отправитель
-// не получал бы эхо собственного сообщения/правки/удаления.
+// extraUserId — отправитель добавляется в комнату явно, иначе не получал бы
+// эхо собственного сообщения/правки/удаления.
 function emitToChat(chatId, event, payload, extraUserId) {
   const participants = participantsForChatId(chatId);
   if (participants === null) {
@@ -205,10 +81,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('chat_message', async (data) => {
-    if (data.origin === "miras") {
-        return;
-    }
-
     // Режим тишины — проверяем по authентичному socket.userId (из user_online),
     // а не по data.senderId, который просто присылает клиент и легко подделать.
     if (socket.userId) {
@@ -220,57 +92,6 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Общий чат → общий чат МИРАС
-      if (data.chatId === "general") {
-        try {
-          await axios.post(`${MIRAS_URL}/api/chat/receive`, {
-            origin: "miras_chat",
-            sender_key: `miras_chat:${data.senderUsername}`,
-            sender_login: data.senderUsername,
-            recipient_key: "__public__",
-            message: data.text,
-            sent_at: new Date().toISOString()
-          }, {
-            headers: {
-              "Content-Type": "application/json",
-              "X-NBRT-Chat-Token": CHAT_SHARED_SECRET
-            },
-            httpAgent: mirasHttpAgent,
-            timeout: 5000
-          });
-        } catch (e) {
-          console.error("Ошибка отправки общего чата в МИРАС:", e.message);
-        }
-      }
-      // Пересылаем в МИРАС только если пишет реально сотрудник этого треда.
-      // Тот же chat_id (miras_admin_<login>_<employeeId>) используется и тогда,
-      // когда сам админ залогинен в MirasChat напрямую (см. Chat.tsx) — в этом
-      // случае пересылать через HTTP в МИРАС не нужно (админ и так там же,
-      // сообщение получателю-сотруднику и так уйдёт через emitToChat ниже),
-      // а старая логика форвардила и такие сообщения, адресуя админу его же
-      // реплику — именно это ломало переписку с админами МИРАС.
-      const parsedAdminChat = data.chatId ? parseAdminChatId(data.chatId) : null;
-      if (parsedAdminChat && Number(data.senderId) === Number(parsedAdminChat.employeeId)) {
-        try {
-          await axios.post(`${MIRAS_URL}/api/chat/receive`, {
-            sender_key: `miras_chat:${data.senderUsername}`,
-            sender_login: data.senderUsername,
-            recipient_key: `admin:${parsedAdminChat.login}`,
-            message: data.text,
-            sent_at: new Date().toISOString()
-          }, {
-            headers: {
-              'Content-Type': 'application/json',
-              'X-NBRT-Chat-Token': CHAT_SHARED_SECRET
-            },
-            httpAgent: mirasHttpAgent,
-            timeout: 5000
-          });
-        } catch (e) {
-          console.error('Ошибка отправки в МИРАС:', e.message);
-        }
-      }
-
       // Сохраняем в локальную БД
       const stmt = db.prepare(
         'INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, ?)'

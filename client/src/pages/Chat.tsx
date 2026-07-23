@@ -17,8 +17,7 @@ import {
   onMobileNotificationTap
 } from '../utils/mobileNotify';
 
-interface User { id: number; username: string; }
-interface MirasAdmin { id: number; login: string; role: string; zone_id: number | null; }
+interface User { id: number; username: string; group_id: number | null; group_name: string | null; }
 interface Message {
   id: number;
   chat_id?: string;
@@ -38,32 +37,15 @@ interface LastMessage {
 interface AllUser {
   id: number;
   username: string;
-  source: 'local' | 'miras';
-  mirasLogin?: string;
+  source: 'local';
+  groupName?: string | null;
 }
 
 const GENERAL_CHAT_ID = 'general';
-const ADMIN_CHAT_PREFIX = 'miras_admin_';
-
-// chat_id с админом — miras_admin_<login>_<myLocalUserId>, чтобы у каждого
-// сотрудника был свой отдельный тред с этим админом (а не общий на всех).
-function parseAdminChatId(chatId: string): { login: string; employeeId: string } | null {
-  if (!chatId.startsWith(ADMIN_CHAT_PREFIX)) return null;
-
-  const rest = chatId.slice(ADMIN_CHAT_PREFIX.length);
-  const lastUnderscore = rest.lastIndexOf('_');
-  if (lastUnderscore === -1) return null;
-
-  return {
-    login: rest.slice(0, lastUnderscore),
-    employeeId: rest.slice(lastUnderscore + 1)
-  };
-}
 
 const Chat: React.FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [users, setUsers] = useState<User[]>([]);
-  const [mirasAdmins, setMirasAdmins] = useState<MirasAdmin[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<number[]>([]);
@@ -83,9 +65,6 @@ const Chat: React.FC = () => {
 
   const currentUserId = Number(localStorage.getItem('userId'));
   const currentUsername = localStorage.getItem('username') || '';
-
-  // Кто вошёл через логин МИРАС — тому доступно удаление чужих аккаунтов
-  const isAdmin = localStorage.getItem('source') === 'miras';
 
   // Режим тишины — суперадмин может включить/выключить прямо во время сессии,
   // поэтому актуальное значение приходит и живьём по сокету (см. account_updated).
@@ -153,19 +132,17 @@ const Chat: React.FC = () => {
       newSocket.emit('user_online', currentUserId);
 
       api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
-      api.get('/miras-admins').then(({ data }) => setMirasAdmins(data)).catch(console.error);
       api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
       api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
       api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
     });
 
-    // Список сотрудников/админов не приходит по сокету (нет событий
+    // Список сотрудников не приходит по сокету (нет событий
     // "зарегистрировался"/"удалён") — подтягиваем его периодически, чтобы
     // ростер не застревал в состоянии на момент открытия вкладки.
     const rosterRefreshInterval = setInterval(() => {
       api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
-      api.get('/miras-admins').then(({ data }) => setMirasAdmins(data)).catch(console.error);
     }, 30000);
 
     newSocket.on('online_users', (userIds: number[]) => setOnlineUsers(userIds));
@@ -252,6 +229,39 @@ const Chat: React.FC = () => {
     };
   }, [currentUserId]);
 
+  // Возврат приложения из фона на Android — пока оно свёрнуто, ОС может
+  // оборвать сеть (Doze/App Standby), и сокет повиснет отключённым: его
+  // встроенный реконнект теоретически должен сработать сам, но ждать его
+  // внутренний backoff не нужно — сразу форсируем попытку и на всякий случай
+  // подтягиваем то, что могло не долететь, пока соединение было мертво.
+  useEffect(() => {
+    if (!isNativeMobile) return;
+    const listenerPromise = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) return;
+
+      if (socket && !socket.connected) {
+        socket.connect();
+      }
+
+      api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
+
+      if (activeChat) {
+        api.get(`/messages/${activeChat}?limit=50&offset=0`)
+          .then(({ data }) => {
+            if (data.messages) {
+              setMessages(data.messages);
+              setHasMore(data.hasMore);
+            } else {
+              setMessages(data);
+              setHasMore(false);
+            }
+          })
+          .catch(console.error);
+      }
+    });
+    return () => { listenerPromise.then((h) => h.remove()); };
+  }, [socket, activeChat]);
+
   // Единый обработчик новых сообщений
   useEffect(() => {
     if (!socket) return;
@@ -295,15 +305,9 @@ const Chat: React.FC = () => {
         const isWindowFocused = document.hasFocus();
 
         if (!isChatActive || !isWindowFocused) {
-          const parsedAdminChat = message.chat_id ? parseAdminChatId(message.chat_id) : null;
-
           const chatName = message.chat_id === GENERAL_CHAT_ID
             ? 'Общий чат'
-            : parsedAdminChat
-              ? (isAdmin
-                  ? users.find(u => u.id === Number(parsedAdminChat.employeeId))?.username || 'Сотрудник'
-                  : parsedAdminChat.login + ' (МИРАС)')
-              : allUsers.find(u => getChatId(u.id) === message.chat_id)?.username || 'Чат';
+            : allUsers.find(u => getChatId(u.id) === message.chat_id)?.username || 'Чат';
 
           showNotification(message, chatName);
         }
@@ -455,24 +459,11 @@ const Chat: React.FC = () => {
     }
   };
 
-  // Объединение локальных пользователей и админов МИРАС.
-  // a.id — это уже локальный users.id (сервер сам мапит логин админа на него),
-  // поэтому коллизий с id локальных пользователей быть не может.
-  const allUsers: AllUser[] = [
-    ...users.map(u => ({ id: u.id, username: u.username, source: 'local' as const })),
-    ...mirasAdmins.map(a => ({
-      id: a.id,
-      username: a.login,
-      source: 'miras' as const,
-      mirasLogin: a.login
-    }))
-  ];
+  const allUsers: AllUser[] = users.map(u => ({ id: u.id, username: u.username, source: 'local' as const, groupName: u.group_name }));
 
   const handleSelectChat = (chatId: string) => {
     if (chatId === GENERAL_CHAT_ID) {
       setActiveChat(GENERAL_CHAT_ID);
-    } else if (chatId.startsWith(ADMIN_CHAT_PREFIX)) {
-      setActiveChat(chatId);
     } else {
       const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === chatId);
       if (user) setActiveChat(chatId);
@@ -552,56 +543,57 @@ const Chat: React.FC = () => {
     window.location.reload();
   };
 
-  const handleDeleteUser = async (userId: number) => {
-    if (!window.confirm('Удалить аккаунт этого сотрудника без возможности восстановления?')) {
-      return;
-    }
-    try {
-      await api.delete(`/users/${userId}`);
-      setUsers(prev => prev.filter(u => u.id !== userId));
-    } catch (e) {
-      console.error('Ошибка удаления аккаунта:', e);
-      alert('Не удалось удалить аккаунт');
-    }
-  };
+  // Реальные группы (настроены в панели супер-админа) — упорядочиваем по
+  // алфавиту, чтобы разделы в списке не прыгали местами между рендерами.
+  const realGroupNames = Array.from(
+    new Set(
+      allUsers
+        .filter(u => u.source === 'local' && u.groupName)
+        .map(u => u.groupName as string)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'ru'));
 
-  // Формирование списка чатов: избранные наверху (по свежести), дальше все
-  // остальные по времени последнего сообщения — без группировки по разделам.
+  function groupRank(c: { id: string; section: ChatSection; groupLabel: string | null }) {
+    if (c.section === 'general') return -1;
+    if (favorites.includes(c.id)) return 0;
+    // groupLabel у "безгруппных" — это плейсхолдер "Без группы", а не реальное
+    // название группы. truthy-проверка тут не годится: indexOf вернёт -1,
+    // и 2 + (-1) = 0 столкнёт их с избранными вместо конца списка.
+    const idx = realGroupNames.indexOf(c.groupLabel || '');
+    if (idx !== -1) return 1 + idx;
+    return 1 + realGroupNames.length; // "Без группы" — всегда последними
+  }
+
+  // Формирование списка чатов: Общий чат — всегда первым, дальше избранные
+  // (по свежести), затем реальные группы (настроены в панели супер-админа),
+  // внутри каждой — тоже по свежести.
   const chats = [
-    { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection },
+    { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
     ...allUsers.map(u => {
       const commentData = comments[u.id];
       const displayName = commentData?.comment ? `${commentData.username} (${commentData.comment})` : u.username;
 
-      // Если сам залогинен как админ МИРАС — переписка с сотрудником должна
-      // использовать ту же схему id, что и сообщения, пришедшие из панели
-      // МИРАС (miras_admin_<свой login>_<id сотрудника>), иначе это два
-      // никак не связанных треда и переписка "теряется" для другой стороны.
       return {
-        id: u.source === 'miras'
-          ? `${ADMIN_CHAT_PREFIX}${u.mirasLogin}_${currentUserId}`
-          : isAdmin
-            ? `${ADMIN_CHAT_PREFIX}${currentUsername}_${u.id}`
-            : getChatId(u.id),
+        id: getChatId(u.id),
         name: displayName,
-        section: (u.source === 'miras' ? 'admin' : 'staff') as ChatSection,
-        deletable: u.source === 'local',
-        online: u.source === 'local' ? onlineUsers.includes(u.id) : true,
+        section: 'staff' as ChatSection,
+        groupLabel: u.groupName || 'Без группы',
+        deletable: true,
+        online: onlineUsers.includes(u.id),
         userId: u.id,
       };
     })
   ]
     .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    // Сначала избранные (тоже по свежести), потом остальные — все по времени
-    // последнего сообщения, без привязки к разделу (админ/сотрудник).
     .sort((a, b) => {
-      const aFav = favorites.includes(a.id) ? 1 : 0;
-      const bFav = favorites.includes(b.id) ? 1 : 0;
-      if (aFav !== bFav) return bFav - aFav;
+      const rankDiff = groupRank(a) - groupRank(b);
+      if (rankDiff !== 0) return rankDiff;
       const aTime = lastMessages[a.id] ? new Date(lastMessages[a.id].created_at).getTime() : 0;
       const bTime = lastMessages[b.id] ? new Date(lastMessages[b.id].created_at).getTime() : 0;
       return bTime - aTime;
-    });
+    })
+    // Избранным — свой ярлык раздела, чтобы не путался с их реальной группой.
+    .map(c => ({ ...c, groupLabel: c.section !== 'general' && favorites.includes(c.id) ? 'Избранное' : c.groupLabel }));
 
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
 
@@ -609,15 +601,6 @@ const Chat: React.FC = () => {
   const activeChatMeta: { name: string; section: ChatSection; online?: boolean } | null = (() => {
     if (!activeChat) return null;
     if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
-    const parsed = parseAdminChatId(activeChat);
-    if (parsed) {
-      // Сам являюсь админом — собеседник тут сотрудник (id уже зашит в chatId), а не я сам.
-      if (isAdmin) {
-        const employee = users.find(u => u.id === Number(parsed.employeeId));
-        return employee ? { name: employee.username, section: 'staff', online: onlineUsers.includes(employee.id) } : null;
-      }
-      return { name: parsed.login, section: 'admin', online: true };
-    }
     const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
     return user ? { name: user.username, section: 'staff', online: onlineUsers.includes(user.id) } : null;
   })();
@@ -638,14 +621,11 @@ const Chat: React.FC = () => {
         onUpdateComment={updateComment}
         comments={comments}
         onMarkAllRead={handleMarkAllRead}
-        isAdmin={isAdmin}
-        onDeleteUser={handleDeleteUser}
       />
       <main className="conversation">
         {view === 'settings' ? (
           <SettingsPanel
             username={currentUsername}
-            isMirasAccount={isAdmin}
             onClose={() => setView('conversation')}
             onOpenProfile={() => setView('profile')}
             onDeleteAccount={handleDeleteSelf}

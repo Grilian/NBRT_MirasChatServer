@@ -3,6 +3,13 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 
 export const isNativeMobile = Capacitor.isNativePlatform();
 
+// Канал уведомлений с повышенной важностью (importance: 5) — без него Android
+// кладёт уведомление молча в шторку, не показывая всплывающий баннер (heads-up).
+// Важность канала нельзя поменять постфактум для уже созданного id, поэтому
+// используем новый id, а не переиспользуем канал по умолчанию плагина
+// (тот был создан с обычной важностью ещё на предыдущих установках).
+const MESSAGE_CHANNEL_ID = 'messages_v2';
+
 // Веб-уведомления (Notification API) внутри Android WebView не долетают до
 // системного трея — нужен нативный мост через Capacitor. На вебе/десктопе
 // эта функция ничего не делает, там продолжает работать обычный Notification.
@@ -13,6 +20,14 @@ export async function ensureMobileNotificationPermission() {
     if (display !== 'granted') {
       await LocalNotifications.requestPermissions();
     }
+    await LocalNotifications.createChannel({
+      id: MESSAGE_CHANNEL_ID,
+      name: 'Сообщения',
+      description: 'Новые сообщения в чате',
+      importance: 5,
+      visibility: 1,
+      vibration: true,
+    });
   } catch (e) {
     console.error('Ошибка запроса разрешения на уведомления:', e);
   }
@@ -36,6 +51,7 @@ export async function showMobileNotification(messageId: number, title: string, b
           title,
           body,
           smallIcon: 'ic_launcher_foreground',
+          channelId: MESSAGE_CHANNEL_ID,
           extra: { chatId }
         }
       ]
