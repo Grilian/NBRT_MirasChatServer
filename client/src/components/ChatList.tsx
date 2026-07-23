@@ -40,12 +40,6 @@ interface ChatListProps {
   onMarkAllRead: () => void;
 }
 
-const SECTION_LABELS: Record<ChatSection, string | null> = {
-  general: null,
-  admin: 'Администрация',
-  staff: 'Сотрудники',
-};
-
 function renderAvatar(chat: Chat) {
   if (chat.section === 'general') {
     return (
@@ -81,7 +75,6 @@ const ChatList: React.FC<ChatListProps> = ({
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
   const filtered = chats.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  let lastSection: ChatSection | null = null;
 
   return (
     <aside className="roster">
@@ -120,15 +113,12 @@ const ChatList: React.FC<ChatListProps> = ({
       <div className="roster-list">
         {filtered.length === 0 && <div className="roster-empty">Ничего не найдено</div>}
         {filtered.map((chat) => {
-          const showLabel = chat.section !== lastSection && SECTION_LABELS[chat.section];
-          lastSection = chat.section;
           const last = lastMessages[chat.id];
           const unreadCount = unreadCounts[chat.id] || 0;
           const isFavorite = favorites.includes(chat.id);
 
           return (
             <React.Fragment key={chat.id}>
-              {showLabel && <div className="roster-section">{SECTION_LABELS[chat.section]}</div>}
               <div
                 tabIndex={0}
                 role="button"

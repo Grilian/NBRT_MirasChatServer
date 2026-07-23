@@ -57,6 +57,18 @@ try {
   // Колонка уже есть
 }
 
+// Миграция: редактирование/удаление сообщений
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN edited_at DATETIME`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN deleted INTEGER DEFAULT 0`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 // Индексы
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);

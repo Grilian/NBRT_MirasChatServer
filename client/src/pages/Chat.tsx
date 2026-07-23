@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { App as CapApp } from '@capacitor/app';
 import ChatList, { ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
 import MessageInput from '../components/MessageInput';
@@ -7,7 +8,13 @@ import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import api from '../api/client';
 import { colorForName, initialsForName } from '../utils/avatar';
-import { ensureMobileNotificationPermission, showMobileNotification, isNativeMobile } from '../utils/mobileNotify';
+import {
+  ensureMobileNotificationPermission,
+  showMobileNotification,
+  isNativeMobile,
+  dismissMobileNotifications,
+  dismissAllMobileNotifications
+} from '../utils/mobileNotify';
 
 interface User { id: number; username: string; }
 interface MirasAdmin { id: number; login: string; role: string; zone_id: number | null; }
@@ -19,6 +26,8 @@ interface Message {
   username: string;
   created_at: string;
   status?: 'sent' | 'delivered' | 'read';
+  edited_at?: string | null;
+  deleted?: boolean | number;
 }
 interface LastMessage {
   chat_id: string;
@@ -90,6 +99,21 @@ const Chat: React.FC = () => {
     const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
     window.electronAPI?.setUnreadBadge(totalUnread > 0);
   }, [unreadCounts]);
+
+  // Аппаратная кнопка "назад" на Android — по умолчанию сразу закрывала бы
+  // приложение (нет истории браузера). Идём по своему стеку экранов:
+  // профиль -> настройки -> переписка -> список чатов, и только с самого
+  // списка сворачиваем приложение, а не убиваем процесс.
+  useEffect(() => {
+    if (!isNativeMobile) return;
+    const listenerPromise = CapApp.addListener('backButton', () => {
+      if (view === 'profile') { setView('settings'); return; }
+      if (view === 'settings') { setView('conversation'); return; }
+      if (mobileView === 'chat') { setMobileView('list'); return; }
+      CapApp.minimizeApp();
+    });
+    return () => { listenerPromise.then((h) => h.remove()); };
+  }, [view, mobileView]);
 
   // Закрытие меню шапки по клику снаружи
   useEffect(() => {
@@ -183,6 +207,19 @@ const Chat: React.FC = () => {
       if (data.status === 'read') {
         api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
       }
+    });
+
+    newSocket.on('message_edited', (data: { id: number; chat_id: string; text: string; edited_at: string }) => {
+      setMessages(prev => prev.map(m => m.id === data.id ? { ...m, text: data.text, edited_at: data.edited_at } : m));
+      setLastMessages(prev => (
+        prev[data.chat_id] && prev[data.chat_id].text !== undefined
+          ? { ...prev, [data.chat_id]: { ...prev[data.chat_id], text: data.text } }
+          : prev
+      ));
+    });
+
+    newSocket.on('message_deleted', (data: { id: number; chat_id: string }) => {
+      setMessages(prev => prev.map(m => m.id === data.id ? { ...m, deleted: true, text: '' } : m));
     });
 
     return () => {
@@ -312,6 +349,7 @@ const Chat: React.FC = () => {
 
     if (unreadIds.length > 0) {
       socket.emit('message_read', { chatId: activeChat, messageIds: unreadIds });
+      dismissMobileNotifications(unreadIds);
     }
   }, [messages, activeChat, socket, currentUserId]);
 
@@ -350,6 +388,7 @@ const Chat: React.FC = () => {
     if (!socket) return;
     socket.emit('mark_all_read');
     setUnreadCounts({});
+    dismissAllMobileNotifications();
   };
 
   // Избранное
@@ -420,6 +459,16 @@ const Chat: React.FC = () => {
     }
   };
 
+  const handleEditMessage = (id: number, text: string) => {
+    if (!socket) return;
+    socket.emit('message_edit', { id, text });
+  };
+
+  const handleDeleteMessage = (id: number) => {
+    if (!socket) return;
+    socket.emit('message_delete', { id });
+  };
+
   const handleTyping = () => {
     if (socket && activeChat) {
       socket.emit('typing', {
@@ -471,10 +520,8 @@ const Chat: React.FC = () => {
     }
   };
 
-  const SECTION_RANK: Record<ChatSection, number> = { general: 0, admin: 1, staff: 2 };
-
-  // Формирование списка чатов: сгруппированы по смыслу (Общий чат / Администрация /
-  // Сотрудники), а внутри своей группы избранные всплывают наверх.
+  // Формирование списка чатов: избранные наверху (по свежести), дальше все
+  // остальные по времени последнего сообщения — без группировки по разделам.
   const chats = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection },
     ...allUsers.map(u => {
@@ -500,11 +547,15 @@ const Chat: React.FC = () => {
     })
   ]
     .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    // Сначала избранные (тоже по свежести), потом остальные — все по времени
+    // последнего сообщения, без привязки к разделу (админ/сотрудник).
     .sort((a, b) => {
-      if (SECTION_RANK[a.section] !== SECTION_RANK[b.section]) return SECTION_RANK[a.section] - SECTION_RANK[b.section];
       const aFav = favorites.includes(a.id) ? 1 : 0;
       const bFav = favorites.includes(b.id) ? 1 : 0;
-      return bFav - aFav;
+      if (aFav !== bFav) return bFav - aFav;
+      const aTime = lastMessages[a.id] ? new Date(lastMessages[a.id].created_at).getTime() : 0;
+      const bTime = lastMessages[b.id] ? new Date(lastMessages[b.id].created_at).getTime() : 0;
+      return bTime - aTime;
     });
 
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
@@ -618,6 +669,8 @@ const Chat: React.FC = () => {
               onScrollTop={loadMoreMessages}
               hasMore={hasMore}
               loadingMore={loadingMore}
+              onEditMessage={handleEditMessage}
+              onDeleteMessage={handleDeleteMessage}
             />
             <MessageInput
               onSend={handleSendMessage}

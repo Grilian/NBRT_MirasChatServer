@@ -38,10 +38,10 @@ router.get('/:chatId', verifyToken, (req, res) => {
     const offset = parseInt(req.query.offset) || 0;
 
     const messages = db.prepare(`
-      SELECT m.id, m.text, m.sender_id, m.created_at, m.status, u.username 
-      FROM messages m 
-      JOIN users u ON m.sender_id = u.id 
-      WHERE m.chat_id = ? 
+      SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username
+      FROM messages m
+      JOIN users u ON m.sender_id = u.id
+      WHERE m.chat_id = ?
       ORDER BY m.created_at DESC
       LIMIT ? OFFSET ?
     `).all(chatId, limit, offset);

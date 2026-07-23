@@ -18,15 +18,21 @@ export async function ensureMobileNotificationPermission() {
   }
 }
 
+// id уведомления должен быть 32-битным целым — берём остаток по модулю,
+// чтобы не переполниться на больших id сообщений. Используем один и тот же
+// маппинг и при показе, и при снятии, иначе прочитанное сообщение не
+// найдёт своё уведомление в трее.
+function toNotificationId(messageId: number) {
+  return messageId % 2147483647;
+}
+
 export async function showMobileNotification(messageId: number, title: string, body: string) {
   if (!isNativeMobile) return;
   try {
     await LocalNotifications.schedule({
       notifications: [
         {
-          // id уведомления должен быть 32-битным целым — берём остаток по модулю,
-          // чтобы не переполниться на больших id сообщений
-          id: messageId % 2147483647,
+          id: toNotificationId(messageId),
           title,
           body,
           smallIcon: 'ic_launcher_foreground'
@@ -35,5 +41,30 @@ export async function showMobileNotification(messageId: number, title: string, b
     });
   } catch (e) {
     console.error('Ошибка показа уведомления:', e);
+  }
+}
+
+// Снимаем уведомление(я) из системного трея при прочтении сообщения в приложении —
+// иначе бейдж на значке и запись в шторке продолжают висеть, хотя сообщение уже прочитано.
+export async function dismissMobileNotifications(messageIds: number[]) {
+  if (!isNativeMobile || messageIds.length === 0) return;
+  try {
+    const targetIds = new Set(messageIds.map(toNotificationId));
+    const { notifications } = await LocalNotifications.getDeliveredNotifications();
+    const toRemove = notifications.filter((n) => targetIds.has(n.id));
+    if (toRemove.length > 0) {
+      await LocalNotifications.removeDeliveredNotifications({ notifications: toRemove });
+    }
+  } catch (e) {
+    console.error('Ошибка снятия уведомлений:', e);
+  }
+}
+
+export async function dismissAllMobileNotifications() {
+  if (!isNativeMobile) return;
+  try {
+    await LocalNotifications.removeAllDeliveredNotifications();
+  } catch (e) {
+    console.error('Ошибка снятия уведомлений:', e);
   }
 }

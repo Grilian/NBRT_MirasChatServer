@@ -159,13 +159,20 @@ app.post('/api/chat/receive', (req, res) => {
   }
 });
 
-function emitToChat(chatId, event, payload) {
+// extraUserId — участник, который может не входить в "фиксированный" список
+// (например, сам админ, когда он написал в miras_admin_<login>_<employeeId>
+// напрямую из MirasChat: комната по chat_id знает только про сотрудника,
+// а не про то, кто сейчас логинится под этим login'ом). Без этого отправитель
+// не получал бы эхо собственного сообщения/правки/удаления.
+function emitToChat(chatId, event, payload, extraUserId) {
   const participants = participantsForChatId(chatId);
   if (participants === null) {
     io.emit(event, payload);
-  } else if (participants.length) {
-    io.to(participants.map((id) => 'user:' + id)).emit(event, payload);
+    return;
   }
+  const rooms = new Set(participants.map((id) => 'user:' + id));
+  if (extraUserId !== undefined && extraUserId !== null) rooms.add('user:' + extraUserId);
+  if (rooms.size) io.to([...rooms]).emit(event, payload);
 }
 
 function broadcastToChat(socket, chatId, event, payload) {
@@ -261,7 +268,7 @@ io.on('connection', (socket) => {
         created_at: new Date().toISOString()
       };
 
-      emitToChat(data.chatId, 'chat_message', message);
+      emitToChat(data.chatId, 'chat_message', message, data.senderId);
 
       // Проверяем, есть ли получатель онлайн
       let recipientOnline = false;
@@ -278,7 +285,7 @@ io.on('connection', (socket) => {
       if (recipientOnline) {
         db.prepare('UPDATE messages SET status = ? WHERE id = ?').run('delivered', result.lastInsertRowid);
         message.status = 'delivered';
-        emitToChat(data.chatId, 'message_status', { id: result.lastInsertRowid, status: 'delivered' });
+        emitToChat(data.chatId, 'message_status', { id: result.lastInsertRowid, status: 'delivered' }, data.senderId);
       }
     } catch (e) {
       console.error('Ошибка:', e);
@@ -368,6 +375,44 @@ io.on('connection', (socket) => {
       }
     } catch (e) {
       console.error('Ошибка при массовой отметке прочитанного:', e);
+    }
+  });
+
+  // Редактировать/удалить можно только своё сообщение — проверяем по
+  // фактическому sender_id в БД, а не по тому, что прислал клиент (в отличие
+  // от chat_message/senderId, здесь это разрушающее действие над чужими данными).
+  socket.on('message_edit', ({ id, text }) => {
+    try {
+      const row = db.prepare('SELECT chat_id, sender_id, deleted FROM messages WHERE id = ?').get(id);
+      if (!row || row.deleted || Number(row.sender_id) !== Number(socket.userId)) return;
+
+      const trimmed = String(text || '').trim();
+      if (!trimmed) return;
+
+      const editedAt = new Date().toISOString();
+      db.prepare('UPDATE messages SET text = ?, edited_at = ? WHERE id = ?').run(trimmed, editedAt, id);
+
+      emitToChat(row.chat_id, 'message_edited', {
+        id,
+        chat_id: row.chat_id,
+        text: trimmed,
+        edited_at: editedAt
+      }, row.sender_id);
+    } catch (e) {
+      console.error('Ошибка редактирования сообщения:', e);
+    }
+  });
+
+  socket.on('message_delete', ({ id }) => {
+    try {
+      const row = db.prepare('SELECT chat_id, sender_id FROM messages WHERE id = ?').get(id);
+      if (!row || Number(row.sender_id) !== Number(socket.userId)) return;
+
+      db.prepare("UPDATE messages SET deleted = 1, text = '' WHERE id = ?").run(id);
+
+      emitToChat(row.chat_id, 'message_deleted', { id, chat_id: row.chat_id }, row.sender_id);
+    } catch (e) {
+      console.error('Ошибка удаления сообщения:', e);
     }
   });
 

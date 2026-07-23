@@ -304,6 +304,25 @@ button, input, textarea { font-family: inherit; }
 .meta-row .ticks { display: inline-flex; }
 .meta-row .ticks.read { color: var(--green); }
 [data-theme="dark"] .meta-row .ticks.read { color: var(--gold-strong); }
+.edited-label { font-style: italic; }
+
+.bubble-deleted { font-style: italic; color: var(--ink-faint); }
+.bubble-editing { padding: 4px; background: none; border: none; box-shadow: none; }
+.bubble-edit-input {
+  width: 100%; min-width: 180px; border: 1px solid var(--gold); background: var(--paper-sunken); color: var(--ink);
+  border-radius: 10px; padding: 8px 11px; font-size: 14px; font-family: inherit;
+}
+
+/* Контекстное меню сообщения — правый клик (десктоп) / долгое нажатие (тач) */
+.msg-context-menu {
+  position: fixed; z-index: 40; background: var(--paper-raised); border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: 0 14px 30px -12px var(--shadow); min-width: 180px; padding: 6px;
+  transform: translate(-8px, 4px);
+}
+.msg-context-menu button { width: 100%; text-align: left; border: none; background: none; padding: 9px 10px; border-radius: 7px; font-size: 13px; color: var(--ink); cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.msg-context-menu button:hover { background: color-mix(in srgb, var(--green) 8%, transparent); }
+.msg-context-menu button.danger { color: var(--unread); }
+.msg-context-menu button.danger:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
 
 .typing-row { align-self: flex-start; margin: 2px 0 10px; }
 .typing-row .bubble { display: flex; align-items: center; gap: 4px; padding: 11px 14px; }
