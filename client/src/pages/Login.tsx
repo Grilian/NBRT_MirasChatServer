@@ -13,6 +13,25 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
 
+  // Админ нажал "Сменить" — старый пароль недействителен, вход по логину
+  // (без проверки пароля) вернул resetToken вместо обычной сессии. Пока он
+  // не пуст, показываем только форму "задайте новый пароль", а не обычный вход.
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+
+  const finishLogin = (data: any) => {
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('userId', data.id);
+    localStorage.setItem('username', data.username);
+    localStorage.setItem('source', data.source || 'local');
+    localStorage.setItem('muted', String(!!data.muted));
+    localStorage.setItem('displayName', data.display_name || data.username);
+    localStorage.setItem('avatarPath', data.avatar_path || '');
+    localStorage.setItem('bio', data.bio || '');
+    localStorage.setItem('phone', data.phone || '');
+    onLogin(data);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -41,22 +60,75 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       if (isRegister) {
         setIsRegister(false);
         alert('Регистрация успешна! Теперь войдите.');
+      } else if (data.mustSetPassword) {
+        setResetToken(data.resetToken);
+        setPassword('');
       } else {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('userId', data.id);
-        localStorage.setItem('username', data.username);
-        localStorage.setItem('source', data.source || 'local');
-        localStorage.setItem('muted', String(!!data.muted));
-        localStorage.setItem('displayName', data.display_name || data.username);
-        localStorage.setItem('avatarPath', data.avatar_path || '');
-        localStorage.setItem('bio', data.bio || '');
-        localStorage.setItem('phone', data.phone || '');
-        onLogin(data);
+        finishLogin(data);
       }
     } catch (err: any) {
       setError(err.response?.data?.error || 'Ошибка');
     }
   };
+
+  const handleCompleteReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!isValidPassword(newPassword)) {
+      setError(`Пароль: ${PASSWORD_HINT}`);
+      return;
+    }
+
+    try {
+      const { data } = await api.post('/auth/complete-reset', { resetToken, newPassword });
+      finishLogin(data);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Ошибка');
+      // Если токен истёк/недействителен — возвращаем на обычный вход, а не
+      // держим человека перед формой, которая больше не сработает.
+      if (err.response?.status === 401) {
+        setResetToken(null);
+      }
+    }
+  };
+
+  if (resetToken) {
+    return (
+      <div className="login-screen">
+        <div className="login-card">
+          <div className="brand-mark">
+            <span className="roundel">M</span>
+            <div className="word">
+              MirasChat
+              <span className="sub">Внутренняя переписка МИРАС</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleCompleteReset}>
+            <p style={{ fontSize: 13.5, color: 'var(--ink-muted)', margin: '0 0 16px' }}>
+              Администратор сбросил ваш пароль. Придумайте новый — у вас есть 15 минут с момента сброса.
+            </p>
+            <div className="field">
+              <label>Новый пароль</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                autoFocus
+              />
+              <div className="field-hint">{PASSWORD_HINT}</div>
+            </div>
+
+            {error && <p className="login-error">{error}</p>}
+
+            <button type="submit" className="btn-primary">Задать пароль и войти</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="login-screen">

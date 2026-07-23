@@ -3,11 +3,23 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
 const verifySuperAdmin = require('../middleware/verifySuperAdmin');
-const { isValidLogin, isReservedLogin, isValidPassword } = require('../utils/validators');
+const { isValidLogin, isReservedLogin, isValidAccountType, PASSWORD_RESET_WINDOW_MS } = require('../utils/validators');
+const { archiveAndDeleteUser } = require('../services/accountArchive');
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key';
 const VALID_ROLES = ['user', 'moderator', 'admin'];
+
+// 'ok' — обычный, рабочий пароль; 'pending' — админ нажал "Сменить", ждём,
+// что человек зайдёт и задаст новый в течение окна; 'expired' — окно прошло,
+// логин заблокирован, пока админ не нажмёт "Сменить" ещё раз.
+// Пустая строка — сентинел "пароль сброшен": колонка password NOT NULL,
+// так что NULL сюда не годится, а bcrypt-хэш никогда не бывает пустым.
+function passwordStatus(user) {
+  if (user.password !== '') return 'ok';
+  if (!user.password_reset_requested_at) return 'ok';
+  return (Date.now() - user.password_reset_requested_at) <= PASSWORD_RESET_WINDOW_MS ? 'pending' : 'expired';
+}
 
 // Простой rate-limit на логин супер-админа — панель публично доступна из браузера,
 // та же логика, что и у /api/admin/login на МИРАСе (5 попыток / 10 минут на IP).
@@ -131,17 +143,23 @@ router.delete('/groups/:id', verifySuperAdmin, (req, res) => {
 router.get('/users', verifySuperAdmin, (req, res) => {
   try {
     const users = db.prepare(`
-      SELECT u.id, u.username, u.group_id, u.role, u.muted, g.name AS group_name
+      SELECT u.id, u.username, u.display_name, u.group_id, u.role, u.muted, u.account_type,
+             u.password, u.password_reset_requested_at, g.name AS group_name
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
       ORDER BY u.username
     `).all();
 
     res.json(users.map((u) => ({
-      ...u,
+      id: u.id,
+      username: u.username,
+      display_name: u.display_name,
+      group_id: u.group_id,
+      group_name: u.group_name,
+      role: u.role || null,
       muted: !!u.muted,
-      role: u.role || 'user',
-      isMirror: u.username.startsWith('miras_')
+      account_type: u.account_type || 'staff',
+      password_status: passwordStatus(u),
     })));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -170,14 +188,6 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
       params.push(nextUsername);
     }
 
-    if (req.body.password) {
-      const pw = String(req.body.password);
-      if (!isValidPassword(pw)) return res.status(400).json({ error: 'Пароль: не короче 5 символов и без кириллицы' });
-
-      updates.push('password = ?');
-      params.push(bcrypt.hashSync(pw, 10));
-    }
-
     if (req.body.group_id !== undefined) {
       const groupId = req.body.group_id === null ? null : Number(req.body.group_id);
       if (groupId !== null) {
@@ -189,10 +199,17 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
     }
 
     if (req.body.role !== undefined) {
-      const role = String(req.body.role);
-      if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Некорректная роль' });
+      const role = req.body.role ? String(req.body.role) : null;
+      if (role !== null && !VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Некорректная роль' });
       updates.push('role = ?');
       params.push(role);
+    }
+
+    if (req.body.account_type !== undefined) {
+      const accountType = String(req.body.account_type);
+      if (!isValidAccountType(accountType)) return res.status(400).json({ error: 'Некорректный тип аккаунта' });
+      updates.push('account_type = ?');
+      params.push(accountType);
     }
 
     if (req.body.muted !== undefined) {
@@ -206,7 +223,8 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
     }
 
     const updated = db.prepare(`
-      SELECT u.id, u.username, u.group_id, u.role, u.muted, g.name AS group_name
+      SELECT u.id, u.username, u.display_name, u.group_id, u.role, u.muted, u.account_type,
+             u.password, u.password_reset_requested_at, g.name AS group_name
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
       WHERE u.id = ?
@@ -223,9 +241,52 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
       });
     }
 
-    res.json({ ...updated, muted: !!updated.muted });
+    res.json({
+      id: updated.id,
+      username: updated.username,
+      display_name: updated.display_name,
+      group_id: updated.group_id,
+      group_name: updated.group_name,
+      role: updated.role || null,
+      muted: !!updated.muted,
+      account_type: updated.account_type || 'staff',
+      password_status: passwordStatus(updated),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// "Сменить" пароль — полностью инвалидирует старый пароль (не даёт админу
+// ввести новый за пользователя). У человека есть PASSWORD_RESET_WINDOW_MS на
+// то, чтобы зайти под своим логином и задать новый пароль самостоятельно —
+// см. /api/auth/login и /api/auth/complete-reset.
+router.post('/users/:id/reset-password', verifySuperAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = db.prepare("UPDATE users SET password = '', password_reset_requested_at = ? WHERE id = ?")
+      .run(Date.now(), id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    res.json({ password_status: 'pending' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Полное удаление аккаунта вместе с историей переписки (архивируется на диск
+// перед удалением). В отличие от самостоятельного удаления, тут разрешено
+// удалять и служебные miras_-зеркала — ради тестирования и очистки этих
+// оставшихся с интеграции МИРАС записей.
+router.post('/users/:id/delete', verifySuperAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = archiveAndDeleteUser(id, { allowMirror: true });
+    if (!result) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    res.json({ ok: true, backupFile: result.backupFile });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 

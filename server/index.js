@@ -19,6 +19,10 @@ const { participantsForChatId, isParticipant } = require('./services/chatPartici
 
 const db = require('./db');
 
+// Группы, кому можно писать даже в режиме тишины — обращение к администрации
+// напрямую, а не рассылка (general всё равно остаётся заблокирован).
+const MUTE_EXEMPT_GROUPS = ['Администрация', 'Админы'];
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -116,8 +120,23 @@ io.on('connection', (socket) => {
     // могли показать, кто написал (клиент брал его из payload, которого не было).
     const senderRow = db.prepare('SELECT username, display_name, muted FROM users WHERE id = ?').get(senderId);
     if (senderRow && senderRow.muted) {
-      socket.emit('message_blocked', { reason: 'muted', chatId: data.chatId });
-      return;
+      // Исключение: даже в режиме тишины можно писать конкретным людям из
+      // групп "Администрация"/"Админы" — это не про рассылку (general
+      // остаётся заблокирован), а про обращение к администрации напрямую.
+      let muteExempt = false;
+      const participants = participantsForChatId(data.chatId);
+      if (participants && participants.length === 2) {
+        const otherId = participants.find((pid) => pid !== senderId);
+        const otherGroup = db.prepare(
+          'SELECT g.name FROM users u LEFT JOIN groups g ON g.id = u.group_id WHERE u.id = ?'
+        ).get(otherId);
+        muteExempt = !!(otherGroup && MUTE_EXEMPT_GROUPS.includes(otherGroup.name));
+      }
+
+      if (!muteExempt) {
+        socket.emit('message_blocked', { reason: 'muted', chatId: data.chatId });
+        return;
+      }
     }
 
     try {

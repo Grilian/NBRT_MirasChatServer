@@ -7,20 +7,36 @@ interface Group {
   member_count: number;
 }
 
+type AccountType = 'staff' | 'internet' | 'miras';
+type PasswordStatus = 'ok' | 'pending' | 'expired';
+
 interface UserRow {
   id: number;
   username: string;
+  display_name: string | null;
   group_id: number | null;
   group_name: string | null;
-  role: 'user' | 'moderator' | 'admin';
+  role: 'user' | 'moderator' | 'admin' | null;
   muted: boolean;
-  isMirror: boolean;
+  account_type: AccountType;
+  password_status: PasswordStatus;
 }
 
-const ROLE_LABELS: Record<UserRow['role'], string> = {
+const ROLE_LABELS: Record<string, string> = {
   user: 'Сотрудник',
   moderator: 'Модератор',
   admin: 'Администратор',
+};
+
+const TYPE_LABELS: Record<AccountType, string> = {
+  staff: 'Сотрудник',
+  internet: 'Интернет',
+  miras: 'Мирас',
+};
+
+const PASSWORD_STATUS_LABELS: Record<Exclude<PasswordStatus, 'ok'>, string> = {
+  pending: 'Ждёт нового пароля',
+  expired: 'Недействителен',
 };
 
 function SuperAdminLogin({ onLogin }: { onLogin: (token: string) => void }) {
@@ -168,8 +184,6 @@ function GroupsPanel({ groups, onChanged }: { groups: Group[]; onChanged: () => 
 function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Group[]; onChanged: () => void }) {
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [passwordForId, setPasswordForId] = useState<number | null>(null);
-  const [passwordValue, setPasswordValue] = useState('');
   const [error, setError] = useState('');
 
   const update = async (id: number, patch: Record<string, unknown>) => {
@@ -194,13 +208,26 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
     await update(id, { username: name });
   };
 
-  const savePassword = async (id: number) => {
-    const pw = passwordValue.trim();
-    setPasswordForId(null);
-    setPasswordValue('');
-    if (!pw) return;
-    if (pw.length < 6) { setError('Пароль должен быть не короче 6 символов'); return; }
-    await update(id, { password: pw });
+  const resetPassword = async (u: UserRow) => {
+    if (!window.confirm(`Сбросить пароль для «${u.display_name || u.username}»? Старый пароль сразу перестанет действовать.`)) return;
+    try {
+      await superAdminApi.post(`/superadmin/users/${u.id}/reset-password`);
+      setError('');
+      onChanged();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось сбросить пароль');
+    }
+  };
+
+  const deleteUser = async (u: UserRow) => {
+    if (!window.confirm(`Полностью удалить «${u.display_name || u.username}» вместе со всей перепиской? Переписка перед этим архивируется на диск сервера, но из приложения аккаунт исчезнет безвозвратно.`)) return;
+    try {
+      await superAdminApi.post(`/superadmin/users/${u.id}/delete`);
+      setError('');
+      onChanged();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось удалить аккаунт');
+    }
   };
 
   return (
@@ -210,12 +237,13 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
       <table className="sa-table">
         <thead>
           <tr>
-            <th>Имя</th>
+            <th>Имя (Логин)</th>
             <th>Тип</th>
             <th>Группа</th>
             <th>Роль</th>
             <th>Тишина</th>
             <th>Пароль</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -231,11 +259,18 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
                     onBlur={() => saveRename(u.id)}
                   />
                 ) : (
-                  <span className="sa-link" onClick={() => startRename(u)}>{u.username}</span>
+                  <span className="sa-link" onClick={() => startRename(u)}>
+                    {u.display_name || u.username} ({u.username})
+                    {u.account_type === 'staff' && <span className="sa-verified-badge" title="Подтверждённая учётная запись">✓</span>}
+                  </span>
                 )}
               </td>
               <td>
-                {u.isMirror ? <span className="badge-admin">Зеркало МИРАС</span> : 'Сотрудник'}
+                <select value={u.account_type} onChange={(e) => update(u.id, { account_type: e.target.value })}>
+                  {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </td>
               <td>
                 <select
@@ -247,7 +282,8 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
                 </select>
               </td>
               <td>
-                <select value={u.role} onChange={(e) => update(u.id, { role: e.target.value })}>
+                <select value={u.role ?? ''} onChange={(e) => update(u.id, { role: e.target.value || null })}>
+                  <option value="">— не назначена —</option>
                   {Object.entries(ROLE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
@@ -260,21 +296,15 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
                 </label>
               </td>
               <td>
-                {passwordForId === u.id ? (
-                  <input
-                    autoFocus
-                    type="password"
-                    placeholder="Новый пароль"
-                    value={passwordValue}
-                    onChange={(e) => setPasswordValue(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') savePassword(u.id); if (e.key === 'Escape') setPasswordForId(null); }}
-                    onBlur={() => savePassword(u.id)}
-                  />
-                ) : (
-                  <button type="button" className="sa-btn-ghost" onClick={() => { setPasswordForId(u.id); setPasswordValue(''); }}>
-                    Сменить
-                  </button>
+                <button type="button" className="sa-btn-ghost" onClick={() => resetPassword(u)}>Сменить</button>
+                {u.password_status !== 'ok' && (
+                  <span className={'sa-password-status' + (u.password_status === 'expired' ? ' is-expired' : '')}>
+                    {PASSWORD_STATUS_LABELS[u.password_status]}
+                  </span>
                 )}
+              </td>
+              <td>
+                <button type="button" className="sa-btn-danger" onClick={() => deleteUser(u)}>Удалить</button>
               </td>
             </tr>
           ))}

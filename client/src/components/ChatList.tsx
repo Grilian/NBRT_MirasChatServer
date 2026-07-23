@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Avatar from './Avatar';
+import { formatMoscowTime } from '../utils/time';
 
 export type ChatSection = 'general' | 'staff';
 
@@ -41,16 +42,28 @@ interface ChatListProps {
   comments: Record<number, Comment>;
   onMarkAllRead: () => void;
   onRemoveContact: (userId: number) => void;
+  onOpenUserInfo: (userId: number) => void;
 }
 
-function renderAvatar(chat: Chat) {
-  return <Avatar name={chat.name} avatarPath={chat.avatarPath} online={chat.online} isGeneral={chat.section === 'general'} />;
+function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void) {
+  const avatar = <Avatar name={chat.name} avatarPath={chat.avatarPath} online={chat.online} isGeneral={chat.section === 'general'} />;
+  if (!chat.userId) return avatar;
+  return (
+    <button
+      type="button"
+      className="row-avatar-btn"
+      onClick={(e) => { e.stopPropagation(); onOpenUserInfo(chat.userId!); }}
+      aria-label="Профиль"
+    >
+      {avatar}
+    </button>
+  );
 }
 
 const ChatList: React.FC<ChatListProps> = ({
   username, avatarPath, chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
-  onMarkAllRead, onRemoveContact
+  onMarkAllRead, onRemoveContact, onOpenUserInfo
 }) => {
   const [editingComment, setEditingComment] = useState<number | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -124,7 +137,7 @@ const ChatList: React.FC<ChatListProps> = ({
                 onClick={() => onSelectChat(chat.id)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChat(chat.id); } }}
               >
-                {renderAvatar(chat)}
+                {renderAvatar(chat, onOpenUserInfo)}
                 <div className="row-body">
                   <div className="row-top">
                     <div className="row-name">
@@ -132,7 +145,7 @@ const ChatList: React.FC<ChatListProps> = ({
                     </div>
                     {last && (
                       <div className="row-time">
-                        {new Date(last.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                        {formatMoscowTime(last.created_at)}
                       </div>
                     )}
                   </div>

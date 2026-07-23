@@ -6,6 +6,8 @@ const multer = require('multer');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { isValidLogin, isReservedLogin, isValidPassword, isValidDisplayName, isValidPhone, isValidBio } = require('../utils/validators');
+const { deleteAvatarFile } = require('../utils/files');
+const { archiveAndDeleteUser } = require('../services/accountArchive');
 const router = express.Router();
 
 const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
@@ -21,63 +23,6 @@ const avatarUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => cb(null, !!AVATAR_MIME_EXT[file.mimetype]),
 });
-
-// Удаляем файл аватара с диска — best-effort, отсутствие файла не ошибка.
-function deleteAvatarFile(avatarPath) {
-  if (!avatarPath) return;
-  const abs = path.join(__dirname, '..', avatarPath.replace(/^\//, ''));
-  fs.unlink(abs, () => {});
-}
-
-// Полное удаление локального аккаунта: сообщения, избранное, комментарии,
-// сама учётная запись.
-function deleteLocalUserById(id) {
-  const user = db.prepare('SELECT id, username, avatar_path FROM users WHERE id = ?').get(id);
-
-  if (!user) {
-    return null;
-  }
-
-  if (user.username.startsWith('miras_')) {
-    throw new Error('Нельзя удалить служебную учётную запись');
-  }
-
-  const tx = db.transaction(() => {
-    // "sender_id = id" ловит только сообщения, которые отправил сам
-    // пользователь — но в тредах "1 на 1" с админом или другим сотрудником
-    // собеседник тоже писал туда со своим sender_id. Такие треды целиком
-    // принадлежат этому пользователю (в отличие от "general", это общий
-    // канал на всех, его не трогаем), поэтому чистим их по chat_id целиком.
-    const idStr = String(id);
-
-    const relatedChatIds = db.prepare('SELECT DISTINCT chat_id FROM messages')
-      .all()
-      .map(row => row.chat_id)
-      .filter(chatId => {
-        if (chatId.startsWith('miras_admin_')) {
-          return chatId.endsWith('_' + idStr);
-        }
-        const match = chatId.match(/^chat_(\d+)_(\d+)$/);
-        return !!match && (match[1] === idStr || match[2] === idStr);
-      });
-
-    if (relatedChatIds.length) {
-      const placeholders = relatedChatIds.map(() => '?').join(',');
-      db.prepare(`DELETE FROM messages WHERE chat_id IN (${placeholders})`).run(...relatedChatIds);
-    }
-
-    db.prepare('DELETE FROM messages WHERE sender_id = ?').run(id);
-    db.prepare('DELETE FROM favorites WHERE user_id = ?').run(id);
-    db.prepare('DELETE FROM user_comments WHERE user_id = ? OR target_user_id = ?').run(id, id);
-    db.prepare('DELETE FROM contacts WHERE user_id = ? OR contact_user_id = ?').run(id, id);
-    db.prepare('DELETE FROM users WHERE id = ?').run(id);
-  });
-
-  tx();
-  deleteAvatarFile(user.avatar_path);
-
-  return user;
-}
 
 // Получить всех пользователей (кроме текущего).
 // miras_* — служебные зеркала админов МИРАС для маршрутизации сообщений,
@@ -228,9 +173,9 @@ router.delete('/me/avatar', verifyToken, (req, res) => {
 // Удалить свой собственный аккаунт
 router.delete('/me', verifyToken, (req, res) => {
   try {
-    const user = deleteLocalUserById(req.userId);
+    const result = archiveAndDeleteUser(req.userId, { allowMirror: false });
 
-    if (!user) {
+    if (!result) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 

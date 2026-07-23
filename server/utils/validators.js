@@ -32,6 +32,18 @@ function isValidBio(bio) {
   return typeof bio === 'string' && bio.length <= 160;
 }
 
+// Тип учётной записи. 'miras' — легаси зеркала МИРАС (интеграция убрана, но
+// записи в базе могли остаться), новые аккаунты через неё больше не создаются.
+const ACCOUNT_TYPES = ['staff', 'internet', 'miras'];
+
+function isValidAccountType(type) {
+  return ACCOUNT_TYPES.includes(type);
+}
+
+// Окно самостоятельной установки нового пароля после того, как админ нажал
+// "Сменить" — по истечении админу нужно нажимать "Сменить" заново.
+const PASSWORD_RESET_WINDOW_MS = 15 * 60 * 1000;
+
 module.exports = {
   isValidLogin,
   isReservedLogin,
@@ -39,4 +51,7 @@ module.exports = {
   isValidDisplayName,
   isValidPhone,
   isValidBio,
+  ACCOUNT_TYPES,
+  isValidAccountType,
+  PASSWORD_RESET_WINDOW_MS,
 };

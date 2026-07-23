@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { nameFor } from '../utils/user';
+import { formatMoscowTime } from '../utils/time';
 
 interface Message {
   id: number;
@@ -200,7 +201,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             )}
             <div className="meta-row">
               {msg.edited_at && !isDeleted && <span className="edited-label">изменено</span>}
-              <span>{new Date(msg.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
+              <span>{formatMoscowTime(msg.created_at)}</span>
               {mine && <TickIcon status={msg.status || 'sent'} />}
             </div>
           </div>

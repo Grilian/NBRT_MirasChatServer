@@ -139,6 +139,27 @@ try {
 // туда, где отображаемое имя ещё не задано.
 db.prepare(`UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''`).run();
 
+// Миграция: Тип учётной записи (Сотрудник/Интернет/Мирас) — раньше это был
+// вычисляемый на лету признак (префикс miras_ в логине), теперь реальное
+// редактируемое поле. account_type по умолчанию 'staff' — этого достаточно
+// для всех строк, кроме зеркал МИРАС, их бэкфилим отдельно.
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN account_type TEXT DEFAULT 'staff'`);
+} catch (e) {
+  // Колонка уже есть
+}
+db.prepare(`UPDATE users SET account_type = 'miras' WHERE username LIKE 'miras\\_%' ESCAPE '\\'`).run();
+
+// Миграция: сброс пароля супер-админом ("Сменить") — храним момент сброса в
+// unix-миллисекундах, а не SQL DATETIME. У SQLite CURRENT_TIMESTAMP нет
+// таймзоны в строке, и разбор такой строки в JS на клиенте/сервере — источник
+// той же путаницы, что и с временем сообщений; unix-время такой проблемы не имеет.
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN password_reset_requested_at INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 // Сиды: стартовые группы + единственный супер-админ панели управления.
 // Пароль генерируется один раз при первом запуске (если не задан через env)
 // и больше нигде не хранится в открытом виде — только его bcrypt-хэш в БД.

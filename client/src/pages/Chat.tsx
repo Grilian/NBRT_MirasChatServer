@@ -7,6 +7,7 @@ import MessageInput from '../components/MessageInput';
 import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
+import UserInfoModal from '../components/UserInfoModal';
 import Avatar from '../components/Avatar';
 import api from '../api/client';
 import { nameFor } from '../utils/user';
@@ -24,6 +25,8 @@ interface User {
   username: string;
   display_name: string | null;
   avatar_path: string | null;
+  bio: string | null;
+  phone: string | null;
   group_id: number | null;
   group_name: string | null;
 }
@@ -49,6 +52,8 @@ interface AllUser {
   username: string;
   display_name: string | null;
   avatarPath: string | null;
+  bio: string | null;
+  phone: string | null;
   source: 'local';
   groupName?: string | null;
 }
@@ -73,6 +78,7 @@ const Chat: React.FC = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [view, setView] = useState<'conversation' | 'settings' | 'profile'>('conversation');
   const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -489,6 +495,8 @@ const Chat: React.FC = () => {
     username: u.username,
     display_name: u.display_name,
     avatarPath: u.avatar_path,
+    bio: u.bio,
+    phone: u.phone,
     source: 'local' as const,
     groupName: u.group_name,
   }));
@@ -529,7 +537,7 @@ const Chat: React.FC = () => {
   // сразу (без ожидания первого сообщения); у собеседника — только когда
   // сообщение реально отправлено (см. серверную автоподписку).
   const handleStartChat = async (user: { id: number; username: string; display_name: string | null; avatar_path: string | null; group_id: number | null; group_name: string | null }) => {
-    setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, user]);
+    setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, { ...user, bio: null, phone: null }]);
     setDirectoryOpen(false);
     setActiveChat(getChatId(user.id));
     setMobileView('chat');
@@ -662,12 +670,14 @@ const Chat: React.FC = () => {
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
 
   // Данные для шапки переписки — независимо от текущего поискового фильтра списка
-  const activeChatMeta: { name: string; section: ChatSection; online?: boolean; avatarPath?: string | null } | null = (() => {
+  const activeChatMeta: { name: string; section: ChatSection; online?: boolean; avatarPath?: string | null; userId?: number } | null = (() => {
     if (!activeChat) return null;
     if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
     const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
-    return user ? { name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id), avatarPath: user.avatarPath } : null;
+    return user ? { name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id), avatarPath: user.avatarPath, userId: user.id } : null;
   })();
+
+  const infoModalUser = infoModalUserId ? allUsers.find(u => u.id === infoModalUserId) : null;
 
   return (
     <div className={'chat-layout' + (mobileView === 'chat' ? ' is-conversation-view' : '')}>
@@ -688,12 +698,33 @@ const Chat: React.FC = () => {
         comments={comments}
         onMarkAllRead={handleMarkAllRead}
         onRemoveContact={handleRemoveContact}
+        onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
       />
       {directoryOpen && (
         <DirectoryModal
           existingContactIds={users.map(u => u.id)}
           onClose={() => setDirectoryOpen(false)}
           onSelectUser={handleStartChat}
+        />
+      )}
+      {infoModalUser && (
+        <UserInfoModal
+          user={{
+            id: infoModalUser.id,
+            username: infoModalUser.username,
+            display_name: infoModalUser.display_name,
+            avatarPath: infoModalUser.avatarPath,
+            groupName: infoModalUser.groupName,
+            bio: infoModalUser.bio,
+            phone: infoModalUser.phone,
+          }}
+          online={onlineUsers.includes(infoModalUser.id)}
+          onClose={() => setInfoModalUserId(null)}
+          onMessage={() => {
+            setActiveChat(getChatId(infoModalUser.id));
+            setMobileView('chat');
+            setInfoModalUserId(null);
+          }}
         />
       )}
       <main className="conversation">
@@ -724,7 +755,12 @@ const Chat: React.FC = () => {
               </button>
 
               {activeChatMeta ? (
-                <>
+                <button
+                  type="button"
+                  className="conv-head-identity"
+                  onClick={() => activeChatMeta.userId && setInfoModalUserId(activeChatMeta.userId)}
+                  disabled={!activeChatMeta.userId}
+                >
                   <Avatar
                     name={activeChatMeta.name}
                     avatarPath={activeChatMeta.avatarPath}
@@ -737,7 +773,7 @@ const Chat: React.FC = () => {
                       {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
                     </div>
                   </div>
-                </>
+                </button>
               ) : (
                 <div className="conv-title"><div className="name">Выберите чат</div></div>
               )}
