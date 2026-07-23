@@ -40,8 +40,6 @@ const io = new Server(server, {
     origin: '*'
   }
 });
-app.set('io', io);
-
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // ===== Настройки интеграции с МИРАС =====

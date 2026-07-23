@@ -13,7 +13,8 @@ import {
   showMobileNotification,
   isNativeMobile,
   dismissMobileNotifications,
-  dismissAllMobileNotifications
+  dismissAllMobileNotifications,
+  onMobileNotificationTap
 } from '../utils/mobileNotify';
 
 interface User { id: number; username: string; }
@@ -357,7 +358,7 @@ const Chat: React.FC = () => {
   // добирается до системного трея — там нужен нативный мост через Capacitor.
   const showNotification = (message: Message, chatName: string) => {
     if (isNativeMobile) {
-      showMobileNotification(message.id, `MirasChat — ${chatName}`, message.text);
+      showMobileNotification(message.id, `MirasChat — ${chatName}`, message.text, message.chat_id || '');
       if (socket) socket.emit('message_delivered', message.id);
       return;
     }
@@ -373,6 +374,16 @@ const Chat: React.FC = () => {
         if (socket) {
           socket.emit('message_delivered', message.id);
         }
+      };
+
+      // Клик по всплывающему уведомлению — открыть нужный чат и вернуть
+      // окно на передний план (на десктопе окно может быть свёрнуто в трей,
+      // одного window.focus() из рендерера для этого недостаточно).
+      notification.onclick = () => {
+        window.electronAPI?.focusWindow?.();
+        window.focus();
+        if (message.chat_id) handleSelectChat(message.chat_id);
+        notification.close();
       };
     }
   };
@@ -446,6 +457,18 @@ const Chat: React.FC = () => {
     }
     setMobileView('chat');
   };
+
+  // Тап по системному уведомлению на Android — открыть тот же чат, откуда
+  // пришло сообщение. handleSelectChat пересоздаётся на каждый рендер, поэтому
+  // держим актуальную версию в ref и подписываемся на нативное событие один раз.
+  const handleSelectChatRef = useRef(handleSelectChat);
+  handleSelectChatRef.current = handleSelectChat;
+
+  useEffect(() => {
+    return onMobileNotificationTap((chatId) => {
+      handleSelectChatRef.current(chatId);
+    });
+  }, []);
 
   const handleSendMessage = (text: string) => {
     if (socket && activeChat) {

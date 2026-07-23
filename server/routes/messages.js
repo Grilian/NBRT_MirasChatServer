@@ -59,27 +59,4 @@ router.get('/:chatId', verifyToken, (req, res) => {
   }
 });
 
-// Отправить сообщение (REST)
-router.post('/', verifyToken, (req, res) => {
-  try {
-    const { chat_id, text } = req.body;
-    const sender_id = req.userId;
-
-    const stmt = db.prepare('INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, ?)');
-    const result = stmt.run(chat_id, sender_id, text, 'sent');
-
-    const io = req.app.get('io');
-    io.emit('chat_message', {
-      id: result.lastInsertRowid,
-      chat_id, sender_id, text,
-      status: 'sent',
-      created_at: new Date().toISOString()
-    });
-
-    res.json({ id: result.lastInsertRowid, chat_id, sender_id, text, status: 'sent' });
-  } catch (e) { 
-    res.status(500).json({ error: e.message }); 
-  }
-});
-
 module.exports = router;

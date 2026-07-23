@@ -226,3 +226,12 @@ ipcMain.on('window:maximize-toggle', () => {
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
 ipcMain.on('unread:set', (event, hasUnread) => setUnreadBadge(!!hasUnread));
+
+// Клик по всплывающему уведомлению — окно может быть свёрнуто в трей
+// (mainWindow.hide()), обычного window.focus() из рендерера для этого мало.
+ipcMain.on('window:focus', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});

@@ -12,6 +12,7 @@ declare global {
       getAutoLaunch: () => Promise<boolean>;
       setAutoLaunch: (enabled: boolean) => Promise<boolean>;
       setUnreadBadge: (hasUnread: boolean) => void;
+      focusWindow: () => void;
     };
   }
 }

@@ -26,7 +26,7 @@ function toNotificationId(messageId: number) {
   return messageId % 2147483647;
 }
 
-export async function showMobileNotification(messageId: number, title: string, body: string) {
+export async function showMobileNotification(messageId: number, title: string, body: string, chatId: string) {
   if (!isNativeMobile) return;
   try {
     await LocalNotifications.schedule({
@@ -35,13 +35,27 @@ export async function showMobileNotification(messageId: number, title: string, b
           id: toNotificationId(messageId),
           title,
           body,
-          smallIcon: 'ic_launcher_foreground'
+          smallIcon: 'ic_launcher_foreground',
+          extra: { chatId }
         }
       ]
     });
   } catch (e) {
     console.error('Ошибка показа уведомления:', e);
   }
+}
+
+// Тап по уведомлению в шторке — переходим в нужный чат. Возвращает функцию
+// отписки; вызывающий должен снять слушатель при размонтировании.
+export function onMobileNotificationTap(callback: (chatId: string) => void): () => void {
+  if (!isNativeMobile) return () => {};
+
+  const listenerPromise = LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+    const chatId = action.notification?.extra?.chatId;
+    if (chatId) callback(chatId);
+  });
+
+  return () => { listenerPromise.then((h) => h.remove()); };
 }
 
 // Снимаем уведомление(я) из системного трея при прочтении сообщения в приложении —

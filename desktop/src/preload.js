@@ -13,5 +13,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getAutoLaunch: () => ipcRenderer.invoke('autostart:get'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
-  setUnreadBadge: (hasUnread) => ipcRenderer.send('unread:set', hasUnread)
+  setUnreadBadge: (hasUnread) => ipcRenderer.send('unread:set', hasUnread),
+  focusWindow: () => ipcRenderer.send('window:focus')
 });
