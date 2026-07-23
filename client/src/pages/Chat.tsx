@@ -87,6 +87,10 @@ const Chat: React.FC = () => {
   // Кто вошёл через логин МИРАС — тому доступно удаление чужих аккаунтов
   const isAdmin = localStorage.getItem('source') === 'miras';
 
+  // Режим тишины — суперадмин может включить/выключить прямо во время сессии,
+  // поэтому актуальное значение приходит и живьём по сокету (см. account_updated).
+  const [muted, setMuted] = useState(localStorage.getItem('muted') === 'true');
+
   // Запрос разрешения на уведомления
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -221,6 +225,24 @@ const Chat: React.FC = () => {
 
     newSocket.on('message_deleted', (data: { id: number; chat_id: string }) => {
       setMessages(prev => prev.map(m => m.id === data.id ? { ...m, deleted: true, text: '' } : m));
+    });
+
+    // Супер-админ может включить/выключить режим тишины (или сменить роль/группу)
+    // прямо во время сессии — применяем сразу, без перелогина.
+    newSocket.on('account_updated', (data: { muted?: boolean }) => {
+      if (typeof data.muted === 'boolean') {
+        setMuted(data.muted);
+        localStorage.setItem('muted', String(data.muted));
+      }
+    });
+
+    // На случай если состояние тишины ещё не долетело (например, включили в
+    // другой вкладке) — сервер всё равно не даст отправить, страхуем и тут.
+    newSocket.on('message_blocked', (data: { reason?: string }) => {
+      if (data.reason === 'muted') {
+        setMuted(true);
+        localStorage.setItem('muted', 'true');
+      }
     });
 
     return () => {
@@ -695,10 +717,15 @@ const Chat: React.FC = () => {
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
             />
+            {muted && (
+              <div className="muted-banner">
+                Ваш аккаунт временно ограничен — отправка сообщений недоступна.
+              </div>
+            )}
             <MessageInput
               onSend={handleSendMessage}
               onTyping={handleTyping}
-              disabled={!activeChat}
+              disabled={!activeChat || muted}
             />
           </>
         )}

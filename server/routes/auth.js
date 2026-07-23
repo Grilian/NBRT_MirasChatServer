@@ -41,7 +41,7 @@ router.post('/login', (req, res) => {
     }
     
     const token = jwt.sign({ id: user.id, username: user.username, source: 'local' }, JWT_SECRET);
-    res.json({ token, id: user.id, username: user.username, source: 'local' });
+    res.json({ token, id: user.id, username: user.username, source: 'local', muted: !!user.muted });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -89,12 +89,13 @@ router.post('/login-miras', async (req, res) => {
       mirasRole: admin.role
     }, JWT_SECRET);
 
-    res.json({ 
-      token, 
-      id: localUser.id, 
+    res.json({
+      token,
+      id: localUser.id,
       username: admin.login,
       source: 'miras',
-      role: admin.role
+      role: admin.role,
+      muted: !!localUser.muted
     });
   } catch (e) {
     if (e.response && e.response.status === 401) {

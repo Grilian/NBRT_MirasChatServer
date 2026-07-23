@@ -14,6 +14,7 @@ const favoritesRoutes = require('./routes/favorites');
 const commentsRoutes = require('./routes/comments');
 const mirasAdminsRoutes = require('./routes/mirasAdmins');
 const mirasUsersRoutes = require('./routes/mirasUsers');
+const superadminRoutes = require('./routes/superadmin');
 const { ensureLocalUserForAdmin } = require('./services/mirasAdminUsers');
 const { parseAdminChatId, participantsForChatId } = require('./services/chatParticipants');
 
@@ -32,6 +33,7 @@ app.use('/api/favorites', favoritesRoutes);
 app.use('/api/comments', commentsRoutes);
 app.use('/api/miras-admins', mirasAdminsRoutes);
 app.use('/api/miras-users', mirasUsersRoutes);
+app.use('/api/superadmin', superadminRoutes);
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -40,6 +42,13 @@ const io = new Server(server, {
     origin: '*'
   }
 });
+
+// Нужен маршрутам панели супер-админа, чтобы толкать живые обновления
+// (например, режим тишины) в комнату конкретного пользователя — не бродкаст
+// пользовательских данных всем подряд, а адресный пуш от доверенного
+// серверного действия, поэтому это не повторяет ранее убранную уязвимость.
+app.set('io', io);
+
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // ===== Настройки интеграции с МИРАС =====
@@ -199,6 +208,17 @@ io.on('connection', (socket) => {
     if (data.origin === "miras") {
         return;
     }
+
+    // Режим тишины — проверяем по authентичному socket.userId (из user_online),
+    // а не по data.senderId, который просто присылает клиент и легко подделать.
+    if (socket.userId) {
+      const senderRow = db.prepare('SELECT muted FROM users WHERE id = ?').get(socket.userId);
+      if (senderRow && senderRow.muted) {
+        socket.emit('message_blocked', { reason: 'muted', chatId: data.chatId });
+        return;
+      }
+    }
+
     try {
       // Общий чат → общий чат МИРАС
       if (data.chatId === "general") {

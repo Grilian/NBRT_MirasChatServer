@@ -1,4 +1,6 @@
 const Database = require('better-sqlite3');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const path = require('path');
 
 const db = new Database(path.join(__dirname, 'messenger.db'));
@@ -48,6 +50,19 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (target_user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS super_admins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Миграция: добавляем колонку status, если БД старая
@@ -67,6 +82,47 @@ try {
   db.exec(`ALTER TABLE messages ADD COLUMN deleted INTEGER DEFAULT 0`);
 } catch (e) {
   // Колонка уже есть
+}
+
+// Миграция: группы, роли, режим тишины — управляются из панели супер-админа
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES groups(id)`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN muted INTEGER DEFAULT 0`);
+} catch (e) {
+  // Колонка уже есть
+}
+
+// Сиды: стартовые группы + единственный супер-админ панели управления.
+// Пароль генерируется один раз при первом запуске (если не задан через env)
+// и больше нигде не хранится в открытом виде — только его bcrypt-хэш в БД.
+function ensureGroup(name) {
+  const existing = db.prepare('SELECT id FROM groups WHERE name = ?').get(name);
+  if (existing) return existing.id;
+  return db.prepare('INSERT INTO groups (name) VALUES (?)').run(name).lastInsertRowid;
+}
+
+ensureGroup('Администрация');
+ensureGroup('Кафедры');
+
+const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
+if (superAdminCount === 0) {
+  const initialUsername = process.env.SUPERADMIN_USERNAME || 'superadmin';
+  const initialPassword = process.env.SUPERADMIN_PASSWORD || crypto.randomBytes(12).toString('base64url');
+  db.prepare('INSERT INTO super_admins (username, password) VALUES (?, ?)')
+    .run(initialUsername, bcrypt.hashSync(initialPassword, 10));
+  console.log('=== Создан супер-админ панели управления ===');
+  console.log('Логин:   ', initialUsername);
+  console.log('Пароль:  ', initialPassword, '(сохраните — больше нигде не показывается)');
+  console.log('=============================================');
 }
 
 // Индексы

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import Login from './pages/Login';
 import Chat from './pages/Chat';
+import SuperAdminApp from './pages/SuperAdminApp';
 import TitleBar from './components/TitleBar';
 import { isNativeMobile } from './utils/mobileNotify';
 
@@ -9,6 +10,20 @@ const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
 function App() {
   const [user, setUser] = useState<any>(null);
+
+  // Панель супер-админа — отдельный экран по хэшу в адресе (без роутера:
+  // тот же index.html что и у обычного чата, серверу не нужно ничего знать
+  // о дополнительных путях). #superadmin открывается прямо в браузере отдельно
+  // от обычной сессии сотрудника/МИРАС-логина.
+  const [isSuperAdminRoute, setIsSuperAdminRoute] = useState(
+    typeof window !== 'undefined' && window.location.hash.startsWith('#superadmin')
+  );
+
+  useEffect(() => {
+    const onHashChange = () => setIsSuperAdminRoute(window.location.hash.startsWith('#superadmin'));
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -38,6 +53,10 @@ function App() {
   const handleLogin = (userData: any) => {
     setUser(userData);
   };
+
+  if (isSuperAdminRoute) {
+    return <SuperAdminApp />;
+  }
 
   return (
     <div className={isElectron ? 'electron-frame' : undefined}>

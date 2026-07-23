@@ -41,6 +41,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         localStorage.setItem('userId', data.id);
         localStorage.setItem('username', data.username);
         localStorage.setItem('source', data.source || 'local');
+        localStorage.setItem('muted', String(!!data.muted));
         onLogin(data);
       }
     } catch (err: any) {
