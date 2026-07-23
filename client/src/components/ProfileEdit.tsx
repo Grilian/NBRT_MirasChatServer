@@ -15,10 +15,11 @@ interface ProfileEditProps {
   currentPhone: string;
   onBack: () => void;
   onSaved: (profile: { username: string; display_name: string; avatar_path: string | null; bio: string; phone: string }) => void;
+  onAvatarChanged: (avatarPath: string | null) => void;
 }
 
 const ProfileEdit: React.FC<ProfileEditProps> = ({
-  currentUsername, currentDisplayName, currentAvatarPath, currentBio, currentPhone, onBack, onSaved
+  currentUsername, currentDisplayName, currentAvatarPath, currentBio, currentPhone, onBack, onSaved, onAvatarChanged
 }) => {
   const [username, setUsername] = useState(currentUsername);
   const [displayName, setDisplayName] = useState(currentDisplayName);
@@ -47,7 +48,7 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
       formData.append('avatar', file);
       const { data } = await api.post('/users/me/avatar', formData);
       setAvatarPath(data.avatar_path);
-      onSaved({ username, display_name: displayName, avatar_path: data.avatar_path, bio, phone });
+      onAvatarChanged(data.avatar_path);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Не удалось загрузить фото');
     } finally {
@@ -61,7 +62,7 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
     try {
       await api.delete('/users/me/avatar');
       setAvatarPath(null);
-      onSaved({ username, display_name: displayName, avatar_path: null, bio, phone });
+      onAvatarChanged(null);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Не удалось убрать фото');
     } finally {

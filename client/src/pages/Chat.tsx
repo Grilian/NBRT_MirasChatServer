@@ -83,11 +83,15 @@ const Chat: React.FC = () => {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = Number(localStorage.getItem('userId'));
-  const currentUsername = localStorage.getItem('username') || '';
-  const currentDisplayName = localStorage.getItem('displayName') || currentUsername;
-  const currentAvatarPath = localStorage.getItem('avatarPath') || null;
-  const currentBio = localStorage.getItem('bio') || '';
-  const currentPhone = localStorage.getItem('phone') || '';
+
+  // Стейт, а не просто чтение localStorage на каждый рендер — иначе смену
+  // аватара/имени в профиле пришлось бы отражать через полный reload
+  // страницы (что выглядело как "окно закрылось"), а не мгновенно на месте.
+  const [currentUsername, setCurrentUsername] = useState(localStorage.getItem('username') || '');
+  const [currentDisplayName, setCurrentDisplayName] = useState(localStorage.getItem('displayName') || localStorage.getItem('username') || '');
+  const [currentAvatarPath, setCurrentAvatarPath] = useState<string | null>(localStorage.getItem('avatarPath') || null);
+  const [currentBio, setCurrentBio] = useState(localStorage.getItem('bio') || '');
+  const [currentPhone, setCurrentPhone] = useState(localStorage.getItem('phone') || '');
 
   // Режим тишины — суперадмин может включить/выключить прямо во время сессии,
   // поэтому актуальное значение приходит и живьём по сокету (см. account_updated).
@@ -610,7 +614,18 @@ const Chat: React.FC = () => {
     localStorage.setItem('avatarPath', profile.avatar_path || '');
     localStorage.setItem('bio', profile.bio);
     localStorage.setItem('phone', profile.phone);
-    window.location.reload();
+    setCurrentUsername(profile.username);
+    setCurrentDisplayName(profile.display_name);
+    setCurrentAvatarPath(profile.avatar_path);
+    setCurrentBio(profile.bio);
+    setCurrentPhone(profile.phone);
+  };
+
+  // Аватар меняется отдельно от остальной формы (загрузка файла сразу же,
+  // без ожидания кнопки "Сохранить") — своё лёгкое обновление, тоже без reload.
+  const handleAvatarChanged = (avatarPath: string | null) => {
+    localStorage.setItem('avatarPath', avatarPath || '');
+    setCurrentAvatarPath(avatarPath);
   };
 
   // Реальные группы (настроены в панели супер-админа) — упорядочиваем по
@@ -699,6 +714,7 @@ const Chat: React.FC = () => {
         onMarkAllRead={handleMarkAllRead}
         onRemoveContact={handleRemoveContact}
         onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
+        onOpenSettings={() => setView('settings')}
       />
       {directoryOpen && (
         <DirectoryModal
@@ -746,6 +762,7 @@ const Chat: React.FC = () => {
             currentPhone={currentPhone}
             onBack={() => setView('settings')}
             onSaved={handleProfileSaved}
+            onAvatarChanged={handleAvatarChanged}
           />
         ) : (
           <>
@@ -784,11 +801,6 @@ const Chat: React.FC = () => {
                 </button>
                 {menuOpen && (
                   <div className="menu">
-                    <button type="button" onClick={() => { setMenuOpen(false); setView('settings'); }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.98 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.36.1.68.3 1 1.55V11a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.6Z" /></svg>
-                      Настройки
-                    </button>
-                    <hr />
                     <button type="button" onClick={() => { setMenuOpen(false); handleLogout(); }}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
                       Выйти

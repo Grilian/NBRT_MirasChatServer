@@ -40,7 +40,10 @@ app.use('/api/contacts', contactsRoutes);
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
 // на каждый файл (как публичные CDN-ссылки на фото профиля у большинства
 // мессенджеров), доступ к самому приложению уже закрыт логином/паролем.
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Смонтировано под /api/uploads (а не просто /uploads): в проде reverse-proxy
+// проксирует на бэкенд только префикс /api — отдельного правила для /uploads
+// нет, и файлы отдавались бы SPA-фолбэком (index.html) вместо самой картинки.
+app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const server = http.createServer(app);
 const io = new Server(server, {
