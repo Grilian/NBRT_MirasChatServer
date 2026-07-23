@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
 const verifySuperAdmin = require('../middleware/verifySuperAdmin');
+const { isValidLogin, isReservedLogin, isValidPassword } = require('../utils/validators');
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key';
@@ -158,9 +159,11 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
 
     if (req.body.username !== undefined) {
       const nextUsername = String(req.body.username).trim();
-      if (!nextUsername) return res.status(400).json({ error: 'Имя не может быть пустым' });
+      if (isReservedLogin(nextUsername) || !isValidLogin(nextUsername)) {
+        return res.status(400).json({ error: 'Логин: 5-32 символов, латиница, цифры и подчёркивание, должен начинаться с буквы' });
+      }
 
-      const existing = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(nextUsername, id);
+      const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?').get(nextUsername, id);
       if (existing) return res.status(400).json({ error: 'Это имя уже занято' });
 
       updates.push('username = ?');
@@ -169,7 +172,7 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
 
     if (req.body.password) {
       const pw = String(req.body.password);
-      if (pw.length < 6) return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' });
+      if (!isValidPassword(pw)) return res.status(400).json({ error: 'Пароль: не короче 5 символов и без кириллицы' });
 
       updates.push('password = ?');
       params.push(bcrypt.hashSync(pw, 10));

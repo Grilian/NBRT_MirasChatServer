@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { colorForName, initialsForName } from '../utils/avatar';
+import Avatar from './Avatar';
 
 export type ChatSection = 'general' | 'staff';
 
@@ -10,6 +10,7 @@ interface Chat {
   groupLabel: string | null;
   online?: boolean;
   userId?: number;
+  avatarPath?: string | null;
   deletable?: boolean;
 }
 
@@ -25,9 +26,11 @@ interface Comment {
 
 interface ChatListProps {
   username: string;
+  avatarPath: string | null;
   chats: Chat[];
   activeChat: string | null;
   onSelectChat: (chatId: string) => void;
+  onOpenDirectory: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   lastMessages: Record<string, LastMessage>;
@@ -37,30 +40,17 @@ interface ChatListProps {
   onUpdateComment: (userId: number, comment: string) => void;
   comments: Record<number, Comment>;
   onMarkAllRead: () => void;
+  onRemoveContact: (userId: number) => void;
 }
 
 function renderAvatar(chat: Chat) {
-  if (chat.section === 'general') {
-    return (
-      <div className="avatar avatar-general">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-      </div>
-    );
-  }
-  return (
-    <div className="avatar" style={{ background: colorForName(chat.name) }}>
-      {initialsForName(chat.name)}
-      {chat.online !== undefined && <span className={'dot' + (chat.online ? '' : ' offline')} />}
-    </div>
-  );
+  return <Avatar name={chat.name} avatarPath={chat.avatarPath} online={chat.online} isGeneral={chat.section === 'general'} />;
 }
 
 const ChatList: React.FC<ChatListProps> = ({
-  username, chats, activeChat, onSelectChat, searchQuery, onSearchChange,
+  username, avatarPath, chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
-  onMarkAllRead
+  onMarkAllRead, onRemoveContact
 }) => {
   const [editingComment, setEditingComment] = useState<number | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -82,9 +72,7 @@ const ChatList: React.FC<ChatListProps> = ({
       <div className="roster-head">
         {/* Заготовка под кнопку аккаунта (аватар + имя) — пока некликабельная, логика будет позже */}
         <div className="roster-account">
-          <div className="avatar avatar-sm" style={{ background: colorForName(username) }}>
-            {initialsForName(username)}
-          </div>
+          <Avatar name={username} avatarPath={avatarPath} size="sm" />
           <div className="roster-account-name">{username}</div>
           {totalUnread > 0 && (
             <>
@@ -101,13 +89,16 @@ const ChatList: React.FC<ChatListProps> = ({
           )}
         </div>
         <div className="search">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
           <input
             type="text"
             placeholder="Поиск"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
           />
+          <button type="button" className="icon-btn-ghost new-chat-btn" title="Найти сотрудника" onClick={onOpenDirectory}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
         </div>
       </div>
 
@@ -173,6 +164,21 @@ const ChatList: React.FC<ChatListProps> = ({
                           <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" />
                         </svg>
                       </button>
+                      {chat.userId && (
+                        <button
+                          type="button"
+                          className="icon-btn-ghost"
+                          title="Убрать из списка"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm('Убрать из списка чатов? Переписка сохранится, чат можно будет снова найти в справочнике.')) {
+                              onRemoveContact(chat.userId!);
+                            }
+                          }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

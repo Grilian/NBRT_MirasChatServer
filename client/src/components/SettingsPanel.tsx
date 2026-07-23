@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { initialsForName, colorForName } from '../utils/avatar';
+import Avatar from './Avatar';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
 interface SettingsPanelProps {
   username: string;
+  avatarPath: string | null;
   onClose: () => void;
   onOpenProfile: () => void;
   onDeleteAccount: () => void;
@@ -19,7 +20,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 ];
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
-  username, onClose, onOpenProfile, onDeleteAccount, onLogout
+  username, avatarPath, onClose, onOpenProfile, onDeleteAccount, onLogout
 }) => {
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
@@ -51,7 +52,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <div className="settings-body">
         <div className="profile-card">
-          <div className="avatar" style={{ background: colorForName(username) }}>{initialsForName(username)}</div>
+          <Avatar name={username} avatarPath={avatarPath} />
           <div className="name">{username}</div>
         </div>
 

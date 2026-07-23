@@ -7,17 +7,18 @@ const router = express.Router();
 router.get('/', verifyToken, (req, res) => {
   try {
     const comments = db.prepare(`
-      SELECT uc.target_user_id, uc.comment, u.username
+      SELECT uc.target_user_id, uc.comment, u.username, u.display_name
       FROM user_comments uc
       JOIN users u ON uc.target_user_id = u.id
       WHERE uc.user_id = ?
     `).all(req.userId);
-    
-    // Преобразуем в объект { target_user_id: { username, comment } }
+
+    // Преобразуем в объект { target_user_id: { username, display_name, comment } }
     const commentsMap = {};
     comments.forEach(c => {
       commentsMap[c.target_user_id] = {
         username: c.username,
+        display_name: c.display_name,
         comment: c.comment
       };
     });

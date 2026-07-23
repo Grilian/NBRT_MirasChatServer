@@ -1,8 +1,10 @@
 require('dotenv').config({ quiet: true });
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 
 const authRoutes = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
@@ -12,7 +14,8 @@ const unreadRoutes = require('./routes/unread');
 const favoritesRoutes = require('./routes/favorites');
 const commentsRoutes = require('./routes/comments');
 const superadminRoutes = require('./routes/superadmin');
-const { participantsForChatId } = require('./services/chatParticipants');
+const contactsRoutes = require('./routes/contacts');
+const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 
 const db = require('./db');
 
@@ -28,6 +31,12 @@ app.use('/api/unread', unreadRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/comments', commentsRoutes);
 app.use('/api/superadmin', superadminRoutes);
+app.use('/api/contacts', contactsRoutes);
+
+// Раздача загруженных аватаров — просто статика, без отдельной авторизации
+// на каждый файл (как публичные CDN-ссылки на фото профиля у большинства
+// мессенджеров), доступ к самому приложению уже закрыт логином/паролем.
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -73,22 +82,42 @@ const onlineUsers = new Map();
 io.on('connection', (socket) => {
   console.log(`Подключен: ${socket.id}`);
 
-  socket.on('user_online', (userId) => {
-    onlineUsers.set(userId, socket.id);
-    socket.userId = userId;
-    socket.join('user:' + userId);
-    io.emit('online_users', Array.from(onlineUsers.keys()));
+  // Раньше принимали userId прямо от клиента без проверки — любой мог
+  // назваться чужим id и получать чужие личные сообщения через комнату
+  // 'user:<id>'. Теперь клиент присылает свой JWT, а userId берём из него.
+  socket.on('user_online', (token) => {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_super_secret_key');
+      const userId = decoded.id;
+      onlineUsers.set(userId, socket.id);
+      socket.userId = userId;
+      socket.join('user:' + userId);
+      io.emit('online_users', Array.from(onlineUsers.keys()));
+    } catch (e) {
+      socket.emit('auth_error', { reason: 'invalid_token' });
+    }
   });
 
   socket.on('chat_message', async (data) => {
-    // Режим тишины — проверяем по authентичному socket.userId (из user_online),
-    // а не по data.senderId, который просто присылает клиент и легко подделать.
-    if (socket.userId) {
-      const senderRow = db.prepare('SELECT muted FROM users WHERE id = ?').get(socket.userId);
-      if (senderRow && senderRow.muted) {
-        socket.emit('message_blocked', { reason: 'muted', chatId: data.chatId });
-        return;
-      }
+    // Не доверяем data.senderId — это просто то, что прислал клиент, и его
+    // легко подделать. Единственный источник истины — socket.userId,
+    // выставленный сервером при аутентифицированном 'user_online'.
+    const senderId = socket.userId;
+    if (!senderId) return;
+
+    // Пишем только в чат, где отправитель реально участник — раньше это никак
+    // не проверялось, и любой мог отправить сообщение в chat_<a>_<b> чужих
+    // пользователей, просто зная их id.
+    if (!isParticipant(data.chatId, senderId)) return;
+
+    // Режим тишины — проверяем по аутентичному senderId, а не по тому, что
+    // прислал клиент. Заодно берём имя — раньше отправленное сообщение
+    // вообще не несло имени отправителя, и в общем чате живые сообщения не
+    // могли показать, кто написал (клиент брал его из payload, которого не было).
+    const senderRow = db.prepare('SELECT username, display_name, muted FROM users WHERE id = ?').get(senderId);
+    if (senderRow && senderRow.muted) {
+      socket.emit('message_blocked', { reason: 'muted', chatId: data.chatId });
+      return;
     }
 
     try {
@@ -96,27 +125,43 @@ io.on('connection', (socket) => {
       const stmt = db.prepare(
         'INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, ?)'
       );
-      const result = stmt.run(data.chatId, data.senderId, data.text, 'sent');
+      const result = stmt.run(data.chatId, senderId, data.text, 'sent');
 
       const message = {
         id: result.lastInsertRowid,
         chat_id: data.chatId,
-        sender_id: data.senderId,
+        sender_id: senderId,
         text: data.text,
         status: 'sent',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        username: senderRow ? senderRow.username : undefined,
+        display_name: senderRow ? senderRow.display_name : undefined,
       };
 
-      emitToChat(data.chatId, 'chat_message', message, data.senderId);
+      emitToChat(data.chatId, 'chat_message', message, senderId);
+
+      // Автоподписка: как только между двумя людьми реально пошли сообщения,
+      // чат появляется в списке контактов у обеих сторон (не только у
+      // отправителя, который мог сам явно добавить собеседника из справочника)
+      // — иначе получатель первого сообщения просто не увидел бы новый чат.
+      const participants = participantsForChatId(data.chatId);
+      if (participants && participants.length === 2) {
+        const [a, b] = participants;
+        const insertContact = db.prepare('INSERT OR IGNORE INTO contacts (user_id, contact_user_id) VALUES (?, ?)');
+        const changedA = insertContact.run(a, b).changes > 0;
+        const changedB = insertContact.run(b, a).changes > 0;
+        if (changedA) io.to('user:' + a).emit('contact_added', { withUserId: b });
+        if (changedB) io.to('user:' + b).emit('contact_added', { withUserId: a });
+      }
 
       // Проверяем, есть ли получатель онлайн
       let recipientOnline = false;
       if (data.chatId === 'general') {
-        recipientOnline = Array.from(onlineUsers.keys()).some(id => id !== data.senderId);
+        recipientOnline = Array.from(onlineUsers.keys()).some(id => id !== senderId);
       } else {
         const match = data.chatId.match(/^chat_(\d+)_(\d+)$/);
         if (match) {
-          const otherId = Number(match[1]) === data.senderId ? Number(match[2]) : Number(match[1]);
+          const otherId = Number(match[1]) === senderId ? Number(match[2]) : Number(match[1]);
           recipientOnline = onlineUsers.has(otherId);
         }
       }
@@ -124,7 +169,7 @@ io.on('connection', (socket) => {
       if (recipientOnline) {
         db.prepare('UPDATE messages SET status = ? WHERE id = ?').run('delivered', result.lastInsertRowid);
         message.status = 'delivered';
-        emitToChat(data.chatId, 'message_status', { id: result.lastInsertRowid, status: 'delivered' }, data.senderId);
+        emitToChat(data.chatId, 'message_status', { id: result.lastInsertRowid, status: 'delivered' }, senderId);
       }
     } catch (e) {
       console.error('Ошибка:', e);

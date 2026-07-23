@@ -1,12 +1,14 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
+const { isParticipant } = require('../services/chatParticipants');
 const router = express.Router();
 
 // Последнее сообщение по каждому chat_id — для превью в списке диалогов.
-// Не сузили выборку до "чатов текущего пользователя": id чатов (chat_<a>_<b>,
-// miras_admin_<login>_<id>) и так завязаны на конкретного пользователя, так что
-// лишние записи просто не находят соответствия в списке на клиенте.
+// Раньше выборка не была сужена до "чатов текущего пользователя" — chat_id
+// (chat_<a>_<b>, miras_admin_<login>_<id>) детерминированно вычисляется из
+// пары id, так что любой мог узнать превью переписки чужих людей, просто
+// подобрав их id. Фильтруем по участию текущего пользователя.
 router.get('/meta/last', verifyToken, (req, res) => {
   try {
     const rows = db.prepare(`
@@ -21,6 +23,7 @@ router.get('/meta/last', verifyToken, (req, res) => {
 
     const result = {};
     rows.forEach(row => {
+      if (!isParticipant(row.chat_id, req.userId)) return;
       result[row.chat_id] = { chat_id: row.chat_id, text: row.text, created_at: row.created_at };
     });
 
@@ -34,11 +37,19 @@ router.get('/meta/last', verifyToken, (req, res) => {
 router.get('/:chatId', verifyToken, (req, res) => {
   try {
     const chatId = req.params.chatId;
+
+    // Раньше кто угодно с валидным токеном мог прочитать историю ЛЮБОГО
+    // чужого 1:1 чата, просто зная/подобрав пару id в chat_<a>_<b> — сервер
+    // не проверял, что запрашивающий сам участник.
+    if (!isParticipant(chatId, req.userId)) {
+      return res.status(403).json({ error: 'Нет доступа к этому чату' });
+    }
+
     const limit = parseInt(req.query.limit) || 50; // По умолчанию 50 сообщений
     const offset = parseInt(req.query.offset) || 0;
 
     const messages = db.prepare(`
-      SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username
+      SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
       FROM messages m
       JOIN users u ON m.sender_id = u.id
       WHERE m.chat_id = ?

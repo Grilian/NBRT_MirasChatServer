@@ -6,8 +6,10 @@ import ChatWindow from '../components/ChatWindow';
 import MessageInput from '../components/MessageInput';
 import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
+import DirectoryModal from '../components/DirectoryModal';
+import Avatar from '../components/Avatar';
 import api from '../api/client';
-import { colorForName, initialsForName } from '../utils/avatar';
+import { nameFor } from '../utils/user';
 import {
   ensureMobileNotificationPermission,
   showMobileNotification,
@@ -17,13 +19,21 @@ import {
   onMobileNotificationTap
 } from '../utils/mobileNotify';
 
-interface User { id: number; username: string; group_id: number | null; group_name: string | null; }
+interface User {
+  id: number;
+  username: string;
+  display_name: string | null;
+  avatar_path: string | null;
+  group_id: number | null;
+  group_name: string | null;
+}
 interface Message {
   id: number;
   chat_id?: string;
   text: string;
   sender_id: number;
   username: string;
+  display_name?: string | null;
   created_at: string;
   status?: 'sent' | 'delivered' | 'read';
   edited_at?: string | null;
@@ -37,6 +47,8 @@ interface LastMessage {
 interface AllUser {
   id: number;
   username: string;
+  display_name: string | null;
+  avatarPath: string | null;
   source: 'local';
   groupName?: string | null;
 }
@@ -54,17 +66,22 @@ const Chat: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [favorites, setFavorites] = useState<string[]>([]);
-  const [comments, setComments] = useState<Record<number, { username: string; comment: string }>>({});
+  const [comments, setComments] = useState<Record<number, { username: string; display_name: string | null; comment: string }>>({});
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
   const [menuOpen, setMenuOpen] = useState(false);
   const [view, setView] = useState<'conversation' | 'settings' | 'profile'>('conversation');
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = Number(localStorage.getItem('userId'));
   const currentUsername = localStorage.getItem('username') || '';
+  const currentDisplayName = localStorage.getItem('displayName') || currentUsername;
+  const currentAvatarPath = localStorage.getItem('avatarPath') || null;
+  const currentBio = localStorage.getItem('bio') || '';
+  const currentPhone = localStorage.getItem('phone') || '';
 
   // Режим тишины — суперадмин может включить/выключить прямо во время сессии,
   // поэтому актуальное значение приходит и живьём по сокету (см. account_updated).
@@ -129,21 +146,28 @@ const Chat: React.FC = () => {
     // заново объявляем себя онлайн и подтягиваем свежее состояние,
     // чтобы после реконнекта не остаться с протухшими данными.
     newSocket.on('connect', () => {
-      newSocket.emit('user_online', currentUserId);
+      newSocket.emit('user_online', localStorage.getItem('token'));
 
-      api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
+      api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
       api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
       api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
       api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
     });
 
-    // Список сотрудников не приходит по сокету (нет событий
-    // "зарегистрировался"/"удалён") — подтягиваем его периодически, чтобы
-    // ростер не застревал в состоянии на момент открытия вкладки.
+    // Список контактов не приходит по сокету целиком (только точечное событие
+    // 'contact_added') — подтягиваем его периодически на случай, если событие
+    // потерялось (короткий разрыв связи и т.п.), чтобы ростер не застревал в
+    // состоянии на момент открытия вкладки.
     const rosterRefreshInterval = setInterval(() => {
-      api.get('/users').then(({ data }) => setUsers(data)).catch(console.error);
+      api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
     }, 30000);
+
+    // Кто-то написал впервые (или мы сами добавили из справочника) —
+    // обновляем список контактов, не дожидаясь очередного 30-секундного опроса.
+    newSocket.on('contact_added', () => {
+      api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
+    });
 
     newSocket.on('online_users', (userIds: number[]) => setOnlineUsers(userIds));
 
@@ -305,9 +329,10 @@ const Chat: React.FC = () => {
         const isWindowFocused = document.hasFocus();
 
         if (!isChatActive || !isWindowFocused) {
+          const otherUser = allUsers.find(u => getChatId(u.id) === message.chat_id);
           const chatName = message.chat_id === GENERAL_CHAT_ID
             ? 'Общий чат'
-            : allUsers.find(u => getChatId(u.id) === message.chat_id)?.username || 'Чат';
+            : (otherUser ? nameFor(otherUser) : 'Чат');
 
           showNotification(message, chatName);
         }
@@ -451,7 +476,7 @@ const Chat: React.FC = () => {
       if (user) {
         setComments(prev => ({
           ...prev,
-          [targetUserId]: { username: user.username, comment }
+          [targetUserId]: { username: user.username, display_name: user.display_name, comment }
         }));
       }
     } catch (e) {
@@ -459,7 +484,14 @@ const Chat: React.FC = () => {
     }
   };
 
-  const allUsers: AllUser[] = users.map(u => ({ id: u.id, username: u.username, source: 'local' as const, groupName: u.group_name }));
+  const allUsers: AllUser[] = users.map(u => ({
+    id: u.id,
+    username: u.username,
+    display_name: u.display_name,
+    avatarPath: u.avatar_path,
+    source: 'local' as const,
+    groupName: u.group_name,
+  }));
 
   const handleSelectChat = (chatId: string) => {
     if (chatId === GENERAL_CHAT_ID) {
@@ -487,11 +519,37 @@ const Chat: React.FC = () => {
     if (socket && activeChat) {
       socket.emit('chat_message', {
         chatId: activeChat,
-        senderId: currentUserId,
-        senderUsername: currentUsername,
         text,
       });
       socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
+    }
+  };
+
+  // Начать чат с кем-то из справочника — контакт появляется в своём списке
+  // сразу (без ожидания первого сообщения); у собеседника — только когда
+  // сообщение реально отправлено (см. серверную автоподписку).
+  const handleStartChat = async (user: { id: number; username: string; display_name: string | null; avatar_path: string | null; group_id: number | null; group_name: string | null }) => {
+    setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, user]);
+    setDirectoryOpen(false);
+    setActiveChat(getChatId(user.id));
+    setMobileView('chat');
+    try {
+      await api.post(`/contacts/${user.id}`);
+    } catch (e) {
+      console.error('Ошибка добавления контакта:', e);
+    }
+  };
+
+  const handleRemoveContact = async (userId: number) => {
+    if (activeChat === getChatId(userId)) {
+      setActiveChat(null);
+      setMobileView('list');
+    }
+    setUsers(prev => prev.filter(u => u.id !== userId));
+    try {
+      await api.delete(`/contacts/${userId}`);
+    } catch (e) {
+      console.error('Ошибка удаления контакта:', e);
     }
   };
 
@@ -510,7 +568,7 @@ const Chat: React.FC = () => {
       socket.emit('typing', {
         chatId: activeChat,
         userId: currentUserId,
-        username: currentUsername,
+        username: currentDisplayName,
       });
 
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
@@ -538,8 +596,12 @@ const Chat: React.FC = () => {
     window.location.reload();
   };
 
-  const handleProfileSaved = (newUsername: string) => {
-    localStorage.setItem('username', newUsername);
+  const handleProfileSaved = (profile: { username: string; display_name: string; avatar_path: string | null; bio: string; phone: string }) => {
+    localStorage.setItem('username', profile.username);
+    localStorage.setItem('displayName', profile.display_name);
+    localStorage.setItem('avatarPath', profile.avatar_path || '');
+    localStorage.setItem('bio', profile.bio);
+    localStorage.setItem('phone', profile.phone);
     window.location.reload();
   };
 
@@ -571,16 +633,18 @@ const Chat: React.FC = () => {
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
     ...allUsers.map(u => {
       const commentData = comments[u.id];
-      const displayName = commentData?.comment ? `${commentData.username} (${commentData.comment})` : u.username;
+      const baseName = nameFor(u);
+      const rowName = commentData?.comment ? `${baseName} (${commentData.comment})` : baseName;
 
       return {
         id: getChatId(u.id),
-        name: displayName,
+        name: rowName,
         section: 'staff' as ChatSection,
         groupLabel: u.groupName || 'Без группы',
         deletable: true,
         online: onlineUsers.includes(u.id),
         userId: u.id,
+        avatarPath: u.avatarPath,
       };
     })
   ]
@@ -598,20 +662,22 @@ const Chat: React.FC = () => {
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
 
   // Данные для шапки переписки — независимо от текущего поискового фильтра списка
-  const activeChatMeta: { name: string; section: ChatSection; online?: boolean } | null = (() => {
+  const activeChatMeta: { name: string; section: ChatSection; online?: boolean; avatarPath?: string | null } | null = (() => {
     if (!activeChat) return null;
     if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
     const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
-    return user ? { name: user.username, section: 'staff', online: onlineUsers.includes(user.id) } : null;
+    return user ? { name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id), avatarPath: user.avatarPath } : null;
   })();
 
   return (
     <div className={'chat-layout' + (mobileView === 'chat' ? ' is-conversation-view' : '')}>
       <ChatList
-        username={currentUsername}
+        username={currentDisplayName}
+        avatarPath={currentAvatarPath}
         chats={chats}
         activeChat={activeChat}
         onSelectChat={handleSelectChat}
+        onOpenDirectory={() => setDirectoryOpen(true)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         lastMessages={lastMessages}
@@ -621,11 +687,20 @@ const Chat: React.FC = () => {
         onUpdateComment={updateComment}
         comments={comments}
         onMarkAllRead={handleMarkAllRead}
+        onRemoveContact={handleRemoveContact}
       />
+      {directoryOpen && (
+        <DirectoryModal
+          existingContactIds={users.map(u => u.id)}
+          onClose={() => setDirectoryOpen(false)}
+          onSelectUser={handleStartChat}
+        />
+      )}
       <main className="conversation">
         {view === 'settings' ? (
           <SettingsPanel
-            username={currentUsername}
+            username={currentDisplayName}
+            avatarPath={currentAvatarPath}
             onClose={() => setView('conversation')}
             onOpenProfile={() => setView('profile')}
             onDeleteAccount={handleDeleteSelf}
@@ -634,6 +709,10 @@ const Chat: React.FC = () => {
         ) : view === 'profile' ? (
           <ProfileEdit
             currentUsername={currentUsername}
+            currentDisplayName={currentDisplayName}
+            currentAvatarPath={currentAvatarPath}
+            currentBio={currentBio}
+            currentPhone={currentPhone}
             onBack={() => setView('settings')}
             onSaved={handleProfileSaved}
           />
@@ -646,15 +725,12 @@ const Chat: React.FC = () => {
 
               {activeChatMeta ? (
                 <>
-                  {activeChatMeta.section === 'general' ? (
-                    <div className="avatar avatar-general avatar-sm">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                    </div>
-                  ) : (
-                    <div className="avatar avatar-sm" style={{ background: colorForName(activeChatMeta.name) }}>
-                      {initialsForName(activeChatMeta.name)}
-                    </div>
-                  )}
+                  <Avatar
+                    name={activeChatMeta.name}
+                    avatarPath={activeChatMeta.avatarPath}
+                    size="sm"
+                    isGeneral={activeChatMeta.section === 'general'}
+                  />
                   <div className="conv-title">
                     <div className="name">{activeChatMeta.name}</div>
                     <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>

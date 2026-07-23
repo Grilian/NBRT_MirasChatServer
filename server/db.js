@@ -63,6 +63,16 @@ db.exec(`
     password TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    contact_user_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, contact_user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (contact_user_id) REFERENCES users(id)
+  );
 `);
 
 // Миграция: добавляем колонку status, если БД старая
@@ -101,6 +111,34 @@ try {
   // Колонка уже есть
 }
 
+// Миграция: логин/пароль больше не единственное поле профиля — появляется
+// отдельное отображаемое имя и стандартные для мессенджера поля.
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN display_name TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN avatar_path TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN bio TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN phone TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+
+// Бэкфилл: до появления display_name отображаемым именем был сам логин —
+// чтобы после обновления ни у кого не осталось пустое имя, копируем логин
+// туда, где отображаемое имя ещё не задано.
+db.prepare(`UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''`).run();
+
 // Сиды: стартовые группы + единственный супер-админ панели управления.
 // Пароль генерируется один раз при первом запуске (если не задан через env)
 // и больше нигде не хранится в открытом виде — только его bcrypt-хэш в БД.
@@ -132,6 +170,30 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
   CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorites(user_id);
   CREATE INDEX IF NOT EXISTS idx_user_comments_user_id ON user_comments(user_id);
+  CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id);
 `);
+
+// Бэкфилл контактов: до появления подписок чат-лист был "все зарегистрированные",
+// так что существующие переписки бэкфилим в contacts в обе стороны — иначе
+// после обновления у всех опустеют списки чатов. INSERT OR IGNORE — безопасно
+// гонять при каждом запуске, повторные проходы просто ничего не делают.
+try {
+  const existingChatIds = db.prepare('SELECT DISTINCT chat_id FROM messages').all().map(row => row.chat_id);
+  const insertContact = db.prepare('INSERT OR IGNORE INTO contacts (user_id, contact_user_id) VALUES (?, ?)');
+
+  const backfillContacts = db.transaction(() => {
+    for (const chatId of existingChatIds) {
+      const match = String(chatId).match(/^chat_(\d+)_(\d+)$/);
+      if (!match) continue;
+      const [a, b] = [Number(match[1]), Number(match[2])];
+      insertContact.run(a, b);
+      insertContact.run(b, a);
+    }
+  });
+
+  backfillContacts();
+} catch (e) {
+  console.error('Ошибка бэкфилла контактов:', e);
+}
 
 module.exports = db;

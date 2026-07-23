@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { nameFor } from '../utils/user';
 
 interface Message {
   id: number;
   text: string;
   sender_id: number;
   username: string;
+  display_name?: string | null;
   created_at: string;
   status?: 'sent' | 'delivered' | 'read';
   edited_at?: string | null;
@@ -176,7 +178,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             onTouchEnd={mine ? clearLongPress : undefined}
             onTouchMove={mine ? clearLongPress : undefined}
           >
-            {!mine && <div className="who">{msg.username}</div>}
+            {!mine && <div className="who">{nameFor(msg)}</div>}
             {isEditing ? (
               <div className="bubble bubble-editing">
                 <input
