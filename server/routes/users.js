@@ -27,17 +27,23 @@ const avatarUpload = multer({
   fileFilter: (req, file, cb) => cb(null, AVATAR_ALLOWED_MIME.includes(file.mimetype)),
 });
 
+// Группа, которую видит даже тип "Интернет", несмотря на общее ограничение
+// ниже — иначе им неоткуда узнать, кому написать с просьбой сменить тип
+// на "Сотрудник" (сами админов в справочнике иначе не найдут).
+const INTERNET_VISIBLE_GROUPS = ['Админы'];
+
 // Получить всех пользователей (кроме текущего) — справочник для поиска.
 // miras_* — служебные зеркала админов МИРАС для маршрутизации сообщений,
 // в списке реальных сотрудников их быть не должно.
 // Тип "Интернет" (незнакомые с улицы, самостоятельная регистрация) видит в
-// справочнике только других "Интернет" — не может пробежаться по всем
-// сотрудникам. После того как админ подтвердит его как "Сотрудник", видимость
-// открывается на всех.
+// справочнике только других "Интернет" плюс группу "Админы" (см. выше) — не
+// может пробежаться по всем сотрудникам. После того как админ подтвердит его
+// как "Сотрудник", видимость открывается на всех.
 router.get('/', verifyToken, (req, res) => {
   try {
     const requester = db.prepare('SELECT account_type FROM users WHERE id = ?').get(req.userId);
     const restrictToInternet = requester && requester.account_type === 'internet';
+    const visibleGroupPlaceholders = INTERNET_VISIBLE_GROUPS.map(() => '?').join(',');
 
     const users = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar_path, u.group_id, g.name AS group_name
@@ -45,8 +51,8 @@ router.get('/', verifyToken, (req, res) => {
       LEFT JOIN groups g ON g.id = u.group_id
       WHERE u.id != ?
         AND u.username NOT LIKE 'miras\_%' ESCAPE '\\'
-        AND (? = 0 OR u.account_type = 'internet')
-    `).all(req.userId, restrictToInternet ? 1 : 0);
+        AND (? = 0 OR u.account_type = 'internet' OR g.name IN (${visibleGroupPlaceholders}))
+    `).all(req.userId, restrictToInternet ? 1 : 0, ...INTERNET_VISIBLE_GROUPS);
     res.json(users);
   } catch (e) {
     res.status(500).json({ error: e.message });
