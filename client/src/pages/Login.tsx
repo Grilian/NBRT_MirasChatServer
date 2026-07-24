@@ -29,6 +29,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     localStorage.setItem('avatarPath', data.avatar_path || '');
     localStorage.setItem('bio', data.bio || '');
     localStorage.setItem('phone', data.phone || '');
+    localStorage.setItem('role', data.role || '');
     onLogin(data);
   };
 

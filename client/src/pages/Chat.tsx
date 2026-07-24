@@ -92,6 +92,10 @@ const Chat: React.FC = () => {
   const [currentAvatarPath, setCurrentAvatarPath] = useState<string | null>(localStorage.getItem('avatarPath') || null);
   const [currentBio, setCurrentBio] = useState(localStorage.getItem('bio') || '');
   const [currentPhone, setCurrentPhone] = useState(localStorage.getItem('phone') || '');
+  // Роль "Администратор" открывает встроенное админ-управление в профиле
+  // собеседника (см. UserInfoModal) — тоже может смениться живьём по сокету.
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(localStorage.getItem('role') || null);
+  const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
 
   // Режим тишины — суперадмин может включить/выключить прямо во время сессии,
   // поэтому актуальное значение приходит и живьём по сокету (см. account_updated).
@@ -104,6 +108,14 @@ const Chat: React.FC = () => {
     }
     ensureMobileNotificationPermission();
   }, []);
+
+  // Список групп нужен только для встроенного админ-управления в профиле —
+  // подтягиваем один раз, когда роль оказывается "Администратор" (в том
+  // числе если её только что назначили живьём, без перелогина).
+  useEffect(() => {
+    if (currentUserRole !== 'admin') return;
+    api.get('/moderation/groups').then(({ data }) => setGroups(data)).catch(console.error);
+  }, [currentUserRole]);
 
   // Красная точка в трее/оверлей на таскбаре (desktop) — пока есть непрочитанное
   useEffect(() => {
@@ -238,12 +250,18 @@ const Chat: React.FC = () => {
       setMessages(prev => prev.map(m => m.id === data.id ? { ...m, deleted: true, text: '' } : m));
     });
 
-    // Супер-админ может включить/выключить режим тишины (или сменить роль/группу)
-    // прямо во время сессии — применяем сразу, без перелогина.
-    newSocket.on('account_updated', (data: { muted?: boolean }) => {
+    // Супер-админ (или теперь и обычный "Администратор" из профиля) может
+    // включить/выключить режим тишины или сменить роль/группу/тип прямо во
+    // время сессии — применяем сразу, без перелогина. Это всегда про самого
+    // себя: сервер шлёт это только в комнату 'user:<id>' затронутого.
+    newSocket.on('account_updated', (data: { muted?: boolean; role?: string | null }) => {
       if (typeof data.muted === 'boolean') {
         setMuted(data.muted);
         localStorage.setItem('muted', String(data.muted));
+      }
+      if (data.role !== undefined) {
+        setCurrentUserRole(data.role);
+        localStorage.setItem('role', data.role || '');
       }
     });
 
@@ -735,6 +753,8 @@ const Chat: React.FC = () => {
             phone: infoModalUser.phone,
           }}
           online={onlineUsers.includes(infoModalUser.id)}
+          canModerate={currentUserRole === 'admin'}
+          groups={groups}
           onClose={() => setInfoModalUserId(null)}
           onMessage={() => {
             setActiveChat(getChatId(infoModalUser.id));

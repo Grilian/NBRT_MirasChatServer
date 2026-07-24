@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import api from '../api/client';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
+import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 
 interface UserInfoModalProps {
   user: {
@@ -13,12 +15,42 @@ interface UserInfoModalProps {
     phone?: string | null;
   };
   online?: boolean;
+  canModerate?: boolean;
+  groups?: { id: number; name: string }[];
   onClose: () => void;
   onMessage: () => void;
 }
 
-const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, onClose, onMessage }) => {
+interface ModerationInfo {
+  muted: boolean;
+  account_type: AccountType;
+  role: string | null;
+  group_id: number | null;
+}
+
+const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate, groups = [], onClose, onMessage }) => {
   const name = nameFor(user);
+  const [moderation, setModeration] = useState<ModerationInfo | null>(null);
+  const [modError, setModError] = useState('');
+
+  // Тишина/тип/группа/роль — не публичные поля, подгружаем отдельно и только
+  // для тех, у кого есть право ими управлять (проверяется и на сервере).
+  useEffect(() => {
+    if (!canModerate) return;
+    api.get(`/moderation/users/${user.id}`)
+      .then(({ data }) => setModeration(data))
+      .catch((err) => setModError(err.response?.data?.error || 'Не удалось загрузить'));
+  }, [canModerate, user.id]);
+
+  const updateModeration = async (patch: Partial<{ muted: boolean; account_type: AccountType; group_id: number | null; role: string | null }>) => {
+    try {
+      const { data } = await api.put(`/moderation/users/${user.id}`, patch);
+      setModeration(data);
+      setModError('');
+    } catch (err: any) {
+      setModError(err.response?.data?.error || 'Не удалось сохранить');
+    }
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -57,6 +89,63 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, onClose, on
           </div>
 
           <button type="button" className="btn-primary" onClick={onMessage}>Написать</button>
+
+          {canModerate && (
+            <div className="user-info-admin">
+              <div className="settings-section-title">Управление</div>
+              {modError && <p className="form-error">{modError}</p>}
+              {moderation ? (
+                <div className="user-info-fields">
+                  <div className="user-info-field">
+                    <span className="user-info-label">Тишина</span>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={moderation.muted}
+                        onChange={(e) => updateModeration({ muted: e.target.checked })}
+                      />
+                      <span className="switch-track"><span className="switch-thumb" /></span>
+                    </label>
+                  </div>
+                  <div className="user-info-field">
+                    <span className="user-info-label">Тип</span>
+                    <select
+                      value={moderation.account_type}
+                      onChange={(e) => updateModeration({ account_type: e.target.value as AccountType })}
+                    >
+                      {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="user-info-field">
+                    <span className="user-info-label">Группа</span>
+                    <select
+                      value={moderation.group_id ?? ''}
+                      onChange={(e) => updateModeration({ group_id: e.target.value ? Number(e.target.value) : null })}
+                    >
+                      <option value="">—</option>
+                      {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="user-info-field">
+                    <span className="user-info-label">Роль</span>
+                    <select
+                      value={moderation.role ?? ''}
+                      onChange={(e) => updateModeration({ role: e.target.value || null })}
+                    >
+                      <option value="">— не назначена —</option>
+                      {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                !modError && <div className="user-info-admin-loading">Загрузка...</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -3,12 +3,12 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
 const verifySuperAdmin = require('../middleware/verifySuperAdmin');
-const { isValidLogin, isReservedLogin, isValidAccountType, PASSWORD_RESET_WINDOW_MS } = require('../utils/validators');
+const { isValidLogin, isReservedLogin, PASSWORD_RESET_WINDOW_MS } = require('../utils/validators');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
+const { applyModeration, notifyModerated } = require('../services/userModeration');
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key';
-const VALID_ROLES = ['user', 'moderator', 'admin'];
 
 // 'ok' — обычный, рабочий пароль; 'pending' — админ нажал "Сменить", ждём,
 // что человек зайдёт и задаст новый в течение окна; 'expired' — окно прошло,
@@ -172,9 +172,8 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
-    const updates = [];
-    const params = [];
-
+    // Логин — только у супер-админа (не входит в общую "модерацию", доступную
+    // и с ролью "Администратор" из обычного клиента).
     if (req.body.username !== undefined) {
       const nextUsername = String(req.body.username).trim();
       if (isReservedLogin(nextUsername) || !isValidLogin(nextUsername)) {
@@ -184,62 +183,19 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
       const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?').get(nextUsername, id);
       if (existing) return res.status(400).json({ error: 'Это имя уже занято' });
 
-      updates.push('username = ?');
-      params.push(nextUsername);
+      db.prepare('UPDATE users SET username = ? WHERE id = ?').run(nextUsername, id);
     }
 
-    if (req.body.group_id !== undefined) {
-      const groupId = req.body.group_id === null ? null : Number(req.body.group_id);
-      if (groupId !== null) {
-        const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(groupId);
-        if (!group) return res.status(400).json({ error: 'Группа не найдена' });
-      }
-      updates.push('group_id = ?');
-      params.push(groupId);
-    }
+    const updated = applyModeration(id, {
+      group_id: req.body.group_id,
+      role: req.body.role,
+      account_type: req.body.account_type,
+      muted: req.body.muted,
+    });
 
-    if (req.body.role !== undefined) {
-      const role = req.body.role ? String(req.body.role) : null;
-      if (role !== null && !VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Некорректная роль' });
-      updates.push('role = ?');
-      params.push(role);
-    }
+    notifyModerated(req.app.get('io'), updated);
 
-    if (req.body.account_type !== undefined) {
-      const accountType = String(req.body.account_type);
-      if (!isValidAccountType(accountType)) return res.status(400).json({ error: 'Некорректный тип аккаунта' });
-      updates.push('account_type = ?');
-      params.push(accountType);
-    }
-
-    if (req.body.muted !== undefined) {
-      updates.push('muted = ?');
-      params.push(req.body.muted ? 1 : 0);
-    }
-
-    if (updates.length > 0) {
-      params.push(id);
-      db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-    }
-
-    const updated = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.group_id, u.role, u.muted, u.account_type,
-             u.password, u.password_reset_requested_at, g.name AS group_name
-      FROM users u
-      LEFT JOIN groups g ON g.id = u.group_id
-      WHERE u.id = ?
-    `).get(id);
-
-    // Живое уведомление клиенту — режим тишины/роль/группа должны подействовать
-    // сразу, не дожидаясь перелогина.
-    const io = req.app.get('io');
-    if (io) {
-      io.to('user:' + id).emit('account_updated', {
-        muted: !!updated.muted,
-        role: updated.role,
-        group_id: updated.group_id
-      });
-    }
+    const full = db.prepare('SELECT password, password_reset_requested_at FROM users WHERE id = ?').get(id);
 
     res.json({
       id: updated.id,
@@ -250,10 +206,10 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
       role: updated.role || null,
       muted: !!updated.muted,
       account_type: updated.account_type || 'staff',
-      password_status: passwordStatus(updated),
+      password_status: passwordStatus(full),
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(400).json({ error: e.message });
   }
 });
 

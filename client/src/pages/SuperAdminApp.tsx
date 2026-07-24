@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import superAdminApi from '../api/superAdminClient';
+import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 
 interface Group {
   id: number;
@@ -7,7 +8,6 @@ interface Group {
   member_count: number;
 }
 
-type AccountType = 'staff' | 'internet' | 'miras';
 type PasswordStatus = 'ok' | 'pending' | 'expired';
 
 interface UserRow {
@@ -21,18 +21,6 @@ interface UserRow {
   account_type: AccountType;
   password_status: PasswordStatus;
 }
-
-const ROLE_LABELS: Record<string, string> = {
-  user: 'Сотрудник',
-  moderator: 'Модератор',
-  admin: 'Администратор',
-};
-
-const TYPE_LABELS: Record<AccountType, string> = {
-  staff: 'Сотрудник',
-  internet: 'Интернет',
-  miras: 'Мирас',
-};
 
 const PASSWORD_STATUS_LABELS: Record<Exclude<PasswordStatus, 'ok'>, string> = {
   pending: 'Ждёт нового пароля',
@@ -267,7 +255,7 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
               </td>
               <td>
                 <select value={u.account_type} onChange={(e) => update(u.id, { account_type: e.target.value })}>
-                  {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                  {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
