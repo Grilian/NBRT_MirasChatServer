@@ -18,3 +18,12 @@ export function formatMoscowTime(value: string): string {
     timeZone: 'Europe/Moscow',
   });
 }
+
+// Дата рождения хранится как 'YYYY-MM-DD' (формат <input type="date">) —
+// показываем как привычное ДД.ММ.ГГГГ, без часового пояса (это календарная
+// дата, а не момент времени, конвертировать её незачем).
+export function formatDate(value: string): string {
+  const [year, month, day] = value.split('-');
+  if (!year || !month || !day) return value;
+  return `${day}.${month}.${year}`;
+}

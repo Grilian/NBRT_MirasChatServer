@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
+import { formatDate } from '../utils/time';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 
 interface UserInfoModalProps {
@@ -13,6 +14,9 @@ interface UserInfoModalProps {
     groupName?: string | null;
     bio?: string | null;
     phone?: string | null;
+    department?: string | null;
+    position?: string | null;
+    birthDate?: string | null;
   };
   online?: boolean;
   canModerate?: boolean;
@@ -72,6 +76,24 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
               <div className="user-info-field">
                 <span className="user-info-label">Группа</span>
                 <span>{user.groupName}</span>
+              </div>
+            )}
+            {user.department && (
+              <div className="user-info-field">
+                <span className="user-info-label">Отдел</span>
+                <span>{user.department}</span>
+              </div>
+            )}
+            {user.position && (
+              <div className="user-info-field">
+                <span className="user-info-label">Должность</span>
+                <span>{user.position}</span>
+              </div>
+            )}
+            {user.birthDate && (
+              <div className="user-info-field">
+                <span className="user-info-label">Дата рождения</span>
+                <span>{formatDate(user.birthDate)}</span>
               </div>
             )}
             {user.bio && (

@@ -160,6 +160,24 @@ try {
   // Колонка уже есть
 }
 
+// Миграция: расширенные поля профиля — отдел, должность, дата рождения
+// (дата — строка 'YYYY-MM-DD', как отдаёт <input type="date">).
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN department TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN position TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN birth_date TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 // Сиды: стартовые группы + единственный супер-админ панели управления.
 // Пароль генерируется один раз при первом запуске (если не задан через env)
 // и больше нигде не хранится в открытом виде — только его bcrypt-хэш в БД.

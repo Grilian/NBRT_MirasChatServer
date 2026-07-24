@@ -27,6 +27,9 @@ interface User {
   avatar_path: string | null;
   bio: string | null;
   phone: string | null;
+  department: string | null;
+  position: string | null;
+  birth_date: string | null;
   group_id: number | null;
   group_name: string | null;
 }
@@ -54,6 +57,9 @@ interface AllUser {
   avatarPath: string | null;
   bio: string | null;
   phone: string | null;
+  department: string | null;
+  position: string | null;
+  birthDate: string | null;
   source: 'local';
   groupName?: string | null;
 }
@@ -75,12 +81,10 @@ const Chat: React.FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
-  const [menuOpen, setMenuOpen] = useState(false);
   const [view, setView] = useState<'conversation' | 'settings' | 'profile'>('conversation');
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = Number(localStorage.getItem('userId'));
 
@@ -92,6 +96,9 @@ const Chat: React.FC = () => {
   const [currentAvatarPath, setCurrentAvatarPath] = useState<string | null>(localStorage.getItem('avatarPath') || null);
   const [currentBio, setCurrentBio] = useState(localStorage.getItem('bio') || '');
   const [currentPhone, setCurrentPhone] = useState(localStorage.getItem('phone') || '');
+  const [currentDepartment, setCurrentDepartment] = useState(localStorage.getItem('department') || '');
+  const [currentPosition, setCurrentPosition] = useState(localStorage.getItem('position') || '');
+  const [currentBirthDate, setCurrentBirthDate] = useState(localStorage.getItem('birthDate') || '');
   // Роль "Администратор" открывает встроенное админ-управление в профиле
   // собеседника (см. UserInfoModal) — тоже может смениться живьём по сокету.
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(localStorage.getItem('role') || null);
@@ -138,17 +145,6 @@ const Chat: React.FC = () => {
     return () => { listenerPromise.then((h) => h.remove()); };
   }, [view, mobileView]);
 
-  // Закрытие меню шапки по клику снаружи
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('click', onDocClick);
-    return () => document.removeEventListener('click', onDocClick);
-  }, []);
-
   // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
   // ни 'stop_typing' (вкладка закрылась, сеть оборвалась) — гасим индикатор сами,
   // чтобы он не завис навечно.
@@ -169,6 +165,33 @@ const Chat: React.FC = () => {
     // чтобы после реконнекта не остаться с протухшими данными.
     newSocket.on('connect', () => {
       newSocket.emit('user_online', localStorage.getItem('token'));
+
+      // Подтягиваем свой профиль целиком — сессии обычных пользователей не
+      // истекают и не переиздаются, так что это единственный способ подобрать
+      // поля, добавленные в приложение уже после того, как человек залогинился
+      // (например, role для встроенного админ-управления), без перелогина.
+      api.get('/users/me').then(({ data }) => {
+        setCurrentUsername(data.username);
+        setCurrentDisplayName(data.display_name);
+        setCurrentAvatarPath(data.avatar_path);
+        setCurrentBio(data.bio);
+        setCurrentPhone(data.phone);
+        setCurrentDepartment(data.department);
+        setCurrentPosition(data.position);
+        setCurrentBirthDate(data.birth_date);
+        setCurrentUserRole(data.role);
+        setMuted(data.muted);
+        localStorage.setItem('username', data.username);
+        localStorage.setItem('displayName', data.display_name);
+        localStorage.setItem('avatarPath', data.avatar_path || '');
+        localStorage.setItem('bio', data.bio || '');
+        localStorage.setItem('phone', data.phone || '');
+        localStorage.setItem('department', data.department || '');
+        localStorage.setItem('position', data.position || '');
+        localStorage.setItem('birthDate', data.birth_date || '');
+        localStorage.setItem('role', data.role || '');
+        localStorage.setItem('muted', String(data.muted));
+      }).catch(console.error);
 
       api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
       api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
@@ -519,6 +542,9 @@ const Chat: React.FC = () => {
     avatarPath: u.avatar_path,
     bio: u.bio,
     phone: u.phone,
+    department: u.department,
+    position: u.position,
+    birthDate: u.birth_date,
     source: 'local' as const,
     groupName: u.group_name,
   }));
@@ -531,6 +557,9 @@ const Chat: React.FC = () => {
       if (user) setActiveChat(chatId);
     }
     setMobileView('chat');
+    // Открытые Настройки/Профиль иначе продолжали закрывать собой область
+    // переписки — activeChat менялся, а видимая панель оставалась прежней.
+    setView('conversation');
   };
 
   // Тап по системному уведомлению на Android — открыть тот же чат, откуда
@@ -559,10 +588,11 @@ const Chat: React.FC = () => {
   // сразу (без ожидания первого сообщения); у собеседника — только когда
   // сообщение реально отправлено (см. серверную автоподписку).
   const handleStartChat = async (user: { id: number; username: string; display_name: string | null; avatar_path: string | null; group_id: number | null; group_name: string | null }) => {
-    setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, { ...user, bio: null, phone: null }]);
+    setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, { ...user, bio: null, phone: null, department: null, position: null, birth_date: null }]);
     setDirectoryOpen(false);
     setActiveChat(getChatId(user.id));
     setMobileView('chat');
+    setView('conversation');
     try {
       await api.post(`/contacts/${user.id}`);
     } catch (e) {
@@ -626,17 +656,26 @@ const Chat: React.FC = () => {
     window.location.reload();
   };
 
-  const handleProfileSaved = (profile: { username: string; display_name: string; avatar_path: string | null; bio: string; phone: string }) => {
+  const handleProfileSaved = (profile: {
+    username: string; display_name: string; avatar_path: string | null; bio: string; phone: string;
+    department: string; position: string; birth_date: string;
+  }) => {
     localStorage.setItem('username', profile.username);
     localStorage.setItem('displayName', profile.display_name);
     localStorage.setItem('avatarPath', profile.avatar_path || '');
     localStorage.setItem('bio', profile.bio);
     localStorage.setItem('phone', profile.phone);
+    localStorage.setItem('department', profile.department);
+    localStorage.setItem('position', profile.position);
+    localStorage.setItem('birthDate', profile.birth_date);
     setCurrentUsername(profile.username);
     setCurrentDisplayName(profile.display_name);
     setCurrentAvatarPath(profile.avatar_path);
     setCurrentBio(profile.bio);
     setCurrentPhone(profile.phone);
+    setCurrentDepartment(profile.department);
+    setCurrentPosition(profile.position);
+    setCurrentBirthDate(profile.birth_date);
   };
 
   // Аватар меняется отдельно от остальной формы (загрузка файла сразу же,
@@ -733,6 +772,7 @@ const Chat: React.FC = () => {
         onRemoveContact={handleRemoveContact}
         onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
         onOpenSettings={() => setView('settings')}
+        onOpenOwnProfile={() => setView('profile')}
       />
       {directoryOpen && (
         <DirectoryModal
@@ -751,14 +791,16 @@ const Chat: React.FC = () => {
             groupName: infoModalUser.groupName,
             bio: infoModalUser.bio,
             phone: infoModalUser.phone,
+            department: infoModalUser.department,
+            position: infoModalUser.position,
+            birthDate: infoModalUser.birthDate,
           }}
           online={onlineUsers.includes(infoModalUser.id)}
           canModerate={currentUserRole === 'admin'}
           groups={groups}
           onClose={() => setInfoModalUserId(null)}
           onMessage={() => {
-            setActiveChat(getChatId(infoModalUser.id));
-            setMobileView('chat');
+            handleSelectChat(getChatId(infoModalUser.id));
             setInfoModalUserId(null);
           }}
         />
@@ -780,6 +822,9 @@ const Chat: React.FC = () => {
             currentAvatarPath={currentAvatarPath}
             currentBio={currentBio}
             currentPhone={currentPhone}
+            currentDepartment={currentDepartment}
+            currentPosition={currentPosition}
+            currentBirthDate={currentBirthDate}
             onBack={() => setView('settings')}
             onSaved={handleProfileSaved}
             onAvatarChanged={handleAvatarChanged}
@@ -814,20 +859,6 @@ const Chat: React.FC = () => {
               ) : (
                 <div className="conv-title"><div className="name">Выберите чат</div></div>
               )}
-
-              <div className="menu-wrap" ref={menuRef}>
-                <button type="button" className="icon-btn" onClick={() => setMenuOpen(v => !v)} aria-label="Меню">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg>
-                </button>
-                {menuOpen && (
-                  <div className="menu">
-                    <button type="button" onClick={() => { setMenuOpen(false); handleLogout(); }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
-                      Выйти
-                    </button>
-                  </div>
-                )}
-              </div>
             </div>
 
             <ChatWindow

@@ -32,6 +32,22 @@ function isValidBio(bio) {
   return typeof bio === 'string' && bio.length <= 160;
 }
 
+function isValidShortText(value) {
+  if (value === undefined || value === null || value === '') return true; // необязательное поле
+  return typeof value === 'string' && value.length <= 100;
+}
+
+const BIRTH_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidBirthDate(value) {
+  if (value === undefined || value === null || value === '') return true; // необязательное поле
+  if (typeof value !== 'string' || !BIRTH_DATE_RE.test(value)) return false;
+  const date = new Date(value + 'T00:00:00Z');
+  if (Number.isNaN(date.getTime())) return false;
+  const year = date.getUTCFullYear();
+  return year >= 1900 && date.getTime() <= Date.now();
+}
+
 // Тип учётной записи. 'miras' — легаси зеркала МИРАС (интеграция убрана, но
 // записи в базе могли остаться), новые аккаунты через неё больше не создаются.
 const ACCOUNT_TYPES = ['staff', 'internet', 'miras'];
@@ -51,6 +67,8 @@ module.exports = {
   isValidDisplayName,
   isValidPhone,
   isValidBio,
+  isValidShortText,
+  isValidBirthDate,
   ACCOUNT_TYPES,
   isValidAccountType,
   PASSWORD_RESET_WINDOW_MS,

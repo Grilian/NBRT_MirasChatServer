@@ -19,6 +19,9 @@ function loginSuccessPayload(user) {
     avatar_path: user.avatar_path || null,
     bio: user.bio || '',
     phone: user.phone || '',
+    department: user.department || '',
+    position: user.position || '',
+    birth_date: user.birth_date || '',
     role: user.role || null,
   };
 }

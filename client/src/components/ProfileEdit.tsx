@@ -13,18 +13,28 @@ interface ProfileEditProps {
   currentAvatarPath: string | null;
   currentBio: string;
   currentPhone: string;
+  currentDepartment: string;
+  currentPosition: string;
+  currentBirthDate: string;
   onBack: () => void;
-  onSaved: (profile: { username: string; display_name: string; avatar_path: string | null; bio: string; phone: string }) => void;
+  onSaved: (profile: {
+    username: string; display_name: string; avatar_path: string | null; bio: string; phone: string;
+    department: string; position: string; birth_date: string;
+  }) => void;
   onAvatarChanged: (avatarPath: string | null) => void;
 }
 
 const ProfileEdit: React.FC<ProfileEditProps> = ({
-  currentUsername, currentDisplayName, currentAvatarPath, currentBio, currentPhone, onBack, onSaved, onAvatarChanged
+  currentUsername, currentDisplayName, currentAvatarPath, currentBio, currentPhone,
+  currentDepartment, currentPosition, currentBirthDate, onBack, onSaved, onAvatarChanged
 }) => {
   const [username, setUsername] = useState(currentUsername);
   const [displayName, setDisplayName] = useState(currentDisplayName);
   const [bio, setBio] = useState(currentBio);
   const [phone, setPhone] = useState(currentPhone);
+  const [department, setDepartment] = useState(currentDepartment);
+  const [position, setPosition] = useState(currentPosition);
+  const [birthDate, setBirthDate] = useState(currentBirthDate);
   const [avatarPath, setAvatarPath] = useState(currentAvatarPath);
   const [newPassword, setNewPassword] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -105,6 +115,9 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
         display_name: displayName,
         bio,
         phone,
+        department,
+        position,
+        birth_date: birthDate,
       });
       setSuccess('Профиль обновлён');
       setNewPassword('');
@@ -115,6 +128,9 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
         avatar_path: data.avatar_path,
         bio: data.bio || '',
         phone: data.phone || '',
+        department: data.department || '',
+        position: data.position || '',
+        birth_date: data.birth_date || '',
       });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Не удалось сохранить изменения');
@@ -156,6 +172,18 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
           <div className="field">
             <label>Телефон</label>
             <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Необязательно" />
+          </div>
+          <div className="field">
+            <label>Отдел</label>
+            <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Необязательно" maxLength={100} />
+          </div>
+          <div className="field">
+            <label>Должность</label>
+            <input type="text" value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Необязательно" maxLength={100} />
+          </div>
+          <div className="field">
+            <label>Дата рождения</label>
+            <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
           </div>
           <div className="field">
             <label>Логин</label>

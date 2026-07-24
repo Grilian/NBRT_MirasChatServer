@@ -5,7 +5,8 @@ const path = require('path');
 const multer = require('multer');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const { isValidLogin, isReservedLogin, isValidPassword, isValidDisplayName, isValidPhone, isValidBio } = require('../utils/validators');
+const sharp = require('sharp');
+const { isValidLogin, isReservedLogin, isValidPassword, isValidDisplayName, isValidPhone, isValidBio, isValidShortText, isValidBirthDate } = require('../utils/validators');
 const { deleteAvatarFile } = require('../utils/files');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 const router = express.Router();
@@ -13,30 +14,67 @@ const router = express.Router();
 const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
 fs.mkdirSync(AVATARS_DIR, { recursive: true });
 
-const AVATAR_MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const AVATAR_MAX_DIMENSION = 320; // сторона квадрата — достаточно для круглого аватара, не для полноэкранного фото
+const AVATAR_JPEG_QUALITY = 80;
 
+// Буфер в памяти, а не сразу на диск — файл нужно сначала прогнать через
+// sharp (телефоны присылают многомегабайтные фото, а нужен маленький
+// сжатый квадрат), и только потом сохранить готовый результат.
 const avatarUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, AVATARS_DIR),
-    filename: (req, file, cb) => cb(null, `user_${req.userId}_${Date.now()}.${AVATAR_MIME_EXT[file.mimetype]}`),
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => cb(null, !!AVATAR_MIME_EXT[file.mimetype]),
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, AVATAR_ALLOWED_MIME.includes(file.mimetype)),
 });
 
-// Получить всех пользователей (кроме текущего).
+// Получить всех пользователей (кроме текущего) — справочник для поиска.
 // miras_* — служебные зеркала админов МИРАС для маршрутизации сообщений,
 // в списке реальных сотрудников их быть не должно.
+// Тип "Интернет" (незнакомые с улицы, самостоятельная регистрация) видит в
+// справочнике только других "Интернет" — не может пробежаться по всем
+// сотрудникам. После того как админ подтвердит его как "Сотрудник", видимость
+// открывается на всех.
 router.get('/', verifyToken, (req, res) => {
   try {
+    const requester = db.prepare('SELECT account_type FROM users WHERE id = ?').get(req.userId);
+    const restrictToInternet = requester && requester.account_type === 'internet';
+
     const users = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar_path, u.group_id, g.name AS group_name
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
       WHERE u.id != ?
         AND u.username NOT LIKE 'miras\_%' ESCAPE '\\'
-    `).all(req.userId);
+        AND (? = 0 OR u.account_type = 'internet')
+    `).all(req.userId, restrictToInternet ? 1 : 0);
     res.json(users);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Свой текущий профиль целиком, включая роль — регулярные пользовательские
+// токены не имеют срока действия и не переиздаются автоматически, так что
+// это единственный способ подтянуть поля, появившиеся уже после логина
+// (например, role), не заставляя человека перелогиниваться вручную.
+router.get('/me', verifyToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.userId);
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      display_name: user.display_name || user.username,
+      avatar_path: user.avatar_path || null,
+      bio: user.bio || '',
+      phone: user.phone || '',
+      department: user.department || '',
+      position: user.position || '',
+      birth_date: user.birth_date || '',
+      role: user.role || null,
+      muted: !!user.muted,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -120,21 +158,50 @@ router.put('/me', verifyToken, (req, res) => {
       params.push(nextPhone);
     }
 
+    if (req.body.department !== undefined) {
+      const nextDepartment = String(req.body.department || '').trim();
+      if (!isValidShortText(nextDepartment)) {
+        return res.status(400).json({ error: 'Отдел: не длиннее 100 символов' });
+      }
+      updates.push('department = ?');
+      params.push(nextDepartment);
+    }
+
+    if (req.body.position !== undefined) {
+      const nextPosition = String(req.body.position || '').trim();
+      if (!isValidShortText(nextPosition)) {
+        return res.status(400).json({ error: 'Должность: не длиннее 100 символов' });
+      }
+      updates.push('position = ?');
+      params.push(nextPosition);
+    }
+
+    if (req.body.birth_date !== undefined) {
+      const nextBirthDate = String(req.body.birth_date || '').trim();
+      if (!isValidBirthDate(nextBirthDate)) {
+        return res.status(400).json({ error: 'Некорректная дата рождения' });
+      }
+      updates.push('birth_date = ?');
+      params.push(nextBirthDate);
+    }
+
     if (updates.length > 0) {
       params.push(user.id);
       db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     }
 
-    const updated = db.prepare('SELECT id, username, display_name, avatar_path, bio, phone FROM users WHERE id = ?').get(user.id);
+    const updated = db.prepare('SELECT id, username, display_name, avatar_path, bio, phone, department, position, birth_date FROM users WHERE id = ?').get(user.id);
     res.json(updated);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Загрузить/заменить свой аватар
+// Загрузить/заменить свой аватар — сжимаем и обрезаем в квадрат перед
+// сохранением, вместо того чтобы хранить исходник как есть (с телефонов
+// приходят многомегабайтные фото на маленький круглый аватар).
 router.post('/me/avatar', verifyToken, (req, res) => {
-  avatarUpload.single('avatar')(req, res, (err) => {
+  avatarUpload.single('avatar')(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message || 'Не удалось загрузить файл' });
     }
@@ -143,8 +210,17 @@ router.post('/me/avatar', verifyToken, (req, res) => {
     }
 
     try {
+      const filename = `user_${req.userId}_${Date.now()}.jpg`;
+      const outputPath = path.join(AVATARS_DIR, filename);
+
+      await sharp(req.file.buffer)
+        .rotate() // на случай EXIF-ориентации с телефонных камер — иначе кроп в квадрат может уйти боком
+        .resize(AVATAR_MAX_DIMENSION, AVATAR_MAX_DIMENSION, { fit: 'cover' })
+        .jpeg({ quality: AVATAR_JPEG_QUALITY })
+        .toFile(outputPath);
+
       const user = db.prepare('SELECT avatar_path FROM users WHERE id = ?').get(req.userId);
-      const avatarPath = `/uploads/avatars/${req.file.filename}`;
+      const avatarPath = `/uploads/avatars/${filename}`;
 
       db.prepare('UPDATE users SET avatar_path = ? WHERE id = ?').run(avatarPath, req.userId);
       if (user && user.avatar_path && user.avatar_path !== avatarPath) {
