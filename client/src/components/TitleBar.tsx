@@ -34,7 +34,7 @@ export default function TitleBar() {
           {isMaximized ? (
             <svg width="10" height="10" viewBox="0 0 10 10">
               <rect x="1.5" y="0" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
-              <rect x="0" y="2.5" width="7" height="7" fill="var(--green)" stroke="currentColor" strokeWidth="1" />
+              <rect x="0" y="2.5" width="7" height="7" fill="var(--accent)" stroke="currentColor" strokeWidth="1" />
             </svg>
           ) : (
             <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>

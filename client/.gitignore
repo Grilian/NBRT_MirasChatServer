@@ -13,6 +13,9 @@
 /build-desktop
 /build-mobile
 
+# auto-generated at build/start time, see scripts/generate-version.js
+/src/version.ts
+
 # misc
 .DS_Store
 .env.local

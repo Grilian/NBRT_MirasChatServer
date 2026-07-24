@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Avatar from './Avatar';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
+import { APP_VERSION, BUILT_AT } from '../version';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
@@ -117,6 +118,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <span className="label">Выйти</span>
           </button>
         </div>
+
+        <div className="app-version">MirasChat {APP_VERSION} · {BUILT_AT}</div>
       </div>
     </div>
   );
