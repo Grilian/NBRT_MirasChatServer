@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const admin = require('firebase-admin');
+// firebase-admin 14 отдаёт только модульный API: привычных admin.credential
+// и admin.messaging() в корневом экспорте больше нет.
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getMessaging } = require('firebase-admin/messaging');
 const db = require('../db');
 
 // Ключ сервисного аккаунта Firebase. В репозитории его нет и быть не должно —
@@ -21,8 +24,8 @@ let messaging = null;
       return;
     }
     const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
-    const app = admin.initializeApp({ credential: admin.credential.cert(credentials) });
-    messaging = admin.messaging(app);
+    const app = initializeApp({ credential: cert(credentials) });
+    messaging = getMessaging(app);
     console.log('[push] FCM подключён, проект ' + credentials.project_id);
   } catch (e) {
     console.error('[push] не удалось инициализировать FCM:', e.message);
