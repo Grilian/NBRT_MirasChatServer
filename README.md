@@ -54,10 +54,156 @@ curl -s -o /dev/null -w '%{http_code}\n' https://cagrizzz.ru/miraschat/
 
 В приложении: Настройки → внизу списка строка вида `MirasChat <хэш> · <дата сборки>` — по ней видно, точно ли раскатился актуальный коммит. Хэш с `+` на конце означает, что сборка была сделана при незакоммиченных изменениях в рабочей копии на сервере.
 
+## Сборка Android-приложения (.apk)
+
+Android-клиент — это тот же веб-клиент, упакованный в Capacitor: `mobile/www` содержит собранную статику React, Android-проект лежит в `mobile/android`. Нативного кода в приложении нет, кроме двух плагинов Capacitor (`@capacitor/app` — кнопка «назад» и сворачивание, `@capacitor/local-notifications` — системные уведомления).
+
+Важно: приложение **не** ходит в локальный сервер. В сборку зашиваются адреса продакшна (`https://cagrizzz.ru/miraschat/api`), см. шаг 3 — как их поменять.
+
+### 0. Что должно быть установлено
+
+| Что | Версия | Как проверить |
+| --- | --- | --- |
+| JDK | **17** — Gradle 8.2.1 не запускается на JDK 21+ | `java -version` |
+| Android SDK | Platform **34** + Build-Tools | наличие `<sdk>/platforms/android-34` |
+| Node.js | 18+ | `node -v` |
+
+На текущей машине сборки: JDK 17 (Eclipse Adoptium), SDK в `C:\Android\sdk`. Путь до SDK берётся из `mobile/android/local.properties` (файл в `.gitignore`, на каждой машине свой):
+
+```
+sdk.dir=C\:\\Android\\sdk
+```
+
+Если файла нет — создайте его вручную (обратные слэши экранируются, как в примере) или один раз откройте проект в Android Studio, она пропишет путь сама. `JAVA_HOME` должен указывать на JDK 17; Gradle и Android SDK ставятся вместе с Android Studio, отдельный Gradle не нужен — используется wrapper (`gradlew`), он сам скачает нужную версию при первом запуске.
+
+Зависимости `mobile/` ставятся один раз:
+
+```bash
+cd mobile
+npm install
+```
+
+### 1. Поднять версию
+
+Версия приложения живёт в `mobile/android/app/build.gradle` и **не меняется автоматически**:
+
+```gradle
+versionCode 3
+versionName "1.2"
+```
+
+- `versionName` — то, что видит пользователь (и что идёт в имя файла APK).
+- `versionCode` — целое число, которое **обязано расти**. Android откажется устанавливать сборку с `versionCode` меньше уже установленной.
+
+Поднимайте оба перед каждой раздаваемой сборкой.
+
+### 2. Собрать веб-клиент и синхронизировать с Android-проектом
+
+```bash
+cd mobile
+npm run prepare-app
+```
+
+Одна команда делает два шага (можно запускать и по отдельности: `npm run build:client`, `npm run sync`):
+
+1. `scripts/build-client.js` собирает `client/` в режиме production в `client/build-mobile` (отдельно от обычного `client/build`, чтобы не перетирать веб-сборку) с `PUBLIC_URL=.` — внутри APK нет веб-сервера, пути должны быть относительными — и копирует результат в `mobile/www`.
+2. `npx cap sync android` копирует `mobile/www` в `android/app/src/main/assets/public` и обновляет список плагинов Capacitor.
+
+Шаг обязателен после **любой** правки в `client/` — Gradle сам клиент не пересобирает.
+
+### 3. Куда будет ходить приложение
+
+По умолчанию в продакшн. Переопределяется переменными окружения на время сборки:
+
+```bash
+MIRASCHAT_API_BASE_URL=https://cagrizzz.ru/miraschat/api \
+MIRASCHAT_SOCKET_URL=https://cagrizzz.ru \
+MIRASCHAT_SOCKET_PATH=/miraschat/socket.io \
+npm run prepare-app
+```
+
+На Windows в PowerShell:
+
+```powershell
+$env:MIRASCHAT_API_BASE_URL='http://192.168.24.2:3010/api'; npm run prepare-app
+```
+
+Адреса печатаются в начале сборки — сверьтесь с выводом. Для сборки под локальный сервер укажите IP машины в сети (не `localhost`: для телефона это он сам).
+
+### 4. Собрать APK
+
+```bash
+cd mobile/android
+./gradlew assembleDebug
+```
+
+На Windows в PowerShell — `.\gradlew.bat assembleDebug`. Первый запуск скачивает Gradle и зависимости (несколько минут), последующие — около минуты.
+
+Результат: `mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+Готовый файл кладём в `mobile/release` под версионным именем (папка в `.gitignore`, APK в репозиторий не коммитятся):
+
+```bash
+cp app/build/outputs/apk/debug/app-debug.apk ../release/MirasChat-1.2-debug.apk
+```
+
+### 5. Проверить, что собралось именно то
+
+```bash
+# путь до SDK — тот же, что в local.properties (ANDROID_HOME на машинах сборки не задан)
+C:/Android/sdk/build-tools/34.0.0/aapt2 dump badging ../release/MirasChat-1.2-debug.apk | head -8
+```
+
+Должно быть видно `versionCode`/`versionName` из шага 1, `package: name='ru.miras.mirasChat'` и разрешение `android.permission.POST_NOTIFICATIONS` (оно приезжает из плагина уведомлений через manifest merger, в нашем `AndroidManifest.xml` его нет и добавлять не нужно).
+
+### 6. Поставить на телефон
+
+По кабелю, с включённой отладкой по USB:
+
+```bash
+adb install -r mobile/release/MirasChat-1.2-debug.apk
+```
+
+Либо просто скинуть `.apk` на устройство и открыть — Android спросит разрешение на установку из неизвестного источника.
+
+При первом запуске приложение запросит разрешение на уведомления (Android 13+). Без него системные уведомления не появятся — внутренние всплывающие в самом приложении работать будут.
+
+### Про подпись: debug против release
+
+`assembleDebug` подписывает APK автоматически сгенерированным debug-ключом (`~/.android/debug.keystore`). Для раздачи внутри организации этого достаточно, но помните:
+
+- debug-ключ **свой на каждой машине разработчика**. APK, собранный на другом компьютере, не встанет поверх уже установленного — Android увидит другую подпись и потребует сначала удалить приложение (данные и сессия при этом теряются). Собирайте релизы для раздачи всегда с одной машины.
+- в Google Play такой APK не примут.
+
+Если понадобится настоящая release-сборка (`assembleRelease`), нужно завести keystore и добавить `signingConfigs` в `mobile/android/app/build.gradle`. Сейчас этого нет — `assembleRelease` соберёт неподписанный APK, который не установится.
+
+### Иконки и splash-экран
+
+Пересобираются из `desktop/assets/icon.svg` и `mobile/assets/icon-foreground.svg`, только если менялся логотип:
+
+```bash
+cd mobile
+node scripts/gen-icons.js     # launcher + adaptive icon во все mipmap-*
+node scripts/gen-splash.js    # splash.png во все drawable-*
+```
+
+После этого — обычная сборка (шаги 2 и 4).
+
+### Если что-то не собирается
+
+| Симптом | Причина |
+| --- | --- |
+| `SDK location not found` | нет `mobile/android/local.properties` или неверный `sdk.dir` |
+| `Unsupported class file major version` | Gradle запустился не на JDK 17 — проверьте `JAVA_HOME` |
+| Приложение открылось, но экран белый | не выполнен `npm run prepare-app`, в `assets/public` пусто или лежит старая сборка |
+| В приложении старый интерфейс | то же самое: Gradle пересобрал только обёртку, забыли пересобрать клиент |
+| Не приходят уведомления | разрешение на уведомления не выдано, либо у приложения включена экономия батареи |
+
 ## Версионирование
 
 - **Веб-клиент** (`client/`): версию не нужно вручную трогать. `client/scripts/generate-version.js` запускается автоматически перед `npm start`/`npm run build` (хуки `prestart`/`prebuild` в `client/package.json`) и штампует короткий git-хэш + время сборки в `client/src/version.ts` (в `.gitignore`, не коммитится). Именно эта версия видна в UI (см. выше).
 - **Десктоп-приложение** (`desktop/`): версия — это поле `"version"` в `desktop/package.json`, её нужно поднимать **вручную** перед каждой сборкой инсталлятора (`npm run dist:win`), она попадает в имя файла (`MirasChat Setup X.Y.Z.exe`) и в метаданные Electron-приложения. Автоматически не меняется — не забывайте бампить перед `dist:win`.
+- **Android-приложение** (`mobile/`): `versionCode` и `versionName` в `mobile/android/app/build.gradle`, тоже **вручную** перед каждой сборкой APK — подробности в разделе «Сборка Android-приложения». Внутри самого приложения (Настройки → низ списка) показывается git-версия веб-клиента, как и в вебе, — она к `versionName` отношения не имеет.
 
 ## Быстрый доступ
 
