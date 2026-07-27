@@ -9,6 +9,9 @@ import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
 import UserInfoModal from '../components/UserInfoModal';
 import Avatar from '../components/Avatar';
+import NavRail, { SectionId, sectionById } from '../components/NavRail';
+import SectionStub from '../components/SectionStub';
+import PeopleSection from '../components/PeopleSection';
 import NotificationStack, { ToastNotification } from '../components/NotificationStack';
 import api from '../api/client';
 import { nameFor } from '../utils/user';
@@ -93,6 +96,9 @@ function chatIdFor(a: number, b: number): string {
 
 const Chat: React.FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
+  // Собственный статус в рельсе: «Онлайн» показываем только при живом сокете —
+  // иначе он врал бы при обрыве связи, когда сообщения уже никуда не уходят.
+  const [socketConnected, setSocketConnected] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -106,7 +112,11 @@ const Chat: React.FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
-  const [view, setView] = useState<'conversation' | 'settings' | 'profile'>('conversation');
+  // Верхний уровень навигации — раздел из рельса. Внутри «Настроек» есть свой
+  // подэкран «Профиль», поэтому он отдельным состоянием, а не восьмым разделом:
+  // в рельсе профиль открывается тем же пунктом «Настройки».
+  const [section, setSection] = useState<SectionId>('chats');
+  const [settingsView, setSettingsView] = useState<'settings' | 'profile'>('settings');
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -133,7 +143,7 @@ const Chat: React.FC = () => {
   // узком экране можно уйти назад к списку чатов, не закрывая сам чат. Во всех
   // этих случаях сообщение человеку не видно, значит его нельзя считать
   // прочитанным и нельзя проглатывать уведомление о нём.
-  const conversationVisible = windowFocused && view === 'conversation' && mobileView === 'chat';
+  const conversationVisible = windowFocused && section === 'chats' && mobileView === 'chat';
 
   const currentUserId = Number(localStorage.getItem('userId'));
 
@@ -240,18 +250,18 @@ const Chat: React.FC = () => {
 
   // Аппаратная кнопка "назад" на Android — по умолчанию сразу закрывала бы
   // приложение (нет истории браузера). Идём по своему стеку экранов:
-  // профиль -> настройки -> переписка -> список чатов, и только с самого
-  // списка сворачиваем приложение, а не убиваем процесс.
+  // профиль -> настройки -> любой другой раздел -> чаты -> список чатов,
+  // и только с самого списка сворачиваем приложение, а не убиваем процесс.
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('backButton', () => {
-      if (view === 'profile') { setView('settings'); return; }
-      if (view === 'settings') { setView('conversation'); return; }
+      if (section === 'settings' && settingsView === 'profile') { setSettingsView('settings'); return; }
+      if (section !== 'chats') { setSection('chats'); return; }
       if (mobileView === 'chat') { setMobileView('list'); return; }
       CapApp.minimizeApp();
     });
     return () => { listenerPromise.then((h) => h.remove()); };
-  }, [view, mobileView]);
+  }, [section, settingsView, mobileView]);
 
   // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
   // ни 'stop_typing' (вкладка закрылась, сеть оборвалась) — гасим индикатор сами,
@@ -271,7 +281,10 @@ const Chat: React.FC = () => {
     // На 'connect' (в т.ч. при переподключении после разрыва сети) —
     // заново объявляем себя онлайн и подтягиваем свежее состояние,
     // чтобы после реконнекта не остаться с протухшими данными.
+    newSocket.on('disconnect', () => setSocketConnected(false));
+
     newSocket.on('connect', () => {
+      setSocketConnected(true);
       newSocket.emit('user_online', localStorage.getItem('token'));
 
       // Подтягиваем свой профиль целиком — сессии обычных пользователей не
@@ -743,9 +756,9 @@ const Chat: React.FC = () => {
       if (user) setActiveChat(chatId);
     }
     setMobileView('chat');
-    // Открытые Настройки/Профиль иначе продолжали закрывать собой область
-    // переписки — activeChat менялся, а видимая панель оставалась прежней.
-    setView('conversation');
+    // Открытые Настройки/Профиль/другой раздел иначе продолжали закрывать собой
+    // область переписки — activeChat менялся, а видимая панель оставалась прежней.
+    setSection('chats');
   };
 
   // Тап по системному уведомлению на Android — открыть тот же чат, откуда
@@ -778,7 +791,7 @@ const Chat: React.FC = () => {
     setDirectoryOpen(false);
     setActiveChat(getChatId(user.id));
     setMobileView('chat');
-    setView('conversation');
+    setSection('chats');
     try {
       await api.post(`/contacts/${user.id}`);
     } catch (e) {
@@ -951,17 +964,39 @@ const Chat: React.FC = () => {
 
   const infoModalUser = infoModalUserId ? allUsers.find(u => u.id === infoModalUserId) : null;
 
+  const isChats = section === 'chats';
+  const activeSection = sectionById(section);
+
+  const openOwnProfile = () => { setSection('settings'); setSettingsView('profile'); };
+
   return (
-    <div className={'chat-layout' + (mobileView === 'chat' ? ' is-conversation-view' : '')}>
+    <div className={'chat-layout'
+      + (isChats ? '' : ' is-single-pane')
+      + (isChats && mobileView === 'chat' ? ' is-conversation-view' : '')}>
       <NotificationStack
         toasts={toasts}
         durationMs={notificationPrefs.durationMs}
         onOpen={(chatId) => { handleSelectChat(chatId); dismissToast(chatId); }}
         onDismiss={dismissToast}
       />
-      <ChatList
+
+      <NavRail
+        active={section}
+        onSelect={(id) => {
+          setSection(id);
+          // Возврат в «Настройки» всегда открывает сам список настроек, а не
+          // подэкран профиля, на котором человек был в прошлый раз.
+          if (id === 'settings') setSettingsView('settings');
+        }}
+        unreadTotal={totalUnread}
         username={currentDisplayName}
         avatarPath={currentAvatarPath}
+        online={socketConnected}
+        onOpenProfile={openOwnProfile}
+      />
+
+      {isChats && (
+      <ChatList
         chats={chats}
         activeChat={activeChat}
         onSelectChat={handleSelectChat}
@@ -977,9 +1012,8 @@ const Chat: React.FC = () => {
         onMarkAllRead={handleMarkAllRead}
         onRemoveContact={handleRemoveContact}
         onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
-        onOpenSettings={() => setView('settings')}
-        onOpenOwnProfile={() => setView('profile')}
       />
+      )}
       {directoryOpen && (
         <DirectoryModal
           existingContactIds={users.map(u => u.id)}
@@ -1011,98 +1045,120 @@ const Chat: React.FC = () => {
           }}
         />
       )}
-      <main className="conversation">
-        {view === 'settings' ? (
-          <SettingsPanel
-            username={currentDisplayName}
-            avatarPath={currentAvatarPath}
-            onClose={() => setView('conversation')}
-            onOpenProfile={() => setView('profile')}
-            onDeleteAccount={handleDeleteSelf}
-            onLogout={handleLogout}
+      {section === 'settings' && (
+        <main className="section-host">
+          {settingsView === 'profile' ? (
+            <ProfileEdit
+              currentUsername={currentUsername}
+              currentDisplayName={currentDisplayName}
+              currentAvatarPath={currentAvatarPath}
+              currentBio={currentBio}
+              currentPhone={currentPhone}
+              currentDepartment={currentDepartment}
+              currentPosition={currentPosition}
+              currentBirthDate={currentBirthDate}
+              onBack={() => setSettingsView('settings')}
+              onSaved={handleProfileSaved}
+              onAvatarChanged={handleAvatarChanged}
+            />
+          ) : (
+            <SettingsPanel
+              username={currentDisplayName}
+              avatarPath={currentAvatarPath}
+              onClose={() => setSection('chats')}
+              onOpenProfile={() => setSettingsView('profile')}
+              onDeleteAccount={handleDeleteSelf}
+              onLogout={handleLogout}
+            />
+          )}
+        </main>
+      )}
+
+      {section === 'people' && (
+        <main className="section-host">
+          <PeopleSection
+            currentUserId={currentUserId}
+            existingContactIds={users.map(u => u.id)}
+            onlineUserIds={onlineUsers}
+            onOpenChat={handleStartChat}
+            onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
           />
-        ) : view === 'profile' ? (
-          <ProfileEdit
-            currentUsername={currentUsername}
-            currentDisplayName={currentDisplayName}
-            currentAvatarPath={currentAvatarPath}
-            currentBio={currentBio}
-            currentPhone={currentPhone}
-            currentDepartment={currentDepartment}
-            currentPosition={currentPosition}
-            currentBirthDate={currentBirthDate}
-            onBack={() => setView('settings')}
-            onSaved={handleProfileSaved}
-            onAvatarChanged={handleAvatarChanged}
-          />
-        ) : (
-          <>
-            <div className="conv-head">
-              <button type="button" className="icon-btn back-btn" onClick={() => setMobileView('list')} aria-label="Назад к списку">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
+        </main>
+      )}
+
+      {!isChats && section !== 'settings' && section !== 'people' && (
+        <main className="section-host">
+          <SectionStub section={activeSection} onBack={() => setSection('chats')} />
+        </main>
+      )}
+
+      {isChats && (
+        <main className="conversation">
+          <div className="conv-head">
+            <button type="button" className="icon-btn back-btn" onClick={() => setMobileView('list')} aria-label="Назад к списку">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
+
+            {activeChatMeta ? (
+              <button
+                type="button"
+                className="conv-head-identity"
+                onClick={() => activeChatMeta.userId && setInfoModalUserId(activeChatMeta.userId)}
+                disabled={!activeChatMeta.userId}
+              >
+                <Avatar
+                  name={activeChatMeta.name}
+                  avatarPath={activeChatMeta.avatarPath}
+                  size="sm"
+                  isGeneral={activeChatMeta.section === 'general'}
+                />
+                <div className="conv-title">
+                  <div className="name">{activeChatMeta.name}</div>
+                  {/* «печатает…» вытесняет статус в самой шапке — так это
+                      показывает Telegram, и индикатор виден, даже когда
+                      переписка прокручена не до конца. */}
+                  {typingText ? (
+                    <div className="status is-typing">
+                      {activeChatMeta.section === 'general' ? `${typingText} печатает` : 'печатает'}
+                      <span className="typing-dots"><span /><span /><span /></span>
+                    </div>
+                  ) : (
+                    <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
+                      {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
+                    </div>
+                  )}
+                </div>
               </button>
-
-              {activeChatMeta ? (
-                <button
-                  type="button"
-                  className="conv-head-identity"
-                  onClick={() => activeChatMeta.userId && setInfoModalUserId(activeChatMeta.userId)}
-                  disabled={!activeChatMeta.userId}
-                >
-                  <Avatar
-                    name={activeChatMeta.name}
-                    avatarPath={activeChatMeta.avatarPath}
-                    size="sm"
-                    isGeneral={activeChatMeta.section === 'general'}
-                  />
-                  <div className="conv-title">
-                    <div className="name">{activeChatMeta.name}</div>
-                    {/* «печатает…» вытесняет статус в самой шапке — так это
-                        показывает Telegram, и индикатор виден, даже когда
-                        переписка прокручена не до конца. */}
-                    {typingText ? (
-                      <div className="status is-typing">
-                        {activeChatMeta.section === 'general' ? `${typingText} печатает` : 'печатает'}
-                        <span className="typing-dots"><span /><span /><span /></span>
-                      </div>
-                    ) : (
-                      <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
-                        {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
-                      </div>
-                    )}
-                  </div>
-                </button>
-              ) : (
-                <div className="conv-title"><div className="name">Выберите чат</div></div>
-              )}
-            </div>
-
-            <ChatWindow
-              chatId={activeChat}
-              messages={messages}
-              currentUserId={currentUserId}
-              showAuthors={activeChat === GENERAL_CHAT_ID}
-              onScrollTop={loadMoreMessages}
-              hasMore={hasMore}
-              loadingMore={loadingMore}
-              unreadCount={activeChat ? unreadCounts[activeChat] : 0}
-              onEditMessage={handleEditMessage}
-              onDeleteMessage={handleDeleteMessage}
-            />
-            {muted && (
-              <div className="muted-banner">
-                Ваш аккаунт временно ограничен — отправка сообщений недоступна.
-              </div>
+            ) : (
+              <div className="conv-title"><div className="name">Выберите чат</div></div>
             )}
-            <MessageInput
-              onSend={handleSendMessage}
-              onTyping={handleTyping}
-              disabled={!activeChat || muted}
-              placeholder={muted ? 'Отправка сообщений ограничена' : undefined}
-            />
-          </>
-        )}
-      </main>
+          </div>
+
+          <ChatWindow
+            chatId={activeChat}
+            messages={messages}
+            currentUserId={currentUserId}
+            showAuthors={activeChat === GENERAL_CHAT_ID}
+            onScrollTop={loadMoreMessages}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            unreadCount={activeChat ? unreadCounts[activeChat] : 0}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+          />
+          {muted && (
+            <div className="muted-banner">
+              Ваш аккаунт временно ограничен — отправка сообщений недоступна.
+            </div>
+          )}
+          <MessageInput
+            onSend={handleSendMessage}
+            onTyping={handleTyping}
+            disabled={!activeChat || muted}
+            placeholder={muted ? 'Отправка сообщений ограничена' : undefined}
+          />
+        </main>
+      )}
     </div>
   );
 };

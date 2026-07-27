@@ -26,8 +26,6 @@ interface Comment {
 }
 
 interface ChatListProps {
-  username: string;
-  avatarPath: string | null;
   chats: Chat[];
   activeChat: string | null;
   onSelectChat: (chatId: string) => void;
@@ -43,8 +41,6 @@ interface ChatListProps {
   onMarkAllRead: () => void;
   onRemoveContact: (userId: number) => void;
   onOpenUserInfo: (userId: number) => void;
-  onOpenSettings: () => void;
-  onOpenOwnProfile: () => void;
 }
 
 function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void) {
@@ -63,9 +59,9 @@ function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void) {
 }
 
 const ChatList: React.FC<ChatListProps> = ({
-  username, avatarPath, chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
+  chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
-  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenSettings, onOpenOwnProfile
+  onMarkAllRead, onRemoveContact, onOpenUserInfo
 }) => {
   const [editingComment, setEditingComment] = useState<number | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -85,11 +81,11 @@ const ChatList: React.FC<ChatListProps> = ({
   return (
     <aside className="roster">
       <div className="roster-head">
+        {/* Аватар и настройки живут на рельсе слева — здесь остаётся только
+            заголовок колонки, счётчик и «прочитать всё», иначе на экране было
+            бы два своих аватара подряд. */}
         <div className="roster-account">
-          <button type="button" className="roster-account-identity" onClick={onOpenOwnProfile}>
-            <Avatar name={username} avatarPath={avatarPath} size="sm" />
-            <div className="roster-account-name">{username}</div>
-          </button>
+          <div className="roster-heading">Чаты</div>
           {totalUnread > 0 && (
             <>
               <span className="row-unread">{totalUnread}</span>
@@ -103,9 +99,6 @@ const ChatList: React.FC<ChatListProps> = ({
               </button>
             </>
           )}
-          <button type="button" className="icon-btn-ghost" title="Настройки" onClick={onOpenSettings}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.98 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.36.1.68.3 1 1.55V11a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.6Z" /></svg>
-          </button>
         </div>
         <div className="search">
           <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>

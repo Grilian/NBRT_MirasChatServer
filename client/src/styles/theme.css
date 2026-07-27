@@ -288,18 +288,110 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .login-foot button { background: none; border: none; padding: 0; color: var(--accent); font-weight: 600; cursor: pointer; font-size: inherit; }
 
 /* ===== Chat shell ===== */
-.chat-layout { display: grid; grid-template-columns: 320px 1fr; width: 100%; height: 100%; overflow: hidden; }
+/* Три колонки: рельс разделов — список — содержимое. У разделов без своего
+   списка (Люди, Настройки, заглушки) средняя колонка отсутствует, поэтому
+   раскладка переключается на две через .is-single-pane. */
+.chat-layout { display: grid; grid-template-columns: 92px 320px 1fr; width: 100%; height: 100%; overflow: hidden; }
+.chat-layout.is-single-pane { grid-template-columns: 92px 1fr; }
+
+/* ---- Рельс разделов ---- */
+.nav-rail {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--sidebar); border-right: 1px solid var(--line);
+  padding: 8px 6px 10px; gap: 6px;
+}
+.rail-brand { display: flex; justify-content: center; padding: 4px 0 8px; }
+.rail-brand .roundel { width: 34px; height: 34px; font-size: 15px; }
+
+.rail-items { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+/* Полоса прокрутки внутри рельса только мешает — пунктов фиксированное число,
+   а на низком окне список просто ужимается. */
+.rail-items::-webkit-scrollbar { width: 0; }
+.rail-items { scrollbar-width: none; }
+
+.rail-item {
+  position: relative; border: none; background: none; cursor: pointer; color: var(--ink-muted);
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 8px 2px 7px; border-radius: var(--radius-md); font: inherit;
+}
+.rail-item:hover { background: var(--row-hover); color: var(--ink); }
+.rail-item.is-active { background: var(--accent); color: var(--accent-ink); }
+.rail-item.is-active:hover { background: var(--accent); }
+.rail-icon { position: relative; display: flex; }
+.rail-icon svg { width: 22px; height: 22px; }
+.rail-label {
+  font-size: 10.5px; line-height: 1.15; font-weight: 500; text-align: center;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rail-badge {
+  position: absolute; top: -5px; left: 11px; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: var(--radius-pill); background: var(--unread-badge); color: #fff;
+  font: 600 10.5px/17px var(--font-ui); text-align: center;
+  border: 2px solid var(--sidebar);
+}
+.rail-item.is-active .rail-badge { background: #fff; color: var(--accent); border-color: var(--accent); }
+/* Точка у разделов-заглушек: пункт кликабелен, но заранее видно, что там пока
+   ничего нет. */
+.rail-soon {
+  position: absolute; top: 7px; right: 8px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--gold); opacity: .85;
+}
+
+.rail-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.rail-theme {
+  border: none; background: none; cursor: pointer; color: var(--ink-faint);
+  width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+.rail-theme:hover { background: var(--row-hover); color: var(--ink); }
+.rail-account {
+  border: none; background: none; cursor: pointer; padding: 4px 2px; border-radius: var(--radius-md);
+  display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; font: inherit; color: inherit;
+}
+.rail-account:hover { background: var(--row-hover); }
+.rail-account .avatar-sm { width: 32px; height: 32px; font-size: 12.5px; }
+.rail-account-text { display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 100%; }
+.rail-account-name {
+  font-size: 10.5px; font-weight: 600; color: var(--ink);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rail-account-status { font-size: 9.5px; color: var(--online); }
+.rail-account-status.is-offline { color: var(--ink-faint); }
+
+/* ---- Раздел без списка (Люди, Настройки, заглушки) ---- */
+.section-host { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--paper-sunken); }
+.section-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.section-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.section-column { max-width: 720px; margin: 0 auto; padding: 14px 14px 40px; }
+.people-search { margin-bottom: 6px; }
+.people-tag { font-size: 11px; color: var(--ink-faint); background: var(--paper-sunken); border-radius: var(--radius-pill); padding: 2px 8px; }
+.section-column .row { background: var(--paper-raised); margin-bottom: 4px; }
+.section-column .row:hover { background: var(--row-hover); }
+
+.section-stub { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; overflow-y: auto; }
+.section-stub-card {
+  max-width: 400px; text-align: center; display: flex; flex-direction: column; align-items: center;
+  background: var(--paper-raised); border-radius: var(--radius-lg); padding: 30px 26px 26px; box-shadow: var(--shadow-sm);
+}
+.section-stub-icon {
+  width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); margin-bottom: 14px;
+}
+.section-stub-icon svg { width: 28px; height: 28px; }
+.section-stub-title { font: 600 19px/1.2 var(--font-display); margin-bottom: 8px; }
+.section-stub-tag {
+  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--gold-strong); background: color-mix(in srgb, var(--gold) 16%, transparent);
+  border-radius: var(--radius-pill); padding: 3px 10px; margin-bottom: 14px;
+}
+.section-stub-text { margin: 0 0 20px; font-size: 14px; line-height: 1.5; color: var(--ink-muted); }
+.section-stub-back { width: auto; padding-left: 22px; padding-right: 22px; }
 
 /* ---- Roster (sidebar) ---- */
 .roster { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--sidebar); }
 .roster-head { padding: 10px 12px 8px; }
 
-.roster-account { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.roster-account-identity {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
-  border: none; background: none; padding: 0; margin: 0; cursor: pointer; text-align: left; font: inherit; color: inherit;
-}
-.roster-account-name { flex: 1; min-width: 0; font-weight: 600; font-size: 14.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-account { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-height: 30px; }
+.roster-heading { flex: 1; min-width: 0; font: 600 18px/1.2 var(--font-display); color: var(--ink); }
 
 .mark-all-read-btn {
   flex: none; width: 26px; height: 26px; border-radius: 50%; border: none; padding: 0; margin-left: 2px;
@@ -706,13 +798,29 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* ===== Responsive: single-pane / mobile navigation ===== */
 @media (max-width: 760px) {
   .chat-layout { display: block; position: relative; overflow: hidden; height: 100%; }
-  .roster, .conversation {
-    position: absolute; inset: 0; width: 100%; height: 100%;
+  /* Рельс становится нижней панелью вкладок: вертикальный на 84px съел бы
+     четверть ширины телефона. Внутри самой переписки он прячется — там нужен
+     весь экран, а вернуться можно кнопкой «назад» в шапке. */
+  .nav-rail {
+    position: absolute; left: 0; right: 0; bottom: 0; top: auto; z-index: 3;
+    flex-direction: row; height: 58px; padding: 0; gap: 0;
+    border-right: none; border-top: 1px solid var(--line);
+  }
+  .rail-brand, .rail-foot { display: none; }
+  .rail-items { flex-direction: row; overflow-x: auto; overflow-y: hidden; gap: 0; }
+  .rail-item { flex: 1 0 auto; min-width: 60px; border-radius: 0; justify-content: center; }
+  .rail-item.is-active { background: none; color: var(--accent); }
+  .rail-item.is-active:hover { background: var(--row-hover); }
+  .rail-item.is-active .rail-badge { background: var(--unread-badge); color: #fff; border-color: var(--sidebar); }
+  .chat-layout.is-conversation-view .nav-rail { display: none; }
+
+  .roster, .conversation, .section-host {
+    position: absolute; inset: 0 0 58px; width: 100%; height: auto;
     transition: transform .3s cubic-bezier(.22, .61, .36, 1); border-right: none;
   }
   .conversation { transform: translateX(100%); }
   .chat-layout.is-conversation-view .roster { transform: translateX(-100%); }
-  .chat-layout.is-conversation-view .conversation { transform: translateX(0); }
+  .chat-layout.is-conversation-view .conversation { transform: translateX(0); inset: 0; }
   .conv-head .back-btn { display: inline-flex; }
   .conv-body { padding: 12px 10px 14px; }
   .msg { max-width: 86%; }
