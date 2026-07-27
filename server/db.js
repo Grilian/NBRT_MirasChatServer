@@ -73,6 +73,22 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (contact_user_id) REFERENCES users(id)
   );
+
+  -- Токены FCM для пуш-уведомлений. UNIQUE именно по token, а не по паре
+  -- с user_id: токен принадлежит установке приложения на конкретном телефоне,
+  -- а не человеку. Если на том же телефоне залогинился другой сотрудник,
+  -- строка должна переехать к нему, иначе пуши о новых сообщениях продолжат
+  -- уходить на устройство под именем прежнего владельца.
+  CREATE TABLE IF NOT EXISTS device_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    platform TEXT NOT NULL DEFAULT 'android',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
 `);
 
 // Миграция: добавляем колонку status, если БД старая

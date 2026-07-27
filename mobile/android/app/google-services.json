@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "307666570479",
+    "project_id": "cg-chat-7b4bc",
+    "storage_bucket": "cg-chat-7b4bc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:307666570479:android:3343717cdf2af3d1585f1a",
+        "android_client_info": {
+          "package_name": "ru.miras.mirasChat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDGXxq9pFBUKlLnpPkmz2MZ65H9A1-cPrM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

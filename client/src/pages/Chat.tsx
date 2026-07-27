@@ -23,6 +23,7 @@ import {
   dismissAllMobileNotifications,
   onMobileNotificationTap
 } from '../utils/mobileNotify';
+import { initMobilePush, unregisterMobilePush, dismissAllPushNotifications } from '../utils/mobilePush';
 import {
   ensureDesktopNotificationPermission,
   showDesktopNotification,
@@ -692,6 +693,11 @@ const Chat: React.FC = () => {
     if (unreadIds.length > 0) {
       socket.emit('message_read', { chatId: activeChat, messageIds: unreadIds });
       dismissMobileNotifications(unreadIds);
+      // Пуши приходят только когда сокет был мёртв, а раз мы сейчас читаем —
+      // приложение открыто и сокет жив. Значит все висящие пуш-карточки уже
+      // неактуальны: то, что осталось непрочитанным, видно в списке чатов.
+      // Адресно их снять нельзя — плагин умеет только "все сразу".
+      dismissAllPushNotifications();
     }
 
     // Открытый и просматриваемый чат не должен светиться в списке
@@ -715,6 +721,7 @@ const Chat: React.FC = () => {
     setUnreadCounts({});
     setToasts([]);
     dismissAllMobileNotifications();
+    dismissAllPushNotifications();
     dismissAllDesktopNotifications();
   };
 
@@ -792,6 +799,15 @@ const Chat: React.FC = () => {
     });
   }, []);
 
+  // Пуш-уведомления: единственный канал, который переживает свёрнутое или
+  // выгруженное приложение. Регистрируем токен при каждом запуске, а тап по
+  // карточке из шторки ведёт в тот же чат, что и локальное уведомление.
+  useEffect(() => {
+    return initMobilePush((chatId) => {
+      handleSelectChatRef.current(chatId);
+    });
+  }, []);
+
   const handleSendMessage = (text: string) => {
     if (socket && activeChat) {
       socket.emit('chat_message', {
@@ -865,11 +881,15 @@ const Chat: React.FC = () => {
     }, 2000);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     // Уведомления от прошлого аккаунта не должны пережить выход — системные
     // карточки живут вне окна и с requireInteraction висят, пока их не закроют.
     dismissAllDesktopNotifications();
     dismissAllMobileNotifications();
+    dismissAllPushNotifications();
+    // Обязательно до localStorage.clear(): запрос требует токена авторизации.
+    // Без него телефон остался бы подписан на пуши прежнего пользователя.
+    await unregisterMobilePush();
     window.electronAPI?.setUnreadBadge(0);
     localStorage.clear();
     window.location.reload();

@@ -146,3 +146,6 @@ server/messenger.db-shm
 server/messenger.db-wal
 server/uploads/
 server/backups/
+
+# Ключ сервисного аккаунта Firebase — доступ на отправку пушей от имени проекта
+server/fcm-service-account.json

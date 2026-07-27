@@ -16,8 +16,10 @@ const commentsRoutes = require('./routes/comments');
 const superadminRoutes = require('./routes/superadmin');
 const contactsRoutes = require('./routes/contacts');
 const moderationRoutes = require('./routes/moderation');
+const devicesRoutes = require('./routes/devices');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
+const { notifyNewMessage } = require('./services/push');
 
 const db = require('./db');
 
@@ -56,6 +58,7 @@ app.use('/api/comments', commentsRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/moderation', verifyToken, requireAdminRole, moderationRoutes);
+app.use('/api/devices', devicesRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
 // на каждый файл (как публичные CDN-ссылки на фото профиля у большинства
@@ -268,16 +271,35 @@ io.on('connection', (socket) => {
         if (changedB) io.to('user:' + b).emit('contact_added', { withUserId: a });
       }
 
-      // Проверяем, есть ли получатель онлайн
+      // Проверяем, есть ли получатель онлайн, и заодно собираем тех, кого
+      // онлайн нет — им сообщение сейчас доставить некуда, значит нужен пуш.
       let recipientOnline = false;
+      const offlineRecipients = [];
       if (data.chatId === 'general') {
-        recipientOnline = onlineUserIds().some(id => id !== senderId);
+        const everyoneElse = db.prepare('SELECT id FROM users WHERE id != ?').all(senderId).map((r) => r.id);
+        recipientOnline = everyoneElse.some((id) => isUserOnline(id));
+        offlineRecipients.push(...everyoneElse.filter((id) => !isUserOnline(id)));
       } else {
         const match = data.chatId.match(/^chat_(\d+)_(\d+)$/);
         if (match) {
           const otherId = Number(match[1]) === senderId ? Number(match[2]) : Number(match[1]);
           recipientOnline = isUserOnline(otherId);
+          if (!recipientOnline) offlineRecipients.push(otherId);
         }
+      }
+
+      // Пуш шлём именно тем, у кого нет живого сокета. Пока сокет жив, клиент
+      // сам показывает уведомление по событию 'chat_message' — послать сюда
+      // ещё и пуш означало бы две карточки на одно сообщение. Свёрнутое на
+      // телефоне приложение выпадает из онлайна само по pingTimeout, так что
+      // оно попадает в эту ветку.
+      const senderName = senderRow ? (senderRow.display_name || senderRow.username) : undefined;
+      for (const userId of offlineRecipients) {
+        notifyNewMessage(userId, {
+          chatId: data.chatId,
+          messageId: result.lastInsertRowid,
+          senderName
+        });
       }
 
       if (recipientOnline) {
