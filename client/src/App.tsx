@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import Login from './pages/Login';
 import Chat from './pages/Chat';
@@ -40,15 +40,22 @@ function App() {
   // залогинены — навигацией внутри чата занимается сам Chat (свой листенер
   // там знает про view/mobileView); здесь обрабатываем только экран логина,
   // где "назад" должен просто сворачивать приложение, а не убивать процесс.
+  // Подписываемся один раз, состояние читаем из ref: пересоздание нативной
+  // подписки на каждую смену user умеет оставлять осиротевший листенер со
+  // старым замороженным состоянием (подробности — в таком же обработчике
+  // в Chat.tsx).
+  const userRef = useRef(user);
+  userRef.current = user;
+
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('backButton', () => {
-      if (!user) {
+      if (!userRef.current) {
         CapApp.minimizeApp();
       }
     });
     return () => { listenerPromise.then((h) => h.remove()); };
-  }, [user]);
+  }, []);
 
   const handleLogin = (userData: any) => {
     setUser(userData);

@@ -252,16 +252,35 @@ const Chat: React.FC = () => {
   // приложение (нет истории браузера). Идём по своему стеку экранов:
   // профиль -> настройки -> любой другой раздел -> чаты -> список чатов,
   // и только с самого списка сворачиваем приложение, а не убиваем процесс.
+  //
+  // Подписку вешаем ровно один раз, а текущий экран читаем из ref. Раньше
+  // эффект пересоздавал листенер на каждую смену раздела, и это приводило к
+  // залипанию: и addListener, и remove() ходят в нативную часть асинхронно,
+  // поэтому старая подписка могла пережить свою отмену (например, если
+  // приложение свернули ровно в этот момент — мост встаёт вместе с WebView).
+  // Дальше на "назад" срабатывали обе, причём осиротевшая — первой, со своим
+  // замороженным состоянием: она видела mobileView === 'list' при открытом
+  // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
+  // тот же открытый чат, "назад" снова сворачивает, и так до полного
+  // закрытия приложения.
+  const backNavRef = useRef({ section, settingsView, mobileView, directoryOpen, infoModalUserId });
+  backNavRef.current = { section, settingsView, mobileView, directoryOpen, infoModalUserId };
+
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('backButton', () => {
-      if (section === 'settings' && settingsView === 'profile') { setSettingsView('settings'); return; }
-      if (section !== 'chats') { setSection('chats'); return; }
-      if (mobileView === 'chat') { setMobileView('list'); return; }
+      const nav = backNavRef.current;
+      // Модалки поверх всего — закрываются первыми, иначе "назад" уводил
+      // экран из-под открытого окна, а само окно оставалось висеть.
+      if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
+      if (nav.directoryOpen) { setDirectoryOpen(false); return; }
+      if (nav.section === 'settings' && nav.settingsView === 'profile') { setSettingsView('settings'); return; }
+      if (nav.section !== 'chats') { setSection('chats'); return; }
+      if (nav.mobileView === 'chat') { setMobileView('list'); return; }
       CapApp.minimizeApp();
     });
     return () => { listenerPromise.then((h) => h.remove()); };
-  }, [section, settingsView, mobileView]);
+  }, []);
 
   // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
   // ни 'stop_typing' (вкладка закрылась, сеть оборвалась) — гасим индикатор сами,
