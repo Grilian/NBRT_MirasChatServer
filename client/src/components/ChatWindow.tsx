@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { nameFor } from '../utils/user';
-import { formatMoscowTime } from '../utils/time';
+import { formatDaySeparator, formatMoscowTime, moscowDayKey } from '../utils/time';
 
 interface Message {
   id: number;
@@ -18,38 +18,85 @@ interface ChatWindowProps {
   chatId: string | null;
   messages: Message[];
   currentUserId: number;
-  typingUser?: string;
+  /** Показывать имя автора над сообщением — нужно только в общем чате */
+  showAuthors?: boolean;
   onScrollTop?: () => void;
   hasMore?: boolean;
   loadingMore?: boolean;
+  /** Непрочитанные в этом чате — цифра на кнопке «вниз», как в Telegram */
+  unreadCount?: number;
   onEditMessage: (id: number, text: string) => void;
   onDeleteMessage: (id: number) => void;
 }
 
 const LONG_PRESS_MS = 450;
 
+// Идущие подряд сообщения одного человека Telegram склеивает в блок: имя
+// показывается один раз сверху, «хвостик» — только у последнего. Разрыв
+// больше пяти минут считаем новым блоком, даже если писал тот же человек.
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
 function TickIcon({ status }: { status: 'sent' | 'delivered' | 'read' }) {
   const doubleTick = status === 'delivered' || status === 'read';
   return (
     <span className={'ticks' + (status === 'read' ? ' read' : '')}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
         {doubleTick ? (
-          <><path d="m2 12 5 5L18 6" /><path d="m8 12 5 5L24 6" /></>
+          <><path d="m1 13 4 4L15 7" /><path d="m9 13 4 4L23 7" /></>
         ) : (
-          <path d="m5 12 5 5L21 6" />
+          <path d="m4 13 5 5L20 7" />
         )}
       </svg>
     </span>
   );
 }
 
+interface RenderedRow {
+  message: Message;
+  /** Первое сообщение в блоке одного автора — над ним подпись автора */
+  startsGroup: boolean;
+  /** Последнее сообщение в блоке — у него рисуется хвостик пузыря */
+  endsGroup: boolean;
+  /** Разделитель дня перед этим сообщением */
+  daySeparator: string | null;
+}
+
+function buildRows(messages: Message[]): RenderedRow[] {
+  return messages.map((message, index) => {
+    const prev = index > 0 ? messages[index - 1] : null;
+    const next = index < messages.length - 1 ? messages[index + 1] : null;
+
+    const dayKey = moscowDayKey(message.created_at);
+    const prevDayKey = prev ? moscowDayKey(prev.created_at) : null;
+    const newDay = dayKey !== prevDayKey;
+
+    const time = new Date(message.created_at).getTime();
+    const groupsWithPrev = !!prev
+      && !newDay
+      && prev.sender_id === message.sender_id
+      && time - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
+    const groupsWithNext = !!next
+      && moscowDayKey(next.created_at) === dayKey
+      && next.sender_id === message.sender_id
+      && new Date(next.created_at).getTime() - time < GROUP_WINDOW_MS;
+
+    return {
+      message,
+      startsGroup: !groupsWithPrev,
+      endsGroup: !groupsWithNext,
+      daySeparator: newDay ? formatDaySeparator(message.created_at) : null,
+    };
+  });
+}
+
 const ChatWindow: React.FC<ChatWindowProps> = ({
-  chatId, messages, currentUserId, typingUser, onScrollTop, hasMore, loadingMore,
+  chatId, messages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onEditMessage, onDeleteMessage
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
+  const [showJumpButton, setShowJumpButton] = useState(false);
   const prevMessagesLengthRef = useRef(0);
 
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
@@ -57,6 +104,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const [editText, setEditText] = useState('');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Позиция прокрутки на момент запроса следующей страницы истории —
+  // подробности в useLayoutEffect ниже.
+  const pendingRestoreRef = useRef<{ height: number; top: number } | null>(null);
 
   useEffect(() => {
     if (messages.length === 0) return;
@@ -70,9 +121,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     prevMessagesLengthRef.current = messages.length;
   }, [messages, shouldScrollToBottom]);
 
+  // Подгрузка истории добавляет сообщения СВЕРХУ, из-за чего содержимое
+  // уезжает вниз, а прокрутка остаётся на месте — визуально это выглядело
+  // как прыжок к совсем другому куску переписки, и читать историю было
+  // невозможно. Возвращаем прокрутку к тому же сообщению: смещаем её ровно
+  // на прирост высоты. useLayoutEffect — чтобы поправить до отрисовки кадра
+  // и человек не увидел скачка.
+  useLayoutEffect(() => {
+    const pending = pendingRestoreRef.current;
+    const container = messagesContainerRef.current;
+    if (!pending || !container) return;
+    if (container.scrollHeight <= pending.height) return;
+
+    container.scrollTop = container.scrollHeight - pending.height + pending.top;
+    pendingRestoreRef.current = null;
+  }, [messages]);
+
   useEffect(() => {
     setShouldScrollToBottom(true);
+    setShowJumpButton(false);
     prevMessagesLengthRef.current = 0;
+    pendingRestoreRef.current = null;
     setMenuFor(null);
     setEditingId(null);
   }, [chatId]);
@@ -99,10 +168,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
     setShouldScrollToBottom(isAtBottom);
+    setShowJumpButton(scrollHeight - scrollTop - clientHeight > 300);
 
-    if (scrollTop < 100 && onScrollTop && hasMore && !loadingMore) {
+    if (scrollTop < 150 && onScrollTop && hasMore && !loadingMore) {
+      pendingRestoreRef.current = { height: scrollHeight, top: scrollTop };
       onScrollTop();
     }
+  };
+
+  const jumpToBottom = () => {
+    setShouldScrollToBottom(true);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const openMenuAt = (msg: Message, x: number, y: number) => {
@@ -153,68 +229,100 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   if (!chatId) {
-    return <div className="conv-empty">Выберите чат</div>;
+    return (
+      <div className="conv-empty">
+        <div className="conv-empty-badge">Выберите чат, чтобы начать переписку</div>
+      </div>
+    );
   }
 
-  return (
-    <div
-      ref={messagesContainerRef}
-      className="conv-body"
-      onScroll={handleScroll}
-    >
-      {loadingMore && <div className="load-more-hint">Загрузка...</div>}
-      {messages.length === 0 && !loadingMore && <div className="load-more-hint">Сообщений пока нет</div>}
-      {messages.length > 0 && <div className="date-sep">Сегодня</div>}
-      {messages.map((msg) => {
-        const mine = msg.sender_id === currentUserId;
-        const isDeleted = !!msg.deleted;
-        const isEditing = editingId === msg.id;
+  const rows = buildRows(messages);
 
-        return (
-          <div
-            key={msg.id}
-            className={'msg ' + (mine ? 'mine' : 'theirs')}
-            onContextMenu={mine ? (e) => handleContextMenu(e, msg) : undefined}
-            onTouchStart={mine ? (e) => handleTouchStart(e, msg) : undefined}
-            onTouchEnd={mine ? clearLongPress : undefined}
-            onTouchMove={mine ? clearLongPress : undefined}
-          >
-            {!mine && <div className="who">{nameFor(msg)}</div>}
-            {isEditing ? (
-              <div className="bubble bubble-editing">
-                <input
-                  autoFocus
-                  className="bubble-edit-input"
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
-                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                  }}
-                  onBlur={commitEdit}
-                />
-              </div>
-            ) : (
-              <div className={'bubble' + (isDeleted ? ' bubble-deleted' : '')}>
-                {isDeleted ? 'Сообщение удалено' : msg.text}
-              </div>
-            )}
-            <div className="meta-row">
-              {msg.edited_at && !isDeleted && <span className="edited-label">изменено</span>}
-              <span>{formatMoscowTime(msg.created_at)}</span>
-              {mine && <TickIcon status={msg.status || 'sent'} />}
-            </div>
+  return (
+    <div className="conv-wrap">
+      <div
+        ref={messagesContainerRef}
+        className="conv-body"
+        onScroll={handleScroll}
+      >
+        {loadingMore && <div className="load-more-hint">Загрузка…</div>}
+        {messages.length === 0 && !loadingMore && (
+          <div className="conv-empty-inline">
+            <div className="conv-empty-badge">Сообщений пока нет</div>
           </div>
-        );
-      })}
-      {typingUser && (
-        <div className="typing-row">
-          <div className="bubble">
-            <span className="dot" /><span className="dot" /><span className="dot" />
-          </div>
-        </div>
+        )}
+
+        {rows.map(({ message: msg, startsGroup, endsGroup, daySeparator }) => {
+          const mine = msg.sender_id === currentUserId;
+          const isDeleted = !!msg.deleted;
+          const isEditing = editingId === msg.id;
+
+          const className = [
+            'msg',
+            mine ? 'mine' : 'theirs',
+            startsGroup ? 'starts-group' : '',
+            endsGroup ? 'ends-group' : '',
+          ].filter(Boolean).join(' ');
+
+          return (
+            <React.Fragment key={msg.id}>
+              {daySeparator && <div className="date-sep">{daySeparator}</div>}
+              <div
+                className={className}
+                onContextMenu={mine ? (e) => handleContextMenu(e, msg) : undefined}
+                onTouchStart={mine ? (e) => handleTouchStart(e, msg) : undefined}
+                onTouchEnd={mine ? clearLongPress : undefined}
+                onTouchMove={mine ? clearLongPress : undefined}
+              >
+                {isEditing ? (
+                  <div className="bubble bubble-editing">
+                    <input
+                      autoFocus
+                      className="bubble-edit-input"
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+                        if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                      }}
+                      onBlur={commitEdit}
+                    />
+                  </div>
+                ) : (
+                  <div className={'bubble' + (isDeleted ? ' bubble-deleted' : '')}>
+                    {/* Имя автора — только в общем чате и только над первым
+                        сообщением блока: в переписке один на один оно
+                        повторяло бы имя из шапки на каждой реплике. */}
+                    {!mine && showAuthors && startsGroup && (
+                      <div className="bubble-author">{nameFor(msg)}</div>
+                    )}
+                    <span className="bubble-text">
+                      {isDeleted ? 'Сообщение удалено' : msg.text}
+                    </span>
+                    {/* Время и галочки — внутри пузыря, как в Telegram:
+                        обтекаются текстом и не занимают отдельную строку. */}
+                    <span className="bubble-meta">
+                      {msg.edited_at && !isDeleted && <span className="edited-label">изм.</span>}
+                      <span className="bubble-time">{formatMoscowTime(msg.created_at)}</span>
+                      {mine && !isDeleted && <TickIcon status={msg.status || 'sent'} />}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
+          );
+        })}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {showJumpButton && (
+        <button type="button" className="jump-to-bottom" onClick={jumpToBottom} aria-label="К последним сообщениям">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14M19 12l-7 7-7-7" />
+          </svg>
+          {!!unreadCount && unreadCount > 0 && <span className="jump-badge">{unreadCount}</span>}
+        </button>
       )}
-      <div ref={messagesEndRef} />
 
       {menuFor && (
         <div

@@ -3,6 +3,18 @@ const path = require('path');
 const fs = require('fs');
 
 const isDev = !app.isPackaged;
+
+// Windows связывает всплывающие уведомления с AppUserModelID приложения.
+// Без явной установки у незапакованного/неправильно зарегистрированного
+// приложения он не совпадает с тем, что прописал установщик, и система
+// молча выбрасывает уведомления — new Notification() в рендерере отрабатывает
+// без ошибок, а на экране не появляется ничего. Значение должно совпадать с
+// build.appId в package.json.
+const APP_USER_MODEL_ID = 'ru.miras.mirasChat';
+if (process.platform === 'win32') {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
+}
+
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const RENDERER_INDEX = path.join(__dirname, '..', 'renderer', 'index.html');
 const STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
@@ -79,6 +91,20 @@ function createWindow() {
   mainWindow.on('maximize', () => mainWindow.webContents.send('window:maximized', true));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:maximized', false));
 
+  // Как только человек вернулся к окну — прекращаем мигать кнопкой в
+  // панели задач и сообщаем рендереру, что можно отмечать открытый чат
+  // прочитанным. Веб-события focus/blur внутри Electron приходят не всегда
+  // (например, при показе окна из трея), поэтому дублируем их из main.
+  mainWindow.on('focus', () => {
+    mainWindow.flashFrame(false);
+    mainWindow.webContents.send('window:focus-changed', true);
+  });
+  mainWindow.on('blur', () => mainWindow.webContents.send('window:focus-changed', false));
+  mainWindow.on('hide', () => mainWindow.webContents.send('window:focus-changed', false));
+  mainWindow.on('show', () => {
+    if (mainWindow.isFocused()) mainWindow.webContents.send('window:focus-changed', true);
+  });
+
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
@@ -129,16 +155,32 @@ function createTray() {
 
 // Красная точка на иконке в трее + оверлей поверх значка в таскбаре, пока
 // есть непрочитанное сообщение — состояние присылает рендерер по IPC.
-function setUnreadBadge(hasUnread) {
+// Раньше сюда приходил голый boolean; теперь ещё и количество, чтобы точное
+// число было видно в подсказке трея, не открывая окно.
+function setUnreadBadge(count) {
+  const hasUnread = count > 0;
+
   if (tray) {
     tray.setImage(path.join(ASSETS_DIR, hasUnread ? 'tray-unread.png' : 'tray.png'));
+    tray.setToolTip(hasUnread ? `MirasChat — непрочитанных: ${count}` : 'MirasChat');
   }
-  if (mainWindow) {
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setOverlayIcon(
       hasUnread ? nativeImage.createFromPath(path.join(ASSETS_DIR, 'overlay-unread.png')) : null,
-      hasUnread ? 'Есть непрочитанные сообщения' : ''
+      hasUnread ? `Непрочитанных сообщений: ${count}` : ''
     );
   }
+}
+
+// Мигание кнопки в панели задач — если окно свёрнуто или спрятано в трей,
+// это единственный способ обратить на себя внимание, кроме самого
+// уведомления, которое человек мог и пропустить. Windows мигает до тех пор,
+// пока окно не получит фокус.
+function flashOnNewMessage() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isFocused()) return;
+  mainWindow.flashFrame(true);
 }
 
 function createAppMenu() {
@@ -225,7 +267,8 @@ ipcMain.on('window:maximize-toggle', () => {
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
-ipcMain.on('unread:set', (event, hasUnread) => setUnreadBadge(!!hasUnread));
+ipcMain.on('unread:set', (event, count) => setUnreadBadge(Number(count) || 0));
+ipcMain.on('window:flash', () => flashOnNewMessage());
 
 // Клик по всплывающему уведомлению — окно может быть свёрнуто в трей
 // (mainWindow.hide()), обычного window.focus() из рендерера для этого мало.

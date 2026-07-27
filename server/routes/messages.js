@@ -45,24 +45,49 @@ router.get('/:chatId', verifyToken, (req, res) => {
       return res.status(403).json({ error: 'Нет доступа к этому чату' });
     }
 
-    const limit = parseInt(req.query.limit) || 50; // По умолчанию 50 сообщений
-    const offset = parseInt(req.query.offset) || 0;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
 
-    const messages = db.prepare(`
-      SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
-      FROM messages m
-      JOIN users u ON m.sender_id = u.id
-      WHERE m.chat_id = ?
-      ORDER BY m.created_at DESC
-      LIMIT ? OFFSET ?
-    `).all(chatId, limit, offset);
+    // Постраничная подгрузка "вверх" идёт по id последнего известного клиенту
+    // сообщения, а не по offset. С offset докрутка истории разъезжалась:
+    // пока человек читает, в чат приходят новые сообщения, все смещаются на
+    // одну позицию, и следующая страница либо повторяла уже показанное, либо
+    // перепрыгивала через непоказанное. Курсор по id от таких сдвигов не
+    // зависит. offset ещё принимаем — на нём сидят уже собранные мобильные
+    // сборки, которые обновляются не одновременно с сервером.
+    const before = parseInt(req.query.before);
+    const offset = parseInt(req.query.offset) || 0;
+    const useCursor = Number.isInteger(before);
+
+    // ORDER BY id, а не created_at: у сообщений, записанных в одну секунду,
+    // created_at совпадает (точность SQLite CURRENT_TIMESTAMP — секунда), и
+    // порядок внутри такой пары был неопределённым — при перезагрузке чата
+    // соседние реплики могли меняться местами.
+    const messages = useCursor
+      ? db.prepare(`
+          SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
+          FROM messages m
+          JOIN users u ON m.sender_id = u.id
+          WHERE m.chat_id = ? AND m.id < ?
+          ORDER BY m.id DESC
+          LIMIT ?
+        `).all(chatId, before, limit)
+      : db.prepare(`
+          SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
+          FROM messages m
+          JOIN users u ON m.sender_id = u.id
+          WHERE m.chat_id = ?
+          ORDER BY m.id DESC
+          LIMIT ? OFFSET ?
+        `).all(chatId, limit, offset);
 
     // Переворачиваем чтобы старые были в начале
     messages.reverse();
 
-    // Проверяем есть ли ещё сообщения
-    const totalMessages = db.prepare('SELECT COUNT(*) as count FROM messages WHERE chat_id = ?').get(chatId);
-    const hasMore = (offset + messages.length) < totalMessages.count;
+    // Есть ли что-то ещё выше самого старого из отданных
+    const oldestId = messages.length ? messages[0].id : null;
+    const hasMore = oldestId === null
+      ? false
+      : db.prepare('SELECT 1 FROM messages WHERE chat_id = ? AND id < ? LIMIT 1').get(chatId, oldestId) !== undefined;
 
     res.json({ messages, hasMore });
   } catch (e) {

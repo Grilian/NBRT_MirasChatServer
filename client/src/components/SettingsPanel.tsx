@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import Avatar from './Avatar';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
+import {
+  DURATION_OPTIONS,
+  NotificationPrefs,
+  getNotificationPrefs,
+  saveNotificationPrefs,
+} from '../utils/notificationPrefs';
+import { desktopNotificationPermission, ensureDesktopNotificationPermission } from '../utils/desktopNotify';
+import { isNativeMobile } from '../utils/mobileNotify';
+import { playIncomingSound } from '../utils/sound';
 import { APP_VERSION, BUILT_AT } from '../version';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
@@ -25,10 +34,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
+  const [notify, setNotify] = useState<NotificationPrefs>(getNotificationPrefs);
+  const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
 
   const handleThemeChange = (value: ThemePreference) => {
     setTheme(value);
     applyThemePreference(value);
+  };
+
+  // Сохраняем сразу при изменении — отдельной кнопки «Применить» тут нет,
+  // как и в остальных настройках приложения.
+  const updateNotify = (patch: Partial<NotificationPrefs>) => {
+    const next = { ...notify, ...patch };
+    setNotify(next);
+    saveNotificationPrefs(next);
+  };
+
+  const handleSystemToggle = async (checked: boolean) => {
+    // Включение системных уведомлений без выданного разрешения ничего бы не
+    // дало — переключатель встал бы в «вкл», а уведомлений всё равно не было.
+    if (checked) {
+      await ensureDesktopNotificationPermission();
+      setSystemPermission(desktopNotificationPermission());
+    }
+    updateNotify({ system: checked });
   };
 
   useEffect(() => {
@@ -55,6 +84,83 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="profile-card">
           <Avatar name={username} avatarPath={avatarPath} />
           <div className="name">{username}</div>
+        </div>
+
+        <div className="settings-section-title">Уведомления</div>
+        <div className="settings-group">
+          <div className="settings-row static">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+            <span className="label">Уведомления о сообщениях</span>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={notify.enabled}
+                onChange={(e) => updateNotify({ enabled: e.target.checked })}
+              />
+              <span className="switch-track"><span className="switch-thumb" /></span>
+            </label>
+          </div>
+
+          <div className="settings-row static">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M19.1 4.9a10 10 0 0 1 0 14.2M15.5 8.5a5 5 0 0 1 0 7" /></svg>
+            <span className="label">Звук</span>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={notify.sound}
+                disabled={!notify.enabled}
+                onChange={(e) => {
+                  updateNotify({ sound: e.target.checked });
+                  if (e.target.checked) playIncomingSound(); // сразу слышно, какой он
+                }}
+              />
+              <span className="switch-track"><span className="switch-thumb" /></span>
+            </label>
+          </div>
+
+          {!isNativeMobile && (
+            <div className="settings-row static">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg>
+              <span className="label">Системные уведомления</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={notify.system}
+                  disabled={!notify.enabled}
+                  onChange={(e) => handleSystemToggle(e.target.checked)}
+                />
+                <span className="switch-track"><span className="switch-thumb" /></span>
+              </label>
+            </div>
+          )}
+
+          {!isNativeMobile && notify.enabled && notify.system && systemPermission === 'denied' && (
+            <div className="settings-note is-warning">
+              Системные уведомления запрещены в настройках {isElectron ? 'Windows' : 'браузера'} — разрешите их там,
+              иначе за пределами окна приложения уведомления показываться не будут. Всплывающие уведомления
+              внутри приложения работают в любом случае.
+            </div>
+          )}
+
+          <div className="settings-row static">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+            <span className="label">Показывать уведомление</span>
+            <select
+              className="settings-select"
+              value={notify.durationMs}
+              disabled={!notify.enabled}
+              onChange={(e) => updateNotify({ durationMs: Number(e.target.value) })}
+            >
+              {DURATION_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="settings-note">
+            Уведомление висит указанное время, а при наведении курсора таймер останавливается — чтобы
+            сообщение не пропало, пока вас нет на месте.
+          </div>
         </div>
 
         <div className="settings-section-title">Оформление</div>

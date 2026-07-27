@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getAutoLaunch: () => ipcRenderer.invoke('autostart:get'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
-  setUnreadBadge: (hasUnread) => ipcRenderer.send('unread:set', hasUnread),
-  focusWindow: () => ipcRenderer.send('window:focus')
+  setUnreadBadge: (count) => ipcRenderer.send('unread:set', count),
+  focusWindow: () => ipcRenderer.send('window:focus'),
+  flashWindow: () => ipcRenderer.send('window:flash'),
+  onFocusChange: (callback) => {
+    const listener = (_event, isFocused) => callback(isFocused);
+    ipcRenderer.on('window:focus-changed', listener);
+    return () => ipcRenderer.removeListener('window:focus-changed', listener);
+  }
 });

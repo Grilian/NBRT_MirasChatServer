@@ -25,6 +25,23 @@ const db = require('./db');
 // напрямую, а не рассылка (general всё равно остаётся заблокирован).
 const MUTE_EXEMPT_GROUPS = ['Администрация', 'Админы'];
 
+const MAX_MESSAGE_LENGTH = 4000;
+const MAX_READ_BATCH = 500;
+
+// Простейшая защита от флуда: не больше FLOOD_MAX_MESSAGES сообщений за
+// FLOOD_WINDOW_MS с одного сокета. Без неё зациклившийся клиент (или кто-то
+// вручную) мог за секунды забить БД и завалить уведомлениями всех участников.
+const FLOOD_WINDOW_MS = 10000;
+const FLOOD_MAX_MESSAGES = 20;
+
+function isFlooding(socket) {
+  const now = Date.now();
+  const recent = (socket.recentMessageTimes || []).filter((t) => now - t < FLOOD_WINDOW_MS);
+  recent.push(now);
+  socket.recentMessageTimes = recent;
+  return recent.length > FLOOD_MAX_MESSAGES;
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -87,7 +104,65 @@ function broadcastToChat(socket, chatId, event, payload) {
 }
 
 // ===== WebSocket =====
-const onlineUsers = new Map();
+// userId -> Set<socketId>. Раньше здесь был Map userId -> socketId, и это
+// ломалось при нескольких сессиях одного человека (вторая вкладка, телефон
+// плюс десктоп, а также momentary-переподключение, когда новый сокет успевает
+// подняться раньше, чем отвалится старый): вход со второго устройства затирал
+// запись первого, а его 'disconnect' затем помечал пользователя оффлайн,
+// хотя он оставался на связи. Отсюда мигающий индикатор "в сети" и, что
+// важнее, recipientOnline === false — сообщение не помечалось доставленным.
+const onlineSockets = new Map();
+
+function markSocketOnline(userId, socketId) {
+  const existing = onlineSockets.get(userId);
+  if (existing) existing.add(socketId);
+  else onlineSockets.set(userId, new Set([socketId]));
+}
+
+// Возвращает true, если это была последняя живая сессия пользователя, то есть
+// он действительно ушёл в оффлайн (а не просто закрыл одну из вкладок).
+function markSocketOffline(userId, socketId) {
+  const sockets = onlineSockets.get(userId);
+  if (!sockets) return false;
+  sockets.delete(socketId);
+  if (sockets.size > 0) return false;
+  onlineSockets.delete(userId);
+  return true;
+}
+
+const onlineUserIds = () => Array.from(onlineSockets.keys());
+const isUserOnline = (userId) => onlineSockets.has(Number(userId));
+
+// Пока человека не было в сети, входящие сообщения оставались в статусе 'sent'
+// (доставлять было некому). Раньше в 'delivered' их переводил только клиент —
+// событием 'message_delivered' из обработчика показа веб-уведомления, то есть
+// если уведомления запрещены/не показались, статус не менялся вообще никогда.
+// Теперь факт доставки фиксирует сервер, как только клиент появился на связи.
+function markPendingDelivered(userId) {
+  try {
+    const pending = db.prepare(
+      "SELECT id, chat_id FROM messages WHERE sender_id != ? AND status = 'sent'"
+    ).all(userId);
+
+    const byChat = {};
+    for (const row of pending) {
+      if (!isParticipant(row.chat_id, userId)) continue;
+      (byChat[row.chat_id] = byChat[row.chat_id] || []).push(row.id);
+    }
+
+    const allIds = Object.values(byChat).flat();
+    if (!allIds.length) return;
+
+    const placeholders = allIds.map(() => '?').join(',');
+    db.prepare(`UPDATE messages SET status = 'delivered' WHERE id IN (${placeholders})`).run(...allIds);
+
+    for (const [chatId, messageIds] of Object.entries(byChat)) {
+      emitToChat(chatId, 'message_status_bulk', { chatId, messageIds, status: 'delivered' });
+    }
+  } catch (e) {
+    console.error('Ошибка отметки доставленных:', e);
+  }
+}
 
 io.on('connection', (socket) => {
   console.log(`Подключен: ${socket.id}`);
@@ -99,10 +174,11 @@ io.on('connection', (socket) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_super_secret_key');
       const userId = decoded.id;
-      onlineUsers.set(userId, socket.id);
+      markSocketOnline(userId, socket.id);
       socket.userId = userId;
       socket.join('user:' + userId);
-      io.emit('online_users', Array.from(onlineUsers.keys()));
+      io.emit('online_users', onlineUserIds());
+      markPendingDelivered(userId);
     } catch (e) {
       socket.emit('auth_error', { reason: 'invalid_token' });
     }
@@ -119,6 +195,19 @@ io.on('connection', (socket) => {
     // не проверялось, и любой мог отправить сообщение в chat_<a>_<b> чужих
     // пользователей, просто зная их id.
     if (!isParticipant(data.chatId, senderId)) return;
+
+    // Текст раньше уходил в БД как есть, что бы клиент ни прислал: пустая
+    // строка, null или мегабайтная простыня одинаково создавали запись. Пустые
+    // сообщения замусоривали превью в списке чатов, а длинные — разъезжались
+    // по вёрстке у всех участников.
+    const text = typeof data.text === 'string' ? data.text.trim() : '';
+    if (!text) return;
+    const finalText = text.length > MAX_MESSAGE_LENGTH ? text.slice(0, MAX_MESSAGE_LENGTH) : text;
+
+    if (isFlooding(socket)) {
+      socket.emit('message_blocked', { reason: 'rate_limit', chatId: data.chatId });
+      return;
+    }
 
     // Режим тишины — проверяем по аутентичному senderId, а не по тому, что
     // прислал клиент. Заодно берём имя — раньше отправленное сообщение
@@ -150,13 +239,13 @@ io.on('connection', (socket) => {
       const stmt = db.prepare(
         'INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, ?)'
       );
-      const result = stmt.run(data.chatId, senderId, data.text, 'sent');
+      const result = stmt.run(data.chatId, senderId, finalText, 'sent');
 
       const message = {
         id: result.lastInsertRowid,
         chat_id: data.chatId,
         sender_id: senderId,
-        text: data.text,
+        text: finalText,
         status: 'sent',
         created_at: new Date().toISOString(),
         username: senderRow ? senderRow.username : undefined,
@@ -182,12 +271,12 @@ io.on('connection', (socket) => {
       // Проверяем, есть ли получатель онлайн
       let recipientOnline = false;
       if (data.chatId === 'general') {
-        recipientOnline = Array.from(onlineUsers.keys()).some(id => id !== senderId);
+        recipientOnline = onlineUserIds().some(id => id !== senderId);
       } else {
         const match = data.chatId.match(/^chat_(\d+)_(\d+)$/);
         if (match) {
           const otherId = Number(match[1]) === senderId ? Number(match[2]) : Number(match[1]);
-          recipientOnline = onlineUsers.has(otherId);
+          recipientOnline = isUserOnline(otherId);
         }
       }
 
@@ -216,35 +305,56 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Раньше здесь не было вообще никаких проверок: клиент присылал любой набор
+  // id, и сервер помечал их прочитанными — можно было погасить чужие счётчики
+  // непрочитанного или, наоборот, отметить прочитанными собственные исходящие
+  // сообщения (клиент их фильтрует, но полагаться на это нельзя). Теперь
+  // сужаем апдейт до чата, в котором сокет реально участник, и только до
+  // чужих сообщений в нём.
   socket.on('message_read', ({ chatId, messageIds }) => {
+    const userId = socket.userId;
+    if (!userId || !chatId) return;
+    if (!Array.isArray(messageIds) || messageIds.length === 0) return;
+    if (!isParticipant(chatId, userId)) return;
 
-    if (!messageIds || messageIds.length === 0)
-      return;
+    try {
+      const ids = messageIds.map(Number).filter(Number.isInteger).slice(0, MAX_READ_BATCH);
+      if (!ids.length) return;
 
-    const placeholders = messageIds.map(() => "?").join(",");
+      const placeholders = ids.map(() => '?').join(',');
 
-    db.prepare(`
-        UPDATE messages
-        SET status='read'
-        WHERE id IN (${placeholders})
-    `).run(...messageIds);
+      // Сначала выбираем те id, которые действительно поменяются, чтобы в
+      // рассылку ушёл честный список, а не всё, что прислал клиент.
+      const affected = db.prepare(`
+        SELECT id FROM messages
+        WHERE id IN (${placeholders}) AND chat_id = ? AND sender_id != ? AND status != 'read'
+      `).all(...ids, chatId, userId).map((row) => row.id);
 
-    emitToChat(chatId, "message_status_bulk", {
-        chatId,
-        messageIds,
-        status: "read"
-    });
+      if (!affected.length) return;
 
+      const affectedPlaceholders = affected.map(() => '?').join(',');
+      db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${affectedPlaceholders})`).run(...affected);
+
+      emitToChat(chatId, 'message_status_bulk', { chatId, messageIds: affected, status: 'read' }, userId);
+    } catch (e) {
+      console.error('Ошибка отметки прочитанного:', e);
+    }
   });
 
   socket.on('message_delivered', (messageId) => {
+    const userId = socket.userId;
+    if (!userId) return;
+
     try {
-      const stmt = db.prepare('UPDATE messages SET status = ? WHERE id = ? AND status = ?');
-      const result = stmt.run('delivered', messageId, 'sent');
-      if (result.changes > 0) {
-        const row = db.prepare('SELECT chat_id FROM messages WHERE id = ?').get(messageId);
-        emitToChat(row ? row.chat_id : null, 'message_status', { id: messageId, status: 'delivered' });
-      }
+      const row = db.prepare('SELECT chat_id, sender_id, status FROM messages WHERE id = ?').get(messageId);
+      // Доставленным сообщение может объявить только его получатель — не
+      // отправитель и не посторонний, знающий id.
+      if (!row || row.status !== 'sent') return;
+      if (Number(row.sender_id) === Number(userId)) return;
+      if (!isParticipant(row.chat_id, userId)) return;
+
+      db.prepare("UPDATE messages SET status = 'delivered' WHERE id = ? AND status = 'sent'").run(messageId);
+      emitToChat(row.chat_id, 'message_status', { id: messageId, status: 'delivered' });
     } catch (e) {
       console.error('Ошибка обновления статуса:', e);
     }
@@ -326,9 +436,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    if (socket.userId) {
-      onlineUsers.delete(socket.userId);
-      io.emit('online_users', Array.from(onlineUsers.keys()));
+    // Оффлайн объявляем, только когда отвалилась последняя сессия человека —
+    // иначе закрытая вкладка гасила индикатор "в сети" у ещё живого клиента.
+    if (socket.userId && markSocketOffline(socket.userId, socket.id)) {
+      io.emit('online_users', onlineUserIds());
     }
     console.log(`Отключен: ${socket.id}`);
   });

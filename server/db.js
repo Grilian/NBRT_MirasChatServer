@@ -235,4 +235,14 @@ try {
   console.error('Ошибка бэкфилла контактов:', e);
 }
 
+// Индексы под самые горячие выборки: история чата (chat_id + порядок),
+// подсчёт непрочитанного и отметка доставленных при входе в сеть — все они
+// раньше упирались в полный скан таблицы сообщений, который с ростом
+// переписки заметно тормозил и открытие чата, и подключение сокета.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id, id);
+  CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status, sender_id);
+  CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
+`);
+
 module.exports = db;

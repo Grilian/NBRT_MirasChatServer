@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Avatar from './Avatar';
-import { formatMoscowTime } from '../utils/time';
+import { formatChatListTime } from '../utils/time';
 
 export type ChatSection = 'general' | 'staff';
 
@@ -151,7 +151,7 @@ const ChatList: React.FC<ChatListProps> = ({
                     </div>
                     {last && (
                       <div className="row-time">
-                        {formatMoscowTime(last.created_at)}
+                        {formatChatListTime(last.created_at)}
                       </div>
                     )}
                   </div>

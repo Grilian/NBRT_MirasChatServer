@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { App as CapApp } from '@capacitor/app';
 import ChatList, { ChatSection } from '../components/ChatList';
@@ -9,6 +9,7 @@ import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
 import UserInfoModal from '../components/UserInfoModal';
 import Avatar from '../components/Avatar';
+import NotificationStack, { ToastNotification } from '../components/NotificationStack';
 import api from '../api/client';
 import { nameFor } from '../utils/user';
 import {
@@ -19,6 +20,18 @@ import {
   dismissAllMobileNotifications,
   onMobileNotificationTap
 } from '../utils/mobileNotify';
+import {
+  ensureDesktopNotificationPermission,
+  showDesktopNotification,
+  dismissDesktopNotification,
+  dismissAllDesktopNotifications
+} from '../utils/desktopNotify';
+import { playIncomingSound, primeNotificationSound } from '../utils/sound';
+import {
+  NotificationPrefs,
+  getNotificationPrefs,
+  onNotificationPrefsChanged
+} from '../utils/notificationPrefs';
 
 interface User {
   id: number;
@@ -66,6 +79,18 @@ interface AllUser {
 
 const GENERAL_CHAT_ID = 'general';
 
+// Больше четырёх карточек на экране — уже не уведомление, а стена, за которой
+// не видно приложения. Самые старые уступают место новым (в них всё равно
+// показано только последнее сообщение чата).
+const MAX_TOASTS = 4;
+
+// chat_id личной переписки детерминированно собирается из пары id — одинаково
+// на клиенте и на сервере (см. services/chatParticipants.js).
+function chatIdFor(a: number, b: number): string {
+  const ids = [a, b].sort((x, y) => x - y);
+  return `chat_${ids[0]}_${ids[1]}`;
+}
+
 const Chat: React.FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -85,8 +110,65 @@ const Chat: React.FC = () => {
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentAt = useRef(0);
+  // Синхронная защёлка «страница истории уже грузится» — см. loadMoreMessages
+  const loadingMoreRef = useRef(false);
+
+  const [toasts, setToasts] = useState<ToastNotification[]>([]);
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(getNotificationPrefs);
+
+  // Окно «в фокусе» — не просто document.hasFocus() в момент прихода
+  // сообщения, а реактивное состояние: от него зависит и показ уведомления, и
+  // (главное) можно ли отмечать сообщения прочитанными. Раньше прочитанными
+  // они помечались всегда, как только попадали в открытый чат — даже если
+  // человек отошёл от компьютера или окно было свёрнуто в трей. Из-за этого
+  // счётчик непрочитанного не появлялся вовсе, а собеседник видел «прочитано»
+  // у сообщения, которое никто не читал.
+  const [windowFocused, setWindowFocused] = useState(
+    typeof document !== 'undefined' ? document.hasFocus() && document.visibilityState !== 'hidden' : true
+  );
+
+  // «Переписку действительно видно на экране»: мало открытого чата и фокуса
+  // окна — поверх переписки могут быть открыты Настройки или Профиль, а на
+  // узком экране можно уйти назад к списку чатов, не закрывая сам чат. Во всех
+  // этих случаях сообщение человеку не видно, значит его нельзя считать
+  // прочитанным и нельзя проглатывать уведомление о нём.
+  const conversationVisible = windowFocused && view === 'conversation' && mobileView === 'chat';
 
   const currentUserId = Number(localStorage.getItem('userId'));
+
+  // Живой снимок состояния для обработчика сокета — см. подробности там же.
+  const liveRef = useRef({
+    activeChat: null as string | null,
+    allUsers: [] as AllUser[],
+    windowFocused: true,
+    conversationVisible: false,
+    prefs: notificationPrefs,
+  });
+
+  // id сообщений, уже учтённых в счётчике непрочитанного — защита от повторного
+  // прихода того же события 'chat_message' при переподключении сокета.
+  const countedMessageIds = useRef<Set<number>>(new Set());
+
+  // Уведомления копятся по чатам: второе сообщение из того же чата не плодит
+  // новую карточку, а обновляет существующую и заново запускает её таймер —
+  // как стопка уведомлений в Telegram.
+  const pushToast = useCallback((incoming: Omit<ToastNotification, 'count' | 'revision'>) => {
+    setToasts(prev => {
+      const existing = prev.find(t => t.chatId === incoming.chatId);
+      if (existing) {
+        return prev.map(t => t.chatId === incoming.chatId
+          ? { ...t, ...incoming, count: t.count + 1, revision: t.revision + 1 }
+          : t);
+      }
+      return [...prev, { ...incoming, count: 1, revision: 0 }].slice(-MAX_TOASTS);
+    });
+  }, []);
+
+  const dismissToast = useCallback((chatId: string) => {
+    setToasts(prev => prev.filter(t => t.chatId !== chatId));
+    dismissDesktopNotification(chatId);
+  }, []);
 
   // Стейт, а не просто чтение localStorage на каждый рендер — иначе смену
   // аватара/имени в профиле пришлось бы отражать через полный reload
@@ -110,10 +192,33 @@ const Chat: React.FC = () => {
 
   // Запрос разрешения на уведомления
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
+    ensureDesktopNotificationPermission();
     ensureMobileNotificationPermission();
+    primeNotificationSound();
+  }, []);
+
+  // Настройки уведомлений меняются в панели настроек — подхватываем сразу,
+  // без перезахода в приложение.
+  useEffect(() => onNotificationPrefsChanged(setNotificationPrefs), []);
+
+  // Фокус окна. visibilitychange нужен отдельно от blur: свёрнутое окно и
+  // фоновая вкладка не всегда дают blur, а в Electron окно, спрятанное в
+  // трей, вообще не проходит через веб-события — оттуда состояние приходит
+  // из main-процесса (см. window:focus-changed).
+  useEffect(() => {
+    const update = () => setWindowFocused(document.hasFocus() && document.visibilityState !== 'hidden');
+
+    window.addEventListener('focus', update);
+    window.addEventListener('blur', update);
+    document.addEventListener('visibilitychange', update);
+    const unsubscribeElectron = window.electronAPI?.onFocusChange?.((isFocused) => setWindowFocused(isFocused));
+
+    return () => {
+      window.removeEventListener('focus', update);
+      window.removeEventListener('blur', update);
+      document.removeEventListener('visibilitychange', update);
+      unsubscribeElectron?.();
+    };
   }, []);
 
   // Список групп нужен только для встроенного админ-управления в профиле —
@@ -124,11 +229,14 @@ const Chat: React.FC = () => {
     api.get('/moderation/groups').then(({ data }) => setGroups(data)).catch(console.error);
   }, [currentUserRole]);
 
-  // Красная точка в трее/оверлей на таскбаре (desktop) — пока есть непрочитанное
+  // Красная точка в трее/оверлей на таскбаре (desktop) и счётчик в заголовке
+  // вкладки (веб) — пока есть непрочитанное. Заголовок вкладки для веб-версии
+  // единственный индикатор, который виден, когда вкладка не активна.
+  const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
   useEffect(() => {
-    const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
-    window.electronAPI?.setUnreadBadge(totalUnread > 0);
-  }, [unreadCounts]);
+    window.electronAPI?.setUnreadBadge(totalUnread);
+    document.title = totalUnread > 0 ? `(${totalUnread}) MirasChat` : 'MirasChat';
+  }, [totalUnread]);
 
   // Аппаратная кнопка "назад" на Android — по умолчанию сразу закрывала бы
   // приложение (нет истории браузера). Идём по своему стеку экранов:
@@ -271,6 +379,13 @@ const Chat: React.FC = () => {
 
     newSocket.on('message_deleted', (data: { id: number; chat_id: string }) => {
       setMessages(prev => prev.map(m => m.id === data.id ? { ...m, deleted: true, text: '' } : m));
+
+      // Превью в списке чатов раньше не трогали — и удалённое сообщение
+      // продолжало висеть там своим текстом, хотя в самой переписке уже
+      // отображалось как «Сообщение удалено». Перечитываем превью с сервера:
+      // локально мы не знаем, какое сообщение стало последним, если удалили
+      // как раз его.
+      api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
     });
 
     // Супер-админ (или теперь и обычный "Администратор" из профиля) может
@@ -337,11 +452,31 @@ const Chat: React.FC = () => {
     return () => { listenerPromise.then((h) => h.remove()); };
   }, [socket, activeChat]);
 
-  // Единый обработчик новых сообщений
+  // Единый обработчик новых сообщений.
+  //
+  // Подписка живёт ровно столько же, сколько сокет, а всё изменчивое состояние
+  // обработчик читает через liveRef. Раньше он пересоздавался по
+  // [socket, activeChat, currentUserId], но при этом обращался ещё и к
+  // allUsers — то есть навсегда запоминал список контактов на момент
+  // подписки. Из-за этого уведомление от человека, добавленного в контакты
+  // уже после открытия приложения, приходило с безликим заголовком «Чат»
+  // вместо имени отправителя.
   useEffect(() => {
     if (!socket) return;
 
     const handler = (message: Message) => {
+      const { activeChat: liveActiveChat, allUsers: liveUsers, windowFocused: focused, conversationVisible, prefs } = liveRef.current;
+      const chatId = message.chat_id;
+      const isMine = message.sender_id === currentUserId;
+      const isActiveChat = !!chatId && chatId === liveActiveChat;
+
+      // «Человек прямо сейчас это видит»: мало того, что чат открыт — окно
+      // должно быть в фокусе, а сама переписка не закрыта настройками или
+      // списком чатов. Свёрнутое в трей окно с открытым чатом раньше
+      // считалось просмотром, и сообщение молча проглатывалось: без
+      // счётчика, без уведомления, сразу «прочитано».
+      const isVisibleNow = isActiveChat && conversationVisible;
+
       // Добавляем сообщение в список если это активный чат. Дедуп по id —
       // при кратком провисании сети сокет переподключается и на сервере
       // на секунды-две может остаться "зависшая" старая комната того же
@@ -349,58 +484,96 @@ const Chat: React.FC = () => {
       // перезапуск приложения сам себя чинил именно потому, что React-стейт
       // просто пересоздавался с нуля — а на самом деле дублировалось само
       // событие, а не запись в БД.
-      if (message.chat_id === activeChat) {
+      if (isActiveChat) {
         setMessages(prev => prev.some(m => m.id === message.id) ? prev : [...prev, message]);
       }
 
       // Превью последнего сообщения в списке диалогов — обновляем сразу,
       // не дожидаясь перезагрузки страницы.
-      if (message.chat_id) {
+      if (chatId) {
         setLastMessages(prev => ({
           ...prev,
-          [message.chat_id as string]: {
-            chat_id: message.chat_id as string,
-            text: message.text,
-            created_at: message.created_at
-          }
+          [chatId]: { chat_id: chatId, text: message.text, created_at: message.created_at }
         }));
       }
 
-      // Если сообщение не от нас и чат не активен — увеличиваем счётчик
-      if (message.sender_id !== currentUserId && message.chat_id !== activeChat && message.chat_id) {
-        setUnreadCounts(prev => ({
-          ...prev,
-          [message.chat_id as string]: (prev[message.chat_id as string] || 0) + 1
-        }));
+      if (isMine || !chatId) return;
+
+      // Счётчик непрочитанного. Дедуп по id обязателен и здесь: то самое
+      // задвоенное событие раньше давало +2 к счётчику, и лишняя единица
+      // висела до перезахода — в списке чатов бейдж показывал больше
+      // сообщений, чем в чате реально есть.
+      if (!isVisibleNow && !countedMessageIds.current.has(message.id)) {
+        if (countedMessageIds.current.size > 2000) countedMessageIds.current.clear();
+        countedMessageIds.current.add(message.id);
+        setUnreadCounts(prev => ({ ...prev, [chatId]: (prev[chatId] || 0) + 1 }));
       }
 
-      // Показываем уведомление
-      if (message.sender_id !== currentUserId) {
-        const isChatActive = message.chat_id === activeChat;
-        const isWindowFocused = document.hasFocus();
+      if (isVisibleNow || !prefs.enabled) return;
 
-        if (!isChatActive || !isWindowFocused) {
-          const otherUser = allUsers.find(u => getChatId(u.id) === message.chat_id);
-          const chatName = message.chat_id === GENERAL_CHAT_ID
-            ? 'Общий чат'
-            : (otherUser ? nameFor(otherUser) : 'Чат');
+      const otherUser = liveUsers.find(u => chatIdFor(currentUserId, u.id) === chatId);
+      const isGeneral = chatId === GENERAL_CHAT_ID;
+      const chatName = isGeneral ? 'Общий чат' : (otherUser ? nameFor(otherUser) : nameFor(message));
 
-          showNotification(message, chatName);
+      // В общем чате важно, кто именно написал — иначе все уведомления
+      // выглядят одинаково и по ним не понять, стоит ли отвлекаться.
+      const body = isGeneral ? `${nameFor(message)}: ${message.text}` : message.text;
+
+      // На мобильном в фоне звук играет сама ОС по каналу уведомления —
+      // свой в этот момент не воспроизвести (приложение усыплено), да и
+      // дублировать его не нужно.
+      if (prefs.sound && (!isNativeMobile || focused)) {
+        playIncomingSound();
+      }
+
+      pushToast({
+        chatId,
+        title: chatName,
+        body,
+        avatarPath: otherUser?.avatarPath ?? null,
+        isGeneral
+      });
+
+      if (!focused) {
+        if (isNativeMobile) {
+          showMobileNotification(message.id, `MirasChat — ${chatName}`, body, chatId);
+        } else if (prefs.system) {
+          showDesktopNotification({
+            title: chatName,
+            body,
+            tag: chatId,
+            onClick: () => {
+              window.electronAPI?.focusWindow?.();
+              window.focus();
+              handleSelectChatRef.current(chatId);
+            }
+          });
         }
+        // Мигание кнопки в панели задач — окно может быть свёрнуто в трей,
+        // и уведомление ОС человек мог не застать.
+        window.electronAPI?.flashWindow?.();
       }
     };
 
     socket.on('chat_message', handler);
     return () => { socket.off('chat_message', handler); };
-  }, [socket, activeChat, currentUserId]);
+  }, [socket, currentUserId, pushToast]);
 
   // Загрузка истории при смене чата
   useEffect(() => {
     if (activeChat) {
+      // Ответ на запрос истории может прийти уже после того, как человек
+      // переключился на другой чат (медленная сеть, быстрые клики по списку).
+      // Без этой отсечки история чата A применялась поверх открытого чата B —
+      // и дальше живые сообщения B дописывались к чужой переписке.
+      let cancelled = false;
+
       setMessages([]);
       setHasMore(true);
+      loadingMoreRef.current = false;
       api.get(`/messages/${activeChat}?limit=50&offset=0`)
         .then(({ data }) => {
+          if (cancelled) return;
           if (data.messages) {
             setMessages(data.messages);
             setHasMore(data.hasMore);
@@ -410,6 +583,11 @@ const Chat: React.FC = () => {
           }
         })
         .catch(console.error);
+      // Счётчик открытого чата гасим локально и не даём серверному ответу
+      // его вернуть. Раньше здесь безусловно применялся свежий /unread, а он
+      // в этот момент ещё считает чат непрочитанным (сообщения помечаются
+      // прочитанными чуть позже, отдельным событием) — бейдж успевал моргнуть
+      // обратно и погаснуть только со второго круга.
       setUnreadCounts(prev => {
           const next = { ...prev };
           delete next[activeChat];
@@ -417,34 +595,63 @@ const Chat: React.FC = () => {
       });
 
       api.get("/unread")
-        .then(({ data }) => setUnreadCounts(data))
+        .then(({ data }) => setUnreadCounts({ ...data, [activeChat]: 0 }))
         .catch(console.error);
+
+      return () => { cancelled = true; };
     } else {
       setMessages([]);
     }
   }, [activeChat]);
 
-  // Подгрузка старых сообщений
+  // Подгрузка старых сообщений. Курсор — id самого старого показанного
+  // сообщения, а не offset по длине списка: пока человек читает историю, в чат
+  // приходят новые сообщения, из-за чего offset «съезжал» и следующая страница
+  // либо дублировала уже показанное, либо перепрыгивала через кусок переписки.
+  //
+  // Защёлка — ref, а не стейт loadingMore. Именно на этом рождались
+  // задвоенные сообщения: onScroll стреляет десятки раз за секунду, а
+  // setLoadingMore(true) применяется только к следующему рендеру, поэтому
+  // события, успевшие до перерисовки, читали из замыкания старое
+  // loadingMore === false и запускали загрузку повторно — с тем же оффсетом.
+  // Одна и та же страница дописывалась в список дважды, и дубликаты жили до
+  // перезахода в приложение (перезаход просто перечитывал историю с сервера).
+  // Ref обновляется синхронно, поэтому второй вызов отсекается сразу.
   const loadMoreMessages = async () => {
-    if (!activeChat || loadingMore || !hasMore) return;
+    if (!activeChat || loadingMoreRef.current || !hasMore || messages.length === 0) return;
 
+    const oldestId = messages[0].id;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const { data } = await api.get(`/messages/${activeChat}?limit=50&offset=${messages.length}`);
+      const { data } = await api.get(`/messages/${activeChat}?limit=50&before=${oldestId}`);
       if (data.messages) {
-        setMessages(prev => [...data.messages, ...prev]);
+        // Второй пояс к защёлке: даже если страница каким-то образом придёт
+        // дважды, уже показанные id отсеются и в список ничего не задвоится.
+        setMessages(prev => {
+          const known = new Set(prev.map(m => m.id));
+          const fresh = data.messages.filter((m: Message) => !known.has(m.id));
+          return fresh.length ? [...fresh, ...prev] : prev;
+        });
         setHasMore(data.hasMore);
       }
     } catch (e) {
       console.error('Ошибка загрузки:', e);
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
   };
 
-  // Отметка прочитанных
+  // Отметка прочитанных — только когда человек действительно смотрит в окно.
+  // Гейт по windowFocused и есть исправление: раньше сообщение, пришедшее в
+  // открытый чат у свёрнутого окна, немедленно становилось «прочитанным».
+  // Собеседник видел две синие галочки, хотя за компьютером никого не было, а
+  // сам получатель не получал ни счётчика, ни следа о пропущенном сообщении.
+  // Эффект перезапускается при возврате фокуса, так что отметка произойдёт
+  // ровно в тот момент, когда человек вернулся к окну.
   useEffect(() => {
-    if (!socket || !activeChat || messages.length === 0) return;
+    if (!socket || !activeChat || !conversationVisible || messages.length === 0) return;
 
     const unreadIds = messages
       .filter(m => m.sender_id !== currentUserId && m.status !== 'read')
@@ -454,46 +661,19 @@ const Chat: React.FC = () => {
       socket.emit('message_read', { chatId: activeChat, messageIds: unreadIds });
       dismissMobileNotifications(unreadIds);
     }
-  }, [messages, activeChat, socket, currentUserId]);
 
-  // Показ уведомления. На Android WebView обычный Notification API не
-  // добирается до системного трея — там нужен нативный мост через Capacitor.
-  const showNotification = (message: Message, chatName: string) => {
-    if (isNativeMobile) {
-      showMobileNotification(message.id, `MirasChat — ${chatName}`, message.text, message.chat_id || '');
-      if (socket) socket.emit('message_delivered', message.id);
-      return;
-    }
+    // Открытый и просматриваемый чат не должен светиться в списке
+    // непрочитанным и держать всплывающее уведомление на экране.
+    setUnreadCounts(prev => {
+      if (!prev[activeChat]) return prev;
+      const next = { ...prev };
+      delete next[activeChat];
+      return next;
+    });
+    dismissToast(activeChat);
+  }, [messages, activeChat, socket, currentUserId, conversationVisible, dismissToast]);
 
-    if ('Notification' in window && Notification.permission === 'granted') {
-      const notification = new Notification(`MirasChat — ${chatName}`, {
-        body: message.text,
-        icon: '/logo192.png',
-        tag: message.id.toString(),
-      });
-
-      notification.onshow = () => {
-        if (socket) {
-          socket.emit('message_delivered', message.id);
-        }
-      };
-
-      // Клик по всплывающему уведомлению — открыть нужный чат и вернуть
-      // окно на передний план (на десктопе окно может быть свёрнуто в трей,
-      // одного window.focus() из рендерера для этого недостаточно).
-      notification.onclick = () => {
-        window.electronAPI?.focusWindow?.();
-        window.focus();
-        if (message.chat_id) handleSelectChat(message.chat_id);
-        notification.close();
-      };
-    }
-  };
-
-  const getChatId = (otherUserId: number) => {
-    const ids = [currentUserId, otherUserId].sort((a, b) => a - b);
-    return `chat_${ids[0]}_${ids[1]}`;
-  };
+  const getChatId = (otherUserId: number) => chatIdFor(currentUserId, otherUserId);
 
   // "Прочитать всё" — на случай застрявших счётчиков непрочитанного
   // (например, после бага с рассылкой личных сообщений всем подряд).
@@ -501,7 +681,9 @@ const Chat: React.FC = () => {
     if (!socket) return;
     socket.emit('mark_all_read');
     setUnreadCounts({});
+    setToasts([]);
     dismissAllMobileNotifications();
+    dismissAllDesktopNotifications();
   };
 
   // Избранное
@@ -548,6 +730,10 @@ const Chat: React.FC = () => {
     source: 'local' as const,
     groupName: u.group_name,
   }));
+
+  // Обновляем снимок для обработчика сокета на каждом рендере — присваивание
+  // должно идти после объявления allUsers, иначе получим TDZ.
+  liveRef.current = { activeChat, allUsers, windowFocused, conversationVisible, prefs: notificationPrefs };
 
   const handleSelectChat = (chatId: string) => {
     if (chatId === GENERAL_CHAT_ID) {
@@ -624,21 +810,35 @@ const Chat: React.FC = () => {
   };
 
   const handleTyping = () => {
-    if (socket && activeChat) {
+    if (!socket || !activeChat) return;
+
+    // Событие 'typing' уходило на каждое нажатие клавиши — при быстром наборе
+    // это десятки сокет-сообщений в секунду каждому участнику чата, полностью
+    // бесполезных: индикатор у собеседника всё равно уже горит. Шлём не чаще
+    // раза в секунду, при этом таймер «перестал печатать» продлеваем всегда.
+    const now = Date.now();
+    if (now - lastTypingSentAt.current > 1000) {
+      lastTypingSentAt.current = now;
       socket.emit('typing', {
         chatId: activeChat,
         userId: currentUserId,
         username: currentDisplayName,
       });
-
-      if (typingTimeout.current) clearTimeout(typingTimeout.current);
-      typingTimeout.current = setTimeout(() => {
-        socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
-      }, 2000);
     }
+
+    if (typingTimeout.current) clearTimeout(typingTimeout.current);
+    typingTimeout.current = setTimeout(() => {
+      lastTypingSentAt.current = 0;
+      socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
+    }, 2000);
   };
 
   const handleLogout = () => {
+    // Уведомления от прошлого аккаунта не должны пережить выход — системные
+    // карточки живут вне окна и с requireInteraction висят, пока их не закроют.
+    dismissAllDesktopNotifications();
+    dismissAllMobileNotifications();
+    window.electronAPI?.setUnreadBadge(0);
     localStorage.clear();
     window.location.reload();
   };
@@ -753,6 +953,12 @@ const Chat: React.FC = () => {
 
   return (
     <div className={'chat-layout' + (mobileView === 'chat' ? ' is-conversation-view' : '')}>
+      <NotificationStack
+        toasts={toasts}
+        durationMs={notificationPrefs.durationMs}
+        onOpen={(chatId) => { handleSelectChat(chatId); dismissToast(chatId); }}
+        onDismiss={dismissToast}
+      />
       <ChatList
         username={currentDisplayName}
         avatarPath={currentAvatarPath}
@@ -851,9 +1057,19 @@ const Chat: React.FC = () => {
                   />
                   <div className="conv-title">
                     <div className="name">{activeChatMeta.name}</div>
-                    <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
-                      {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
-                    </div>
+                    {/* «печатает…» вытесняет статус в самой шапке — так это
+                        показывает Telegram, и индикатор виден, даже когда
+                        переписка прокручена не до конца. */}
+                    {typingText ? (
+                      <div className="status is-typing">
+                        {activeChatMeta.section === 'general' ? `${typingText} печатает` : 'печатает'}
+                        <span className="typing-dots"><span /><span /><span /></span>
+                      </div>
+                    ) : (
+                      <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
+                        {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
+                      </div>
+                    )}
                   </div>
                 </button>
               ) : (
@@ -865,10 +1081,11 @@ const Chat: React.FC = () => {
               chatId={activeChat}
               messages={messages}
               currentUserId={currentUserId}
-              typingUser={typingText}
+              showAuthors={activeChat === GENERAL_CHAT_ID}
               onScrollTop={loadMoreMessages}
               hasMore={hasMore}
               loadingMore={loadingMore}
+              unreadCount={activeChat ? unreadCounts[activeChat] : 0}
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
             />
@@ -881,6 +1098,7 @@ const Chat: React.FC = () => {
               onSend={handleSendMessage}
               onTyping={handleTyping}
               disabled={!activeChat || muted}
+              placeholder={muted ? 'Отправка сообщений ограничена' : undefined}
             />
           </>
         )}

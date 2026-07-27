@@ -52,6 +52,15 @@ export async function showMobileNotification(messageId: number, title: string, b
           body,
           smallIcon: 'ic_launcher_foreground',
           channelId: MESSAGE_CHANNEL_ID,
+          // Уведомления одного чата Android складывает в одну стопку, а не
+          // сыплет отдельными карточками на каждое сообщение — как в Telegram.
+          group: `chat_${chatId}`,
+          // Тап по уведомлению убирает его из шторки (мы всё равно открываем
+          // этот чат). Без autoCancel карточка остаётся висеть после перехода.
+          autoCancel: true,
+          // ongoing: false — уведомление можно смахнуть. Явно, потому что по
+          // умолчанию поведение зависит от версии плагина.
+          ongoing: false,
           extra: { chatId }
         }
       ]
