@@ -24,6 +24,7 @@ import {
   onMobileNotificationTap
 } from '../utils/mobileNotify';
 import { initMobilePush, unregisterMobilePush, dismissAllPushNotifications } from '../utils/mobilePush';
+import { watchMobileKeyboard, hideMobileKeyboard } from '../utils/mobileKeyboard';
 import {
   ensureDesktopNotificationPermission,
   showDesktopNotification,
@@ -267,6 +268,25 @@ const Chat: React.FC = () => {
   const backNavRef = useRef({ section, settingsView, mobileView, directoryOpen, infoModalUserId });
   backNavRef.current = { section, settingsView, mobileView, directoryOpen, infoModalUserId };
 
+  useEffect(() => watchMobileKeyboard(), []);
+
+  // Любой уход с экрана переписки — сначала убрать клавиатуру и дать WebView
+  // перестроиться, и только потом переключать панель. Перестроение под
+  // закрывающуюся клавиатуру поверх CSS-перехода роняет анимацию на полпути
+  // (подробности в mobileKeyboard.ts).
+  const leaveConversation = useCallback(() => {
+    hideMobileKeyboard().then(() => setMobileView('list'));
+  }, []);
+
+  const goToSection = useCallback((id: SectionId) => {
+    hideMobileKeyboard().then(() => {
+      setSection(id);
+      // Возврат в «Настройки» всегда открывает сам список настроек, а не
+      // подэкран профиля, на котором человек был в прошлый раз.
+      if (id === 'settings') setSettingsView('settings');
+    });
+  }, []);
+
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('backButton', () => {
@@ -277,11 +297,11 @@ const Chat: React.FC = () => {
       if (nav.directoryOpen) { setDirectoryOpen(false); return; }
       if (nav.section === 'settings' && nav.settingsView === 'profile') { setSettingsView('settings'); return; }
       if (nav.section !== 'chats') { setSection('chats'); return; }
-      if (nav.mobileView === 'chat') { setMobileView('list'); return; }
+      if (nav.mobileView === 'chat') { leaveConversation(); return; }
       CapApp.minimizeApp();
     });
     return () => { listenerPromise.then((h) => h.remove()); };
-  }, []);
+  }, [leaveConversation]);
 
   // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
   // ни 'stop_typing' (вкладка закрылась, сеть оборвалась) — гасим индикатор сами,
@@ -1021,12 +1041,7 @@ const Chat: React.FC = () => {
 
       <NavRail
         active={section}
-        onSelect={(id) => {
-          setSection(id);
-          // Возврат в «Настройки» всегда открывает сам список настроек, а не
-          // подэкран профиля, на котором человек был в прошлый раз.
-          if (id === 'settings') setSettingsView('settings');
-        }}
+        onSelect={goToSection}
         unreadTotal={totalUnread}
         username={currentDisplayName}
         avatarPath={currentAvatarPath}
@@ -1134,7 +1149,7 @@ const Chat: React.FC = () => {
       {isChats && (
         <main className="conversation">
           <div className="conv-head">
-            <button type="button" className="icon-btn back-btn" onClick={() => setMobileView('list')} aria-label="Назад к списку">
+            <button type="button" className="icon-btn back-btn" onClick={leaveConversation} aria-label="Назад к списку">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
             </button>
 

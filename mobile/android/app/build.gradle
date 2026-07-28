@@ -10,8 +10,8 @@ android {
         // Поднимать вручную перед каждой сборкой APK (см. README, раздел
         // «Сборка Android-приложения»): versionCode должен строго расти,
         // иначе Android откажется ставить сборку поверх установленной.
-        versionCode 5
-        versionName "1.3"
+        versionCode 6
+        versionName "1.3.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
