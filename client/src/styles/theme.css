@@ -383,6 +383,8 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   color: var(--gold-strong); background: color-mix(in srgb, var(--gold) 16%, transparent);
   border-radius: var(--radius-pill); padding: 3px 10px; margin-bottom: 14px;
 }
+/* Раздел, за который уже взялись, — отличаем от общего «В разработке». */
+.section-stub-tag.is-started { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .section-stub-text { margin: 0 0 20px; font-size: 14px; line-height: 1.5; color: var(--ink-muted); }
 .section-stub-back { width: auto; padding-left: 22px; padding-right: 22px; }
 

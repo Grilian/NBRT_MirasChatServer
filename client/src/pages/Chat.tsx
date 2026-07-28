@@ -11,6 +11,7 @@ import UserInfoModal from '../components/UserInfoModal';
 import Avatar from '../components/Avatar';
 import NavRail, { SectionId, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
+import CalendarSection from '../components/CalendarSection';
 import PeopleSection from '../components/PeopleSection';
 import NotificationStack, { ToastNotification } from '../components/NotificationStack';
 import api from '../api/client';
@@ -1140,7 +1141,13 @@ const Chat: React.FC = () => {
         </main>
       )}
 
-      {!isChats && section !== 'settings' && section !== 'people' && (
+      {section === 'calendar' && (
+        <main className="section-host">
+          <CalendarSection section={activeSection} onBack={() => setSection('chats')} />
+        </main>
+      )}
+
+      {!isChats && section !== 'settings' && section !== 'people' && section !== 'calendar' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => setSection('chats')} />
         </main>
