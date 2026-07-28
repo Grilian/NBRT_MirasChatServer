@@ -48,6 +48,7 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
 
   const [draft, setDraft] = useState<DraftTarget | null>(null);
   const [details, setDetails] = useState<CalendarOccurrence | null>(null);
+  const [actionError, setActionError] = useState('');
 
   // Направление последнего перехода: содержимое въезжает с той стороны, куда
   // листнули, — иначе смена месяца выглядит как мигание, и непонятно, вперёд
@@ -142,17 +143,28 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
     reload();
   };
 
+  // Действия ниже вызываются прямо из разметки, поэтому ошибку тут некому
+  // поймать: без catch отказ сервера превращался бы в необработанный промис,
+  // а человек видел бы, что нажатие просто ничего не сделало.
   const toggleTask = async (occurrence: CalendarOccurrence) => {
-    if (occurrence.event_id === null) return;
-    await setTaskCompleted(occurrence.event_id, occurrence.occurrence_start, !occurrence.completed);
-    reload();
+    if (occurrence.event_id === null || !occurrence.can_edit) return;
+    try {
+      await setTaskCompleted(occurrence.event_id, occurrence.occurrence_start, !occurrence.completed);
+      reload();
+    } catch {
+      setActionError('Не удалось отметить задачу');
+    }
   };
 
   const respond = async (occurrence: CalendarOccurrence, answer: 'accepted' | 'declined') => {
-    if (occurrence.event_id === null) return;
-    await respondToInvite(occurrence.event_id, answer);
-    setDetails(null);
-    reload();
+    if (occurrence.event_id === null || !occurrence.is_guest) return;
+    try {
+      await respondToInvite(occurrence.event_id, answer);
+      setDetails(null);
+      reload();
+    } catch {
+      setActionError('Не удалось отправить ответ');
+    }
   };
 
   return (
@@ -203,6 +215,9 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
       </header>
 
       {error && <p className="form-error cal-error">Не удалось загрузить календарь</p>}
+      {actionError && (
+        <p className="form-error cal-error" onAnimationEnd={() => setActionError('')}>{actionError}</p>
+      )}
 
       <div className="cal-body">
         <aside className="cal-side">
@@ -331,7 +346,10 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
                 </div>
               )}
 
-              {details.source === 'calendar' && !details.is_owner && (
+              {/* Отвечать можно только на приглашение. У общего события, где
+                  человек просто зритель, отвечать не на что — сервер такой
+                  ответ и не принял бы. */}
+              {details.source === 'calendar' && details.is_guest && (
                 <div className="cal-details-actions">
                   <button type="button" className="btn-primary" onClick={() => respond(details, 'accepted')}>
                     Пойду

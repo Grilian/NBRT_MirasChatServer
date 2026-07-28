@@ -53,7 +53,10 @@ const AgendaView: React.FC<AgendaViewProps> = ({ occurrences, onOpenEvent, onTog
           <div className="cal-agenda-items">
             {sortForDay(byDay.get(day)!).map((item) => (
               <div key={item.id} className={`cal-agenda-row${item.completed ? ' is-done' : ''}`}>
-                {item.is_task && item.event_id !== null ? (
+                {/* Галочка — только у того, кто вправе менять задачу. Чужую
+                    (например, из общего календаря) сервер отметить не даст, и
+                    показывать кнопку, которая заведомо не сработает, нельзя. */}
+                {item.is_task && item.event_id !== null && item.can_edit ? (
                   <button
                     type="button"
                     className={`cal-check${item.completed ? ' is-checked' : ''}`}

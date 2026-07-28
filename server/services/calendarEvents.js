@@ -113,6 +113,13 @@ function serializeOccurrence(event, occurrence, userId, completions, canEditGlob
   // того, что автор в отпуске.
   const canEdit = event.scope_kind === 'global' ? canEditGlobal : isOwner;
 
+  const guests = guestsStatement.all(event.id).map((g) => ({
+    user_id: g.user_id,
+    response: g.response,
+    display_name: g.display_name || g.username,
+    avatar_path: g.avatar_path,
+  }));
+
   return {
     // Ключ вхождения, а не события: в сетке их может быть много от одной
     // серии, и React нужен стабильный, различимый id.
@@ -135,13 +142,12 @@ function serializeOccurrence(event, occurrence, userId, completions, canEditGlob
     owner_id: event.owner_id,
     is_owner: isOwner,
     can_edit: canEdit,
+    // Приглашён ли именно этот человек. Без этого признака клиент не отличает
+    // «меня позвали» от «я просто вижу общее событие» и предлагает ответить
+    // на приглашение там, где отвечать не на что.
+    is_guest: guests.some((guest) => guest.user_id === userId),
     source: 'calendar',
-    guests: guestsStatement.all(event.id).map((g) => ({
-      user_id: g.user_id,
-      response: g.response,
-      display_name: g.display_name || g.username,
-      avatar_path: g.avatar_path,
-    })),
+    guests,
   };
 }
 
@@ -265,6 +271,8 @@ function listContactBirthdays({ userId, from, to }) {
         scope_id: null,
         owner_id: contact.id,
         is_owner: false,
+        can_edit: false,
+        is_guest: false,
         source: 'birthday',
         guests: [],
       });

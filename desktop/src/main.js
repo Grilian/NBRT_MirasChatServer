@@ -328,7 +328,9 @@ autoUpdater.on('update-downloaded', (info) => {
   // мы отличаем расписание, назначенное под этот билд, от оставшегося с
   // прошлого раза (см. dueAt).
   pendingUpdate = { version: info.version, releaseDate: Date.parse(info.releaseDate) };
-  applySchedule();
+  // Ловим отказ явно: это main-процесс, и необработанный промис здесь роняет
+  // не вкладку, а всё приложение.
+  applySchedule().catch((e) => console.error('Расписание обновления не применилось:', e.message));
 });
 autoUpdater.on('error', (e) => {
   // Недоступный сервер обновлений — не повод показывать ошибку человеку,
@@ -347,7 +349,7 @@ function checkForUpdates() {
   // Обновление уже скачано и ждёт назначенного часа: новых версий искать не
   // нужно, а вот расписание админ мог передвинуть — перечитываем его.
   if (pendingUpdate) {
-    applySchedule();
+    applySchedule().catch((e) => console.error('Расписание обновления не применилось:', e.message));
     return;
   }
   autoUpdater.checkForUpdates().catch((e) => console.error('Проверка обновлений не удалась:', e.message));

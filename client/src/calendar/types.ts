@@ -71,6 +71,11 @@ export interface CalendarOccurrence {
    * owner_id на клиенте значило бы дублировать правило в двух местах.
    */
   can_edit: boolean;
+  /**
+   * Позвали ли именно этого человека. Отличает «меня пригласили» от «я вижу
+   * общее событие»: отвечать на приглашение можно только в первом случае.
+   */
+  is_guest: boolean;
   source: 'calendar' | 'birthday';
   guests: EventGuest[];
 }

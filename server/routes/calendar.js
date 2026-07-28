@@ -118,8 +118,13 @@ function replaceGuests(eventId, ownerId, guestIds) {
   const insert = db.prepare(
     'INSERT OR IGNORE INTO calendar_event_guests (event_id, user_id) VALUES (?, ?)'
   );
+  // Проверяем, что такой человек есть. Внешние ключи в SQLite включены, и
+  // несуществующий id уронил бы вставку с 500 — при том что виноват запрос,
+  // а не сервер.
+  const exists = db.prepare('SELECT 1 FROM users WHERE id = ?');
   for (const userId of guestIds) {
     if (userId === ownerId) continue; // владелец и так участник
+    if (!exists.get(userId)) continue;
     insert.run(eventId, userId);
   }
 }
