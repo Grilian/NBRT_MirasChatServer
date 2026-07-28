@@ -11,6 +11,7 @@ import { desktopNotificationPermission, ensureDesktopNotificationPermission } fr
 import { isNativeMobile } from '../utils/mobileNotify';
 import { playIncomingSound } from '../utils/sound';
 import { formatMoscowDateTime } from '../utils/time';
+import { MobileUpdateInfo, checkMobileUpdate, mobileVersionName, openMobileUpdate } from '../utils/mobileUpdate';
 import { APP_VERSION, BUILT_AT } from '../version';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
@@ -37,6 +38,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [mobileUpdate, setMobileUpdate] = useState<MobileUpdateInfo | null>(null);
   const [notify, setNotify] = useState<NotificationPrefs>(getNotificationPrefs);
   const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
 
@@ -68,6 +70,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       window.electronAPI!.getAutoLaunch().then(setAutoLaunch);
       window.electronAPI!.getAppVersion().then(setAppVersion);
     }
+  }, []);
+
+  // На Android номер версии и проверка обновления берутся из самого пакета
+  // и манифеста на сервере — по той же причине, что и в десктопе: строка
+  // «доступна 1.3.2» бесполезна, пока не видно, что стоит сейчас.
+  useEffect(() => {
+    mobileVersionName().then((version) => { if (version) setAppVersion(version); });
+    checkMobileUpdate().then(setMobileUpdate);
   }, []);
 
   // Состояние автообновления приходит из main-процесса. Проверку запускаем и
@@ -249,6 +259,23 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <span className="value is-action">Перезапустить</span>
                 </button>
               )}
+            </div>
+          </>
+        )}
+
+        {/* На Android обновление молча поставить нельзя: система не даёт
+            приложениям устанавливать пакеты без своего диалога. Поэтому здесь,
+            в отличие от десктопа, кнопка обязательна — она открывает ссылку на
+            APK, дальше скачивание и установку ведёт сам Android. */}
+        {mobileUpdate && (
+          <>
+            <div className="settings-section-title">Приложение</div>
+            <div className="settings-group">
+              <button type="button" className="settings-row" onClick={() => openMobileUpdate(mobileUpdate.url)}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                <span className="label">Доступна версия {mobileUpdate.versionName}</span>
+                <span className="value is-action">Обновить</span>
+              </button>
             </div>
           </>
         )}

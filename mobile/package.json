@@ -7,7 +7,8 @@
     "build:client": "node scripts/build-client.js",
     "sync": "npx cap sync android",
     "prepare-app": "npm run build:client && npm run sync",
-    "open:android": "npx cap open android"
+    "open:android": "npx cap open android",
+    "update-manifest": "node scripts/make-update-manifest.js"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
