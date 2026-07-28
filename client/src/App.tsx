@@ -5,6 +5,7 @@ import Chat from './pages/Chat';
 import SuperAdminApp from './pages/SuperAdminApp';
 import TitleBar from './components/TitleBar';
 import { isNativeMobile } from './utils/mobileNotify';
+import { reportAppVersion } from './utils/reportVersion';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
@@ -34,6 +35,13 @@ function App() {
       setUser({ token, id: userId, username });
     }
   }, []);
+
+  // Сообщаем серверу версию приложения, как только появилась сессия — и при
+  // восстановлении из localStorage, и после явного входа. Нужно панели
+  // управления, чтобы видеть, до кого обновление доехало.
+  useEffect(() => {
+    if (user) reportAppVersion();
+  }, [user]);
 
   // Аппаратная кнопка "назад" на Android по умолчанию просто закрывает
   // приложение (нет истории браузера, по которой можно откатиться). Если

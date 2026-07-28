@@ -151,6 +151,19 @@ router.get('/users', verifySuperAdmin, (req, res) => {
       ORDER BY u.username
     `).all();
 
+    // Версии одним запросом, а не по строке на пользователя: строк тут
+    // столько же, сколько людей, а запросов в цикле было бы вдвое больше.
+    const versionRows = db.prepare(
+      'SELECT user_id, platform, version, updated_at FROM user_app_versions'
+    ).all();
+
+    const versionsByUser = new Map();
+    for (const row of versionRows) {
+      const list = versionsByUser.get(row.user_id) || [];
+      list.push({ platform: row.platform, version: row.version, updated_at: row.updated_at });
+      versionsByUser.set(row.user_id, list);
+    }
+
     res.json(users.map((u) => ({
       id: u.id,
       username: u.username,
@@ -161,6 +174,10 @@ router.get('/users', verifySuperAdmin, (req, res) => {
       muted: !!u.muted,
       account_type: u.account_type || 'staff',
       password_status: passwordStatus(u),
+      // Пусто — значит клиент ни разу не отчитался: либо сборка старше
+      // появления этой телеметрии, либо человек с тех пор не заходил.
+      // Панель в обоих случаях показывает «old».
+      app_versions: versionsByUser.get(u.id) || [],
     })));
   } catch (e) {
     res.status(500).json({ error: e.message });

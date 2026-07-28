@@ -13,6 +13,11 @@ interface TimeGridViewProps {
   occurrences: CalendarOccurrence[];
   onCreateAt: (day: DayKey, minutes: number) => void;
   onOpenEvent: (occurrence: CalendarOccurrence) => void;
+  /**
+   * Ссылка на прокручиваемую область отдаётся наружу: по ней виджет понимает,
+   * что сутки долистаны до края и жест пора отдать листанию недель.
+   */
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
@@ -26,9 +31,10 @@ const HOUR_HEIGHT = 48;
 const SLOT_MINUTES = 30;
 
 const TimeGridView: React.FC<TimeGridViewProps> = ({
-  anchor, days, occurrences, onCreateAt, onOpenEvent,
+  anchor, days, occurrences, onCreateAt, onOpenEvent, scrollRef: externalScrollRef,
 }) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const localScrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = externalScrollRef ?? localScrollRef;
   const today = todayKey();
 
   // Сутки целиком в экран не помещаются, а начало рабочего дня интереснее

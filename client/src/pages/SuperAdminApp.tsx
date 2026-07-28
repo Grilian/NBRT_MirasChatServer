@@ -21,6 +21,64 @@ interface UserRow {
   muted: boolean;
   account_type: AccountType;
   password_status: PasswordStatus;
+  /** Может отсутствовать, если панель открыта против сервера постарше. */
+  app_versions?: AppVersion[];
+}
+
+interface AppVersion {
+  platform: 'desktop' | 'android' | 'web';
+  version: string;
+  updated_at: number;
+}
+
+const PLATFORM_LABELS: Record<string, string> = {
+  desktop: 'ПК',
+  android: 'Android',
+  web: 'Веб',
+};
+
+// Фиксированный порядок платформ: иначе строки таблицы перемешивались бы
+// в зависимости от того, откуда человек заходил последним, и колонку стало бы
+// невозможно читать сверху вниз.
+const PLATFORM_ORDER = ['desktop', 'android', 'web'];
+
+/**
+ * Версии приложений у одного человека. Их может быть несколько: десктоп на
+ * работе и телефон в кармане — это разные установки с разными версиями,
+ * и при раскатке важно видеть обе.
+ */
+function AppVersions({ versions }: { versions?: AppVersion[] }) {
+  if (!versions || versions.length === 0) {
+    return (
+      <span
+        className="sa-version is-old"
+        title="Клиент не сообщает версию: сборка старше этой возможности либо человек с тех пор не заходил"
+      >
+        old
+      </span>
+    );
+  }
+
+  const sorted = [...versions].sort(
+    (a, b) => PLATFORM_ORDER.indexOf(a.platform) - PLATFORM_ORDER.indexOf(b.platform)
+  );
+
+  return (
+    <div className="sa-versions">
+      {sorted.map((item) => (
+        <span
+          key={item.platform}
+          className="sa-version"
+          title={`Отчитался ${formatMoscowDateTime(item.updated_at)}`}
+        >
+          <span className="sa-version-platform">
+            {PLATFORM_LABELS[item.platform] || item.platform}
+          </span>
+          {item.version}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 const PASSWORD_STATUS_LABELS: Record<Exclude<PasswordStatus, 'ok'>, string> = {
@@ -232,6 +290,7 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
             <th>Роль</th>
             <th>Тишина</th>
             <th>Пароль</th>
+            <th>Версия</th>
             <th></th>
           </tr>
         </thead>
@@ -291,6 +350,9 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
                     {PASSWORD_STATUS_LABELS[u.password_status]}
                   </span>
                 )}
+              </td>
+              <td>
+                <AppVersions versions={u.app_versions} />
               </td>
               <td>
                 <button type="button" className="sa-btn-danger" onClick={() => deleteUser(u)}>Удалить</button>

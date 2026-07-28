@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   DayKey, addDays, addMonths, dayKeyOf, formatClock, formatDayLong, monthTitle,
   nextHalfHour, instantOf, todayKey, weekTitle, weekDays,
 } from './dates';
 import { createEvent, deleteEvent, respondToInvite, setTaskCompleted, updateEvent } from './api';
 import { useCalendarData } from './useCalendarData';
+import { useCalendarKeys, useStepGestures } from './gestures';
 import AgendaView from './AgendaView';
 import EventDialog from './EventDialog';
 import MiniMonth from './MiniMonth';
@@ -46,6 +47,9 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
   const [draft, setDraft] = useState<DraftTarget | null>(null);
   const [details, setDetails] = useState<CalendarOccurrence | null>(null);
 
+  const mainRef = useRef<HTMLElement>(null);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
+
   const markedDays = useMemo(() => {
     const days = new Set<DayKey>();
     for (const occurrence of occurrences) days.add(dayKeyOf(occurrence.starts_at));
@@ -67,6 +71,21 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
     else if (mode === 'day') setAnchor(addDays(anchor, direction));
     else setAnchor(addDays(anchor, direction * 30));
   };
+
+  // Колесо и свайп листают то же, что стрелки в шапке. В «Расписании» жест
+  // выключен: там длинный список, и листать его — это прокрутка, а не переход.
+  // В сетке времени переход случается, только когда сутки долистаны до края.
+  useStepGestures(mainRef, shift, {
+    enabled: mode !== 'agenda' && !draft && !details,
+    scrollable: () => (mode === 'week' || mode === 'day' ? gridScrollRef.current : null),
+  });
+
+  useCalendarKeys({
+    onStep: shift,
+    onToday: () => setAnchor(todayKey()),
+    onView: setMode,
+    enabled: !draft && !details,
+  });
 
   const openCreate = (day: DayKey, minutes: number | null, allDay = false) => {
     setDraft({
@@ -186,7 +205,7 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
           </div>
         </aside>
 
-        <main className={`cal-main${loading ? ' is-loading' : ''}`}>
+        <main className={`cal-main${loading ? ' is-loading' : ''}`} ref={mainRef}>
           {mode === 'month' && (
             <MonthView
               anchor={anchor}
@@ -204,6 +223,7 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
               occurrences={occurrences}
               onCreateAt={(day, minutes) => openCreate(day, minutes)}
               onOpenEvent={openOccurrence}
+              scrollRef={gridScrollRef}
             />
           )}
 

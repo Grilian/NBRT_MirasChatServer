@@ -146,6 +146,24 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 
+  -- Какая версия приложения у кого стоит. Отдельной строкой на платформу, а не
+  -- колонкой в users: один и тот же человек сидит с десктопа и с телефона, и
+  -- единственная колонка показывала бы ту версию, с которой он заходил
+  -- последней, — то есть ровно не то, что нужно при раскатке.
+  --
+  -- Клиенты старше этой версии сюда не пишут вовсе: строки просто нет, и панель
+  -- показывает «old». Отличить «старая сборка» от «ни разу не заходил» нельзя,
+  -- да и незачем — в обоих случаях обновление до них не доехало.
+  CREATE TABLE IF NOT EXISTS user_app_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    version TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(user_id, platform),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
   -- Выполнение задачи — по вхождению, а не по событию: у повторяющейся задачи
   -- «сдать отчёт каждый понедельник» галочка закрывает один понедельник.
   CREATE TABLE IF NOT EXISTS calendar_task_completions (
