@@ -285,6 +285,11 @@ const Chat: React.FC = () => {
       // Возврат в «Настройки» всегда открывает сам список настроек, а не
       // подэкран профиля, на котором человек был в прошлый раз.
       if (id === 'settings') setSettingsView('settings');
+      // То же и с «Чатами»: раздел открывается списком, а не последней
+      // перепиской. Иначе выходит ловушка — уйти из чатов, не нажав «назад» в
+      // шапке, оставляет mobileView в 'chat', и возврат в раздел роняет сразу
+      // в переписку, где на узком экране рельс разделов скрыт и выйти некуда.
+      if (id === 'chats') setMobileView('list');
     });
   }, []);
 
@@ -297,7 +302,9 @@ const Chat: React.FC = () => {
       if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
       if (nav.directoryOpen) { setDirectoryOpen(false); return; }
       if (nav.section === 'settings' && nav.settingsView === 'profile') { setSettingsView('settings'); return; }
-      if (nav.section !== 'chats') { setSection('chats'); return; }
+      // Тот же сброс, что и в goToSection: аппаратная кнопка «назад» возвращает
+      // к списку чатов, а не в переписку, открытую до ухода в другой раздел.
+      if (nav.section !== 'chats') { setSection('chats'); setMobileView('list'); return; }
       if (nav.mobileView === 'chat') { leaveConversation(); return; }
       CapApp.minimizeApp();
     });

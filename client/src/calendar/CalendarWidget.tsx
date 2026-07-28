@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  DayKey, addDays, addMonths, dayKeyOf, formatClock, formatDayLong, monthTitle,
-  nextHalfHour, instantOf, todayKey, weekTitle, weekDays,
+  DayKey, addDays, addMonths, dayKeyOf, formatClock, formatDayLong, monthShortTitle,
+  monthTitle, nextHalfHour, instantOf, todayKey, weekTitle, weekDays,
 } from './dates';
 import { createEvent, deleteEvent, respondToInvite, setTaskCompleted, updateEvent } from './api';
 import { useCalendarData } from './useCalendarData';
@@ -47,6 +47,11 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
   const [draft, setDraft] = useState<DraftTarget | null>(null);
   const [details, setDetails] = useState<CalendarOccurrence | null>(null);
 
+  // Направление последнего перехода: содержимое въезжает с той стороны, куда
+  // листнули, — иначе смена месяца выглядит как мигание, и непонятно, вперёд
+  // ты ушёл или назад.
+  const [direction, setDirection] = useState(1);
+
   const mainRef = useRef<HTMLElement>(null);
   const gridScrollRef = useRef<HTMLDivElement>(null);
 
@@ -64,19 +69,38 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
         ? 'Ближайшие события'
         : monthTitle(anchor);
 
-  // Шаг стрелок зависит от режима: в месяце листается месяц, в неделе — неделя.
-  const shift = (direction: number) => {
-    if (mode === 'month') setAnchor(addMonths(anchor, direction));
-    else if (mode === 'week') setAnchor(addDays(anchor, direction * 7));
-    else if (mode === 'day') setAnchor(addDays(anchor, direction));
-    else setAnchor(addDays(anchor, direction * 30));
+  // Куда сдвинута дата от режима к режиму. По этому же правилу считаются
+  // подписи соседних периодов в подсказках сверху и снизу.
+  const shiftedAnchor = (direction: number): DayKey => {
+    if (mode === 'month') return addMonths(anchor, direction);
+    if (mode === 'week') return addDays(anchor, direction * 7);
+    if (mode === 'day') return addDays(anchor, direction);
+    return addDays(anchor, direction * 30);
   };
 
-  // Колесо и свайп листают то же, что стрелки в шапке. В «Расписании» жест
-  // выключен: там длинный список, и листать его — это прокрутка, а не переход.
-  // В сетке времени переход случается, только когда сутки долистаны до края.
+  const shift = (direction: number) => {
+    setDirection(direction);
+    setAnchor(shiftedAnchor(direction));
+  };
+
+  // Что лежит по соседству — этим подписаны полосы-подсказки. Человеку не
+  // приходится догадываться, что тут вообще можно листать, и заодно видно,
+  // куда именно он попадёт.
+  const neighbourLabel = (direction: number): string => {
+    const target = shiftedAnchor(direction);
+    if (mode === 'month') return monthShortTitle(target);
+    if (mode === 'week') return weekTitle(target);
+    return formatDayLong(target);
+  };
+
+  // «Расписание» не листается: там длинный список, и прокручивать его — это
+  // прокрутка, а не переход. Отсюда же скрыты подсказки и анимация.
+  const pageable = mode !== 'agenda';
+
+  // Колесо и свайп листают то же, что стрелки в шапке. В сетке времени
+  // переход случается, только когда сутки долистаны до края.
   useStepGestures(mainRef, shift, {
-    enabled: mode !== 'agenda' && !draft && !details,
+    enabled: pageable && !draft && !details,
     scrollable: () => (mode === 'week' || mode === 'day' ? gridScrollRef.current : null),
   });
 
@@ -206,33 +230,58 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
         </aside>
 
         <main className={`cal-main${loading ? ' is-loading' : ''}`} ref={mainRef}>
-          {mode === 'month' && (
-            <MonthView
-              anchor={anchor}
-              occurrences={occurrences}
-              onOpenDay={(day) => { setAnchor(day); setMode('day'); }}
-              onCreate={(day) => openCreate(day, null)}
-              onOpenEvent={openOccurrence}
-            />
+          {/* Полоса-подсказка. Она же кнопка: на телефоне подсказывает, что
+              экран листается, на компьютере — работает как навигация, потому
+              что тянуться к стрелкам в шапке ради соседнего месяца незачем. */}
+          {pageable && (
+            <button type="button" className="cal-peek is-prev" onClick={() => shift(-1)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m18 15-6-6-6 6" /></svg>
+              <span>{neighbourLabel(-1)}</span>
+            </button>
           )}
 
-          {(mode === 'week' || mode === 'day') && (
-            <TimeGridView
-              anchor={anchor}
-              days={mode === 'week' ? weekDays(anchor) : [anchor]}
-              occurrences={occurrences}
-              onCreateAt={(day, minutes) => openCreate(day, minutes)}
-              onOpenEvent={openOccurrence}
-              scrollRef={gridScrollRef}
-            />
-          )}
+          {/* key на обёртке: смена даты пересоздаёт узел, и анимация въезда
+              запускается заново. Без этого CSS-анимация отработала бы один раз
+              за всю жизнь компонента. */}
+          <div
+            key={`${mode}:${anchor}`}
+            className={`cal-page${pageable ? (direction >= 0 ? ' is-next' : ' is-prev') : ''}`}
+          >
+            {mode === 'month' && (
+              <MonthView
+                anchor={anchor}
+                occurrences={occurrences}
+                onOpenDay={(day) => { setAnchor(day); setMode('day'); }}
+                onCreate={(day) => openCreate(day, null)}
+                onOpenEvent={openOccurrence}
+              />
+            )}
 
-          {mode === 'agenda' && (
-            <AgendaView
-              occurrences={occurrences}
-              onOpenEvent={openOccurrence}
-              onToggleTask={toggleTask}
-            />
+            {(mode === 'week' || mode === 'day') && (
+              <TimeGridView
+                anchor={anchor}
+                days={mode === 'week' ? weekDays(anchor) : [anchor]}
+                occurrences={occurrences}
+                onCreateAt={(day, minutes) => openCreate(day, minutes)}
+                onOpenEvent={openOccurrence}
+                scrollRef={gridScrollRef}
+              />
+            )}
+
+            {mode === 'agenda' && (
+              <AgendaView
+                occurrences={occurrences}
+                onOpenEvent={openOccurrence}
+                onToggleTask={toggleTask}
+              />
+            )}
+          </div>
+
+          {pageable && (
+            <button type="button" className="cal-peek is-next" onClick={() => shift(1)}>
+              <span>{neighbourLabel(1)}</span>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
           )}
         </main>
       </div>

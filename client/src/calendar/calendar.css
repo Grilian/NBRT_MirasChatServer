@@ -89,7 +89,40 @@
   flex: none; width: 232px; padding: 14px; border-right: 1px solid var(--line);
   overflow-y: auto; background: var(--sidebar);
 }
-.cal-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.cal-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.cal-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* Содержимое въезжает с той стороны, куда листнули: без этого смена месяца
+   выглядит как мигание, и непонятно, вперёд ты ушёл или назад. Сдвиг
+   намеренно небольшой — это подсказка о направлении, а не поездка. */
+@keyframes cal-page-next {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes cal-page-prev {
+  from { transform: translateY(-16px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.cal-page.is-next { animation: cal-page-next 180ms cubic-bezier(.22, .61, .36, 1); }
+.cal-page.is-prev { animation: cal-page-prev 180ms cubic-bezier(.22, .61, .36, 1); }
+
+/* Полоса-подсказка: показывает, что экран листается, и куда попадёшь.
+   Она же кнопка — на компьютере это ближайшая навигация к содержимому. */
+.cal-peek {
+  flex: none; display: flex; align-items: center; justify-content: center; gap: 6px;
+  border: none; background: transparent; cursor: pointer; width: 100%;
+  padding: 5px 12px; font-size: 11.5px; color: var(--ink-faint);
+  border-block: 1px solid transparent;
+}
+.cal-peek span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-peek svg { flex: none; opacity: .8; }
+.cal-peek:hover { color: var(--accent); background: var(--row-hover); }
+.cal-peek.is-prev { border-bottom-color: var(--line); }
+.cal-peek.is-next { border-top-color: var(--line); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cal-page.is-next, .cal-page.is-prev { animation: none; }
+}
 /* Во время загрузки сетка гаснет, но остаётся на месте: подменять её спиннером
    значит терять контекст при каждом листании месяца. */
 .cal-main.is-loading { opacity: .55; transition: opacity var(--ease); }
@@ -329,4 +362,7 @@
   .cal-grid-gutter { width: 38px; }
   .cal-agenda { padding: 8px 12px 32px; }
   .cal-dialog-when { grid-template-columns: 1fr; }
+  /* На телефоне подсказка нужнее всего — там нет стрелок под рукой, — но и
+     места меньше: ужимаем по высоте, не убирая. */
+  .cal-peek { padding: 3px 12px; font-size: 11px; }
 }

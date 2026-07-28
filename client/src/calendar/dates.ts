@@ -136,6 +136,13 @@ export function monthTitle(day: DayKey): string {
   return `${MONTHS_NOMINATIVE[month - 1]} ${year}`;
 }
 
+/** Месяц для подсказки: год дописываем, только если он не текущий. */
+export function monthShortTitle(day: DayKey): string {
+  const [year, month] = day.split('-').map(Number);
+  const suffix = String(year) === todayKey().slice(0, 4) ? '' : ` ${year}`;
+  return `${MONTHS_NOMINATIVE[month - 1]}${suffix}`;
+}
+
 /** «4 августа», с годом — только если он не текущий. */
 export function formatDayLong(day: DayKey): string {
   const [year, month] = day.split('-').map(Number);
