@@ -89,6 +89,16 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
+
+  -- Настройки, которые задаёт супер-админ и которые должны пережить
+  -- перезапуск сервера. Ключ-значение, а не колонки: настройка пока одна
+  -- (момент установки обновления), и таблицу под неё пришлось бы переделывать
+  -- при появлении второй.
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at INTEGER
+  );
 `);
 
 // Миграция: добавляем колонку status, если БД старая

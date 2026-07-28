@@ -17,6 +17,7 @@ const superadminRoutes = require('./routes/superadmin');
 const contactsRoutes = require('./routes/contacts');
 const moderationRoutes = require('./routes/moderation');
 const devicesRoutes = require('./routes/devices');
+const updatesRoutes = require('./routes/updates');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { notifyNewMessage } = require('./services/push');
@@ -59,6 +60,7 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/moderation', verifyToken, requireAdminRole, moderationRoutes);
 app.use('/api/devices', devicesRoutes);
+app.use('/api/updates', updatesRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
 // на каждый файл (как публичные CDN-ссылки на фото профиля у большинства

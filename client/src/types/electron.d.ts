@@ -27,5 +27,6 @@ declare global {
     | { status: 'available'; version: string }
     | { status: 'downloading'; percent: number }
     | { status: 'downloaded'; version: string }
+    | { status: 'scheduled'; version: string; at: number }
     | { status: 'error'; message: string };
 }

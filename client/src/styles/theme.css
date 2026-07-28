@@ -848,6 +848,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-row-muted { opacity: .6; }
 .sa-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .sa-link:hover { color: var(--accent); }
+.sa-hint { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--ink-muted); }
 .sa-inline-form { display: flex; gap: 8px; margin-top: 14px; }
 .sa-inline-form input { flex: 1; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px; }
 .sa-btn-ghost { border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 6px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }

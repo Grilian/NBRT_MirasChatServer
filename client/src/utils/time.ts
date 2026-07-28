@@ -84,3 +84,38 @@ export function formatDate(value: string): string {
   if (!year || !month || !day) return value;
   return `${day}.${month}.${year}`;
 }
+
+// ---- Момент установки обновления (панель супер-админа) ----
+//
+// Админ задаёт время по Москве, храним и передаём unix-миллисекунды. Смещение
+// зоны считаем через Intl, а не константой +3: зашитое смещение живёт ровно до
+// следующей правки часовых поясов, а такие правки в стране уже случались.
+export function moscowOffsetMs(at: Date = new Date()): number {
+  const asUtc = new Date(at.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const asMoscow = new Date(at.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+  return asMoscow.getTime() - asUtc.getTime();
+}
+
+/** Момент → значение для <input type="datetime-local"> по московскому времени. */
+export function toMoscowInputValue(ms: number): string {
+  return new Date(ms + moscowOffsetMs(new Date(ms))).toISOString().slice(0, 16);
+}
+
+/** Обратно: то, что человек ввёл в поле, — московское время, а не его местное. */
+export function fromMoscowInputValue(value: string): number | null {
+  const asIfUtc = Date.parse(`${value}:00Z`);
+  if (Number.isNaN(asIfUtc)) return null;
+  return asIfUtc - moscowOffsetMs(new Date(asIfUtc));
+}
+
+/** Момент целиком, для подписей вида «29.07.2026, 03:00». */
+export function formatMoscowDateTime(ms: number): string {
+  return new Date(ms).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Europe/Moscow',
+  });
+}

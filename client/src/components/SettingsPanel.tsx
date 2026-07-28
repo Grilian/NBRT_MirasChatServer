@@ -10,6 +10,7 @@ import {
 import { desktopNotificationPermission, ensureDesktopNotificationPermission } from '../utils/desktopNotify';
 import { isNativeMobile } from '../utils/mobileNotify';
 import { playIncomingSound } from '../utils/sound';
+import { formatMoscowDateTime } from '../utils/time';
 import { APP_VERSION, BUILT_AT } from '../version';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
@@ -216,18 +217,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </label>
               </div>
 
-              {/* Рядом со строкой обновления, а не в подвале: «доступно
-                  обновление 1.3.1» ни о чём не говорит, пока не видно, что
-                  стоит сейчас. Хэш сборки в подвале для этого не годится —
-                  сравнить его с номером версии нельзя. */}
-              {appVersion && (
-                <div className="settings-row static">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>
-                  <span className="label">Версия</span>
-                  <span className="value">{appVersion}</span>
-                </div>
-              )}
-
               {/* Ни «Скачать», ни «Установить» тут нет: обновление идёт само.
                   Строки ниже — не действия, а отчёт о том, что происходит,
                   чтобы скачивание на фоне не выглядело чем-то непрошеным. */}
@@ -236,6 +225,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
                   <span className="label">Загрузка обновления</span>
                   <span className="value">{update.status === 'downloading' ? `${update.percent}%` : '…'}</span>
+                </div>
+              )}
+
+              {/* Установку назначил супер-админ. Кнопки «Перезапустить» тут
+                  намеренно нет: она обошла бы назначенный час, ради которого
+                  расписание и заводили. */}
+              {update.status === 'scheduled' && (
+                <div className="settings-row static">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+                  <span className="label">Обновление {update.version} установится</span>
+                  <span className="value">{formatMoscowDateTime(update.at)}</span>
                 </div>
               )}
 
@@ -273,7 +273,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
         </div>
 
-        <div className="app-version">MirasChat {APP_VERSION} · {BUILT_AT}</div>
+        {/* В десктопе показываем номер версии: он совпадает с тем, что пишет
+            строка обновления, и человеку есть с чем сравнить. Хэш сборки
+            остаётся в вебе — там номера версии просто нет, а знать, какой
+            коммит раскатан, всё равно нужно (см. README, проверка деплоя). */}
+        <div className="app-version">MirasChat {appVersion ?? APP_VERSION} · {BUILT_AT}</div>
       </div>
     </div>
   );

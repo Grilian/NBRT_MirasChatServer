@@ -324,19 +324,11 @@ autoUpdater.on('update-available', (info) => sendUpdateState({ status: 'availabl
 autoUpdater.on('update-not-available', () => sendUpdateState({ status: 'idle' }));
 autoUpdater.on('download-progress', (p) => sendUpdateState({ status: 'downloading', percent: Math.round(p.percent) }));
 autoUpdater.on('update-downloaded', (info) => {
-  sendUpdateState({ status: 'downloaded', version: info.version });
-
-  // Окно свёрнуто в трей и не в фокусе — за приложением никто не сидит, самое
-  // время перезапуститься: человек вернётся уже к обновлённой версии и ничего
-  // не заметит. Если окно открыто, ждём: autoInstallOnAppQuit накатит
-  // обновление при закрытии приложения.
-  //
-  // Трей здесь принципиален. Закрытие окна прячет приложение, а не завершает
-  // его, так что выхода можно ждать неделями — без этой ветки обновление
-  // висело бы скачанным и неустановленным до перезагрузки машины.
-  const unattended = !mainWindow || mainWindow.isDestroyed()
-    || (!mainWindow.isVisible() && !mainWindow.isFocused());
-  if (unattended) installUpdate();
+  // releaseDate кладёт в latest.yml сам electron-builder при сборке — по нему
+  // мы отличаем расписание, назначенное под этот билд, от оставшегося с
+  // прошлого раза (см. dueAt).
+  pendingUpdate = { version: info.version, releaseDate: Date.parse(info.releaseDate) };
+  applySchedule();
 });
 autoUpdater.on('error', (e) => {
   // Недоступный сервер обновлений — не повод показывать ошибку человеку,
@@ -352,6 +344,12 @@ const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 function checkForUpdates() {
   if (!canUpdate) return;
+  // Обновление уже скачано и ждёт назначенного часа: новых версий искать не
+  // нужно, а вот расписание админ мог передвинуть — перечитываем его.
+  if (pendingUpdate) {
+    applySchedule();
+    return;
+  }
   autoUpdater.checkForUpdates().catch((e) => console.error('Проверка обновлений не удалась:', e.message));
 }
 
@@ -363,6 +361,98 @@ function installUpdate() {
   // Тихо и с автозапуском после установки: экран установщика человеку тут
   // показывать не за чем, а приложение должно вернуться само.
   autoUpdater.quitAndInstall(true, true);
+}
+
+// ===== Расписание установки =====
+//
+// Супер-админ может назначить момент, раньше которого обновление ставить
+// нельзя. Скачивание при этом не откладывается — ждёт только установка: иначе
+// в назначенный час все клиенты разом пойдут на сервер за 80 МБ.
+//
+// Адрес берём из того же build.publish, откуда качаются обновления. Своей
+// конфигурации у main-процесса нет: базовый URL API прошит в рендерер при
+// сборке, а сессии, чтобы спросить его там, у main тоже нет.
+const SCHEDULE_URL = (() => {
+  try {
+    const publishUrl = require('../package.json').build.publish[0].url;
+    return new URL('../api/updates/schedule', publishUrl).toString();
+  } catch {
+    return null;
+  }
+})();
+
+const SCHEDULE_FETCH_TIMEOUT_MS = 10000;
+
+// Обновление, которое уже скачано и ждёт своего часа.
+let pendingUpdate = null;
+let installTimer = null;
+
+// Момент запуска приложения. Нужен, чтобы отличить «обновление ждало нас
+// выключенными» от «вышло, пока человек работает»: в первом случае ставим
+// сразу, во втором — по состоянию окна.
+const launchedAt = Date.now();
+const STARTUP_INSTALL_WINDOW_MS = 5 * 60 * 1000;
+
+async function fetchNotBefore() {
+  if (!SCHEDULE_URL) return null;
+  try {
+    const response = await fetch(SCHEDULE_URL, {
+      signal: AbortSignal.timeout(SCHEDULE_FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return Number.isFinite(data.notBefore) ? data.notBefore : null;
+  } catch (e) {
+    // Сервер расписания недоступен — не повод держать обновление вечно.
+    // Считаем, что расписания нет, и ставим по обычным правилам.
+    console.error('Расписание обновлений недоступно:', e.message);
+    return null;
+  }
+}
+
+// Момент, раньше которого ставить нельзя. Время, назначенное раньше, чем
+// собран билд, осталось от прошлого выпуска и ничего не откладывает — иначе
+// однажды выставленная дата навсегда отпускала бы все будущие версии сразу.
+function dueAt(notBefore) {
+  if (!notBefore || notBefore <= pendingUpdate.releaseDate) return 0;
+  return notBefore;
+}
+
+async function applySchedule() {
+  if (!pendingUpdate) return;
+
+  clearTimeout(installTimer);
+  installTimer = null;
+
+  const due = dueAt(await fetchNotBefore());
+  const wait = due - Date.now();
+
+  if (wait > 0) {
+    sendUpdateState({ status: 'scheduled', version: pendingUpdate.version, at: due });
+    // Таймер ставим только на близкие сроки: далёкую дату подхватит очередная
+    // проверка обновлений, а заодно и увидит, если админ её передвинул.
+    if (wait <= UPDATE_CHECK_INTERVAL_MS) installTimer = setTimeout(applySchedule, wait);
+    return;
+  }
+
+  sendUpdateState({ status: 'downloaded', version: pendingUpdate.version });
+
+  // Обновление ждало нас выключенными — ставим сразу, не дожидаясь, пока
+  // приложение свернут: на старте человек ещё ничего не начал, а перезапуск
+  // ему ничего не стоит. Окно проверки узкое, чтобы медленная закачка не
+  // выдернула приложение у того, кто уже сел работать.
+  const startedRecently = Date.now() - launchedAt < STARTUP_INSTALL_WINDOW_MS;
+
+  // Иначе ждём момента, когда за приложением никто не сидит. Трей здесь
+  // принципиален: закрытие окна прячет приложение, а не завершает его, так
+  // что выхода можно ждать неделями — без этой ветки обновление висело бы
+  // скачанным и неустановленным до перезагрузки машины.
+  const unattended = !mainWindow || mainWindow.isDestroyed()
+    || (!mainWindow.isVisible() && !mainWindow.isFocused());
+
+  if (startedRecently || unattended) installUpdate();
+  // Не подошло ни то, ни другое — обновление встанет при закрытии приложения
+  // (autoInstallOnAppQuit) либо по кнопке «Перезапустить» в настройках.
 }
 
 ipcMain.on('update:check', () => checkForUpdates());

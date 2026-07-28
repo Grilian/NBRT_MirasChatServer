@@ -6,6 +6,7 @@ const verifySuperAdmin = require('../middleware/verifySuperAdmin');
 const { isValidLogin, isReservedLogin, PASSWORD_RESET_WINDOW_MS } = require('../utils/validators');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { applyModeration, notifyModerated } = require('../services/userModeration');
+const { getUpdateNotBefore, setUpdateNotBefore } = require('../services/appSettings');
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key';
@@ -243,6 +244,35 @@ router.post('/users/:id/delete', verifySuperAdmin, (req, res) => {
     res.json({ ok: true, backupFile: result.backupFile });
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// Момент, раньше которого клиенты не ставят скачанное обновление. Пусто —
+// ставят сразу. Само по себе это расписание ничего не откладывает: клиент
+// сверяет его с датой сборки из latest.yml, и время, назначенное раньше, чем
+// залит билд, срабатывает как «сразу» (подробности в README).
+router.get('/update-schedule', verifySuperAdmin, (req, res) => {
+  res.json({ notBefore: getUpdateNotBefore() });
+});
+
+router.put('/update-schedule', verifySuperAdmin, (req, res) => {
+  try {
+    const raw = req.body.notBefore;
+
+    if (raw === null || raw === undefined || raw === '') {
+      setUpdateNotBefore(null);
+      return res.json({ notBefore: null });
+    }
+
+    const ms = Number(raw);
+    if (!Number.isFinite(ms)) {
+      return res.status(400).json({ error: 'Некорректный момент времени' });
+    }
+
+    setUpdateNotBefore(ms);
+    res.json({ notBefore: ms });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
