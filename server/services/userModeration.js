@@ -42,15 +42,32 @@ function applyModeration(targetId, patch) {
     params.push(patch.muted ? 1 : 0);
   }
 
+  // Отдел назначается только отсюда, из панели. Сам себе человек его выставить
+  // не может: отделами приглашают на события, и запись в чужой отдел означала
+  // бы выданный себе доступ к чужим встречам.
+  if (patch.department_id !== undefined) {
+    const departmentId = patch.department_id === null || patch.department_id === ''
+      ? null
+      : Number(patch.department_id);
+    if (departmentId !== null) {
+      const department = db.prepare('SELECT id FROM departments WHERE id = ?').get(departmentId);
+      if (!department) throw new Error('Отдел не найден');
+    }
+    updates.push('department_id = ?');
+    params.push(departmentId);
+  }
+
   if (updates.length > 0) {
     params.push(targetId);
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
   }
 
   return db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.group_id, u.role, u.muted, u.account_type, g.name AS group_name
+    SELECT u.id, u.username, u.display_name, u.group_id, u.role, u.muted, u.account_type,
+           g.name AS group_name, u.department_id, d.name AS department_name
     FROM users u
     LEFT JOIN groups g ON g.id = u.group_id
+    LEFT JOIN departments d ON d.id = u.department_id
     WHERE u.id = ?
   `).get(targetId);
 }

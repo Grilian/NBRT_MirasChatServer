@@ -145,9 +145,11 @@ router.get('/users', verifySuperAdmin, (req, res) => {
   try {
     const users = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.group_id, u.role, u.muted, u.account_type,
-             u.password, u.password_reset_requested_at, g.name AS group_name
+             u.password, u.password_reset_requested_at, g.name AS group_name,
+             u.department_id, d.name AS department_name
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
+      LEFT JOIN departments d ON d.id = u.department_id
       ORDER BY u.username
     `).all();
 
@@ -173,6 +175,8 @@ router.get('/users', verifySuperAdmin, (req, res) => {
       role: u.role || null,
       muted: !!u.muted,
       account_type: u.account_type || 'staff',
+      department_id: u.department_id || null,
+      department_name: u.department_name || null,
       password_status: passwordStatus(u),
       // Пусто — значит клиент ни разу не отчитался: либо сборка старше
       // появления этой телеметрии, либо человек с тех пор не заходил.
@@ -209,6 +213,7 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
       role: req.body.role,
       account_type: req.body.account_type,
       muted: req.body.muted,
+      department_id: req.body.department_id,
     });
 
     notifyModerated(req.app.get('io'), updated);
@@ -224,6 +229,8 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
       role: updated.role || null,
       muted: !!updated.muted,
       account_type: updated.account_type || 'staff',
+      department_id: updated.department_id || null,
+      department_name: updated.department_name || null,
       password_status: passwordStatus(full),
     });
   } catch (e) {

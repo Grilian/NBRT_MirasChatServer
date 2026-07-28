@@ -32,24 +32,20 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
   const [displayName, setDisplayName] = useState(currentDisplayName);
   const [bio, setBio] = useState(currentBio);
   const [phone, setPhone] = useState(currentPhone);
-  // Отдел теперь ссылка на справочник, а наверх приходит только название.
-  // Спрашиваем свой профиль сам, чтобы не тянуть id через всю цепочку
-  // состояния в Chat.tsx и не угадывать отдел по имени: после переименования
-  // в панели угадывание молча оставило бы поле пустым.
-  const [departmentId, setDepartmentId] = useState<number | null>(null);
-  const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
+  // Отдел назначает администратор в панели, здесь он только показывается:
+  // отделами приглашают на события, и возможность записать себя в чужой отдел
+  // означала бы выданный себе доступ к чужим встречам. Значение спрашиваем у
+  // сервера, а не берём из пропса, чтобы после переназначения в панели тут не
+  // висело устаревшее.
+  const [departmentName, setDepartmentName] = useState(currentDepartment);
   const [position, setPosition] = useState(currentPosition);
   const [birthDate, setBirthDate] = useState(currentBirthDate);
   const [avatarPath, setAvatarPath] = useState(currentAvatarPath);
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.get('/departments'), api.get('/users/me')])
-      .then(([list, me]) => {
-        if (cancelled) return;
-        setDepartments(list.data);
-        setDepartmentId(me.data.department_id ?? null);
-      })
-      .catch(() => { /* без справочника поле останется пустым, остальное редактируется */ });
+    api.get('/users/me')
+      .then(({ data }) => { if (!cancelled) setDepartmentName(data.department || ''); })
+      .catch(() => { /* останется то, что пришло сверху */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -132,7 +128,6 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
         display_name: displayName,
         bio,
         phone,
-        department_id: departmentId,
         position,
         birth_date: birthDate,
       });
@@ -192,15 +187,8 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
           </div>
           <div className="field">
             <label>Отдел</label>
-            <select
-              value={departmentId ?? ''}
-              onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">Не указан</option>
-              {departments.map((item) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
-              ))}
-            </select>
+            <div className="field-readonly">{departmentName || 'Не указан'}</div>
+            <p className="field-hint">Назначается администратором.</p>
           </div>
           <div className="field">
             <label>Должность</label>

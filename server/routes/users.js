@@ -172,22 +172,10 @@ router.put('/me', verifyToken, (req, res) => {
       params.push(nextPhone);
     }
 
-    // Отдел выбирается из справочника, а не пишется текстом: свободная строка
-    // означала бы «Автоматизация», «автоматизация» и «Отдел автоматизации» как
-    // три разных отдела, по которым потом не собрать участников события.
-    if (req.body.department_id !== undefined) {
-      const raw = req.body.department_id;
-      if (raw === null || raw === '') {
-        updates.push('department_id = NULL');
-      } else {
-        const departmentId = Number(raw);
-        const exists = Number.isFinite(departmentId)
-          && db.prepare('SELECT 1 FROM departments WHERE id = ?').get(departmentId);
-        if (!exists) return res.status(400).json({ error: 'Такого отдела нет' });
-        updates.push('department_id = ?');
-        params.push(departmentId);
-      }
-    }
+    // Отдел сюда намеренно не принимается. Его назначает администратор в
+    // панели: отделами приглашают на события, и возможность записать себя в
+    // чужой отдел означала бы возможность самому себе выдать доступ к чужим
+    // встречам. В профиле отдел только показывается.
 
     if (req.body.position !== undefined) {
       const nextPosition = String(req.body.position || '').trim();

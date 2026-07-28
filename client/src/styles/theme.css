@@ -274,6 +274,9 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .field input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 1px var(--accent); }
 .field-hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 5px; }
+/* Поле, которое человек видит, но не меняет: без рамки ввода, чтобы не
+   выглядело сломанным полем. */
+.field-readonly { font-size: 14px; color: var(--ink); padding: 9px 0 2px; }
 
 .btn-primary {
   width: 100%; border: none; border-radius: var(--radius-md); padding: 12.5px 0; margin-top: 4px;

@@ -20,6 +20,8 @@ interface UserRow {
   role: 'user' | 'moderator' | 'admin' | null;
   muted: boolean;
   account_type: AccountType;
+  department_id: number | null;
+  department_name: string | null;
   password_status: PasswordStatus;
   /** Может отсутствовать, если панель открыта против сервера постарше. */
   app_versions?: AppVersion[];
@@ -228,7 +230,7 @@ function GroupsPanel({ groups, onChanged }: { groups: Group[]; onChanged: () => 
   );
 }
 
-function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Group[]; onChanged: () => void }) {
+function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[]; groups: Group[]; departments: Group[]; onChanged: () => void }) {
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState('');
@@ -287,6 +289,7 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
             <th>Имя (Логин)</th>
             <th>Тип</th>
             <th>Группа</th>
+            <th>Отдел</th>
             <th>Роль</th>
             <th>Тишина</th>
             <th>Пароль</th>
@@ -327,6 +330,18 @@ function UsersPanel({ users, groups, onChanged }: { users: UserRow[]; groups: Gr
                 >
                   <option value="">—</option>
                   {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              </td>
+              {/* Отдел назначается только здесь: им приглашают на события, и
+                  возможность выставить его себе означала бы выданный себе
+                  доступ к чужим встречам. */}
+              <td>
+                <select
+                  value={u.department_id ?? ''}
+                  onChange={(e) => update(u.id, { department_id: e.target.value ? Number(e.target.value) : null })}
+                >
+                  <option value="">—</option>
+                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </td>
               <td>
@@ -597,7 +612,7 @@ export default function SuperAdminApp() {
         {loadError && <p className="form-error">{loadError}</p>}
         <GroupsPanel groups={groups} onChanged={load} />
         <DepartmentsPanel departments={departments} onChanged={load} />
-        <UsersPanel users={users} groups={groups} onChanged={load} />
+        <UsersPanel users={users} groups={groups} departments={departments} onChanged={load} />
         <UpdateSchedulePanel />
       </main>
     </div>
