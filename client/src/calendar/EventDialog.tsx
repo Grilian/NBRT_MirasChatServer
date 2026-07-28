@@ -5,9 +5,10 @@ import {
   DayKey, dayKeyOf, instantOf, minutesFromTimeInput, toDateInput, toTimeInput,
 } from './dates';
 import {
-  CalendarOccurrence, CalendarScope, EVENT_COLORS, EventColor, EventDraft,
-  RecurrenceFreq,
+  CalendarOccurrence, CalendarScope, CalendarScopeKind, EVENT_COLORS, EventColor,
+  EventDraft, RecurrenceFreq,
 } from './types';
+import { colorOfLayer } from './layers';
 
 interface Contact {
   id: number;
@@ -16,7 +17,10 @@ interface Contact {
 }
 
 interface EventDialogProps {
+  /** Область по умолчанию для нового события. */
   scope: CalendarScope;
+  /** Показывать ли выбор «Мои события / Общий календарь». */
+  canPublishGlobal: boolean;
   /** Редактируемое вхождение; null — создаём новое. */
   occurrence: CalendarOccurrence | null;
   /** Начало для нового события: клик по дню или по слоту сетки. */
@@ -38,9 +42,15 @@ const REPEAT_OPTIONS: { value: RecurrenceFreq | 'none'; label: string }[] = [
 const DEFAULT_DURATION_MINUTES = 60;
 
 const EventDialog: React.FC<EventDialogProps> = ({
-  scope, occurrence, initialStart, initialAllDay, onClose, onSave, onDelete,
+  scope, canPublishGlobal, occurrence, initialStart, initialAllDay, onClose, onSave, onDelete,
 }) => {
   const editing = occurrence && occurrence.event_id !== null ? occurrence : null;
+
+  // Область события: у существующего берём его собственную, у нового — ту, в
+  // которой открыли календарь.
+  const [scopeKind, setScopeKind] = useState<CalendarScopeKind>(
+    editing?.scope_kind ?? scope.kind
+  );
 
   const [title, setTitle] = useState(editing?.title ?? '');
   const [isTask, setIsTask] = useState(editing?.is_task ?? false);
@@ -60,8 +70,11 @@ const EventDialog: React.FC<EventDialogProps> = ({
   const [until, setUntil] = useState(
     editing?.recurrence?.until ? toDateInput(editing.recurrence.until) : ''
   );
+  // Цвет по умолчанию берём у слоя: событие в общем календаре сразу выглядит
+  // общим, и в сетке видно, откуда оно, без чтения названия.
+  const defaultColor = (colorOfLayer(scopeKind === 'global' ? 'global' : 'personal') as EventColor);
   const [color, setColor] = useState<EventColor>(
-    (editing?.color === 'birthday' ? 'blue' : editing?.color) ?? 'blue'
+    (editing?.color === 'birthday' ? defaultColor : editing?.color) ?? defaultColor
   );
   const [location, setLocation] = useState(editing?.location ?? '');
   const [description, setDescription] = useState(editing?.description ?? '');
@@ -141,8 +154,8 @@ const EventDialog: React.FC<EventDialogProps> = ({
         : { freq, interval: parsedInterval, until: until ? instantOf(until, 24 * 60) : null },
       is_task: isTask,
       guest_ids: guestIds,
-      scope_kind: scope.kind,
-      scope_id: scope.id ?? null,
+      scope_kind: scopeKind,
+      scope_id: scopeKind === 'space' ? scope.id ?? null : null,
     };
   };
 
@@ -221,6 +234,32 @@ const EventDialog: React.FC<EventDialogProps> = ({
               Задача
             </button>
           </div>
+
+          {/* Выбор календаря показываем только тем, кому есть из чего выбирать.
+              Остальным строка «Мои события» ничего не сообщала бы, а место
+              в диалоге занимала. */}
+          {canPublishGlobal && scopeKind !== 'space' && (
+            <div className="field">
+              <label htmlFor="cal-scope">Календарь</label>
+              <select
+                id="cal-scope"
+                value={scopeKind}
+                onChange={(event) => {
+                  const next = event.target.value as CalendarScopeKind;
+                  setScopeKind(next);
+                  // Цвет тянем за областью, пока человек не выбрал свой:
+                  // иначе событие в общем календаре осталось бы «личного» цвета.
+                  setColor(colorOfLayer(next === 'global' ? 'global' : 'personal') as EventColor);
+                }}
+              >
+                <option value="personal">Мои события</option>
+                <option value="global">Общий календарь</option>
+              </select>
+              {scopeKind === 'global' && (
+                <p className="field-hint">Это событие увидят все сотрудники.</p>
+              )}
+            </div>
+          )}
 
           <label className="cal-dialog-check">
             <input type="checkbox" checked={allDay} onChange={(event) => setAllDay(event.target.checked)} />

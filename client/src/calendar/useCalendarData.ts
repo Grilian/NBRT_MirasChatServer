@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchRange } from './api';
 import { DayKey, addDays, instantOf, monthGrid, todayKey, weekDays } from './dates';
-import { CalendarOccurrence, CalendarScope, CalendarViewMode } from './types';
+import { describeLayers, layerOf, loadDisabledLayers, saveDisabledLayers } from './layers';
+import { CalendarLayer, CalendarOccurrence, CalendarScope, CalendarViewMode, LayerId } from './types';
 
 // Сколько дней вперёд показывает «Расписание». Достаточно, чтобы список не
 // обрывался на пустом месте, и не столько, чтобы тянуть полгода событий.
@@ -31,26 +32,33 @@ interface CalendarData {
   setMode: (mode: CalendarViewMode) => void;
   anchor: DayKey;
   setAnchor: (day: DayKey) => void;
+  /** Только вхождения включённых слоёв — это то, что рисуют представления. */
   occurrences: CalendarOccurrence[];
+  layers: CalendarLayer[];
+  isLayerEnabled: (id: LayerId) => boolean;
+  toggleLayer: (id: LayerId) => void;
+  canPublishGlobal: boolean;
   loading: boolean;
   error: boolean;
-  showBirthdays: boolean;
-  setShowBirthdays: (value: boolean) => void;
   reload: () => void;
 }
 
 /**
  * Загрузка вхождений для текущего режима и даты.
  *
- * Слои держим раздельно и склеиваем на выходе: переключение «Дней рождения»
- * не должно ходить на сервер за тем, что уже загружено.
+ * С сервера приходит всё, что человеку положено видеть, одним ответом, а
+ * разделение на слои и фильтрация делаются здесь: переключить слой не должно
+ * значить сходить на сервер за тем, что уже загружено.
+ *
+ * scope задаётся только для врезок вроде списка в карточке пространства — там
+ * нужен один слой, а не весь календарь.
  */
-export function useCalendarData(scope: CalendarScope): CalendarData {
+export function useCalendarData(scope?: CalendarScope): CalendarData {
   const [mode, setMode] = useState<CalendarViewMode>('month');
   const [anchor, setAnchor] = useState<DayKey>(todayKey);
-  const [events, setEvents] = useState<CalendarOccurrence[]>([]);
-  const [birthdays, setBirthdays] = useState<CalendarOccurrence[]>([]);
-  const [showBirthdays, setShowBirthdays] = useState(true);
+  const [all, setAll] = useState<CalendarOccurrence[]>([]);
+  const [canPublishGlobal, setCanPublishGlobal] = useState(false);
+  const [disabled, setDisabled] = useState<Set<LayerId>>(loadDisabledLayers);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
@@ -61,11 +69,13 @@ export function useCalendarData(scope: CalendarScope): CalendarData {
     let cancelled = false;
     setLoading(true);
 
-    fetchRange(scope, from, to)
+    fetchRange(from, to, scope)
       .then((data) => {
         if (cancelled) return;
-        setEvents(data.events);
-        setBirthdays(data.birthdays);
+        // Дни рождения приезжают отдельным массивом, но дальше живут наравне с
+        // остальными: слой у них свой, а обращение одинаковое.
+        setAll([...data.events, ...data.birthdays]);
+        setCanPublishGlobal(data.canPublishGlobal);
         setError(false);
       })
       .catch(() => { if (!cancelled) setError(true); })
@@ -74,12 +84,26 @@ export function useCalendarData(scope: CalendarScope): CalendarData {
     return () => { cancelled = true; };
     // scope — объект, в зависимостях он бы менялся каждый рендер; разбираем на поля.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope.kind, scope.id, from, to, reloadToken]);
+  }, [scope?.kind, scope?.id, from, to, reloadToken]);
 
-  const occurrences = useMemo(() => {
-    const merged = showBirthdays ? [...events, ...birthdays] : events;
-    return merged.sort((a, b) => a.starts_at - b.starts_at);
-  }, [events, birthdays, showBirthdays]);
+  const layers = useMemo(() => describeLayers(all), [all]);
+
+  const isLayerEnabled = useCallback((id: LayerId) => !disabled.has(id), [disabled]);
+
+  const occurrences = useMemo(
+    () => all.filter((item) => !disabled.has(layerOf(item))),
+    [all, disabled]
+  );
+
+  const toggleLayer = useCallback((id: LayerId) => {
+    setDisabled((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveDisabledLayers(next);
+      return next;
+    });
+  }, []);
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
@@ -87,8 +111,9 @@ export function useCalendarData(scope: CalendarScope): CalendarData {
     mode, setMode,
     anchor, setAnchor,
     occurrences,
+    layers, isLayerEnabled, toggleLayer,
+    canPublishGlobal,
     loading, error,
-    showBirthdays, setShowBirthdays,
     reload,
   };
 }

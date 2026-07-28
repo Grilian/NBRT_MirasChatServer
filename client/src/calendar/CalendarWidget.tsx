@@ -16,10 +16,11 @@ import './calendar.css';
 
 interface CalendarWidgetProps {
   /**
-   * Чей календарь показываем. Личный сегодня, календарь пространства — когда
-   * появятся пространства; всё остальное в виджете от этого не зависит.
+   * Ограничить одной областью. Не задан — календарь показывает объединение
+   * всех доступных слоёв, и это основной режим. Задаётся для врезок: список
+   * событий в карточке пространства, где весь календарь ни к чему.
    */
-  scope: CalendarScope;
+  scope?: CalendarScope;
   /** Заголовок раздела; в карточке пространства шапка будет своя. */
   title?: string;
   onBack?: () => void;
@@ -41,7 +42,8 @@ interface DraftTarget {
 const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Календарь', onBack }) => {
   const {
     mode, setMode, anchor, setAnchor, occurrences,
-    loading, error, showBirthdays, setShowBirthdays, reload,
+    layers, isLayerEnabled, toggleLayer, canPublishGlobal,
+    loading, error, reload,
   } = useCalendarData(scope);
 
   const [draft, setDraft] = useState<DraftTarget | null>(null);
@@ -122,7 +124,7 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
   // Чужое событие и день рождения открываются только на просмотр: править
   // можно то, чем владеешь, остальное — карточка с деталями и ответом.
   const openOccurrence = (occurrence: CalendarOccurrence) => {
-    if (occurrence.is_owner && occurrence.event_id !== null) {
+    if (occurrence.can_edit && occurrence.event_id !== null) {
       setDraft({ occurrence, start: occurrence.starts_at, allDay: occurrence.all_day });
     } else {
       setDetails(occurrence);
@@ -210,22 +212,24 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
             markedDays={markedDays}
           />
 
+          {/* Слои строятся по тому, что реально пришло: пространств может быть
+              сколько угодно, перечислить их заранее нельзя. Выключенные
+              запоминаются, иначе с несколькими пространствами пришлось бы
+              настраивать список при каждом открытии. */}
           <div className="cal-layers">
             <div className="cal-layers-title">Слои</div>
-            <label className="cal-layer">
-              <input type="checkbox" checked readOnly disabled />
-              <span className="cal-dot cal-color-blue" aria-hidden="true" />
-              <span>Мои события</span>
-            </label>
-            <label className="cal-layer">
-              <input
-                type="checkbox"
-                checked={showBirthdays}
-                onChange={(event) => setShowBirthdays(event.target.checked)}
-              />
-              <span className="cal-dot cal-color-birthday" aria-hidden="true" />
-              <span>Дни рождения</span>
-            </label>
+            {layers.map((layer) => (
+              <label key={layer.id} className="cal-layer">
+                <input
+                  type="checkbox"
+                  checked={isLayerEnabled(layer.id)}
+                  onChange={() => toggleLayer(layer.id)}
+                />
+                <span className={`cal-dot cal-color-${layer.color}`} aria-hidden="true" />
+                <span className="cal-layer-name">{layer.label}</span>
+                {layer.count > 0 && <span className="cal-layer-count">{layer.count}</span>}
+              </label>
+            ))}
           </div>
         </aside>
 
@@ -288,7 +292,8 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
 
       {draft && (
         <EventDialog
-          scope={scope}
+          scope={scope ?? { kind: 'personal' }}
+          canPublishGlobal={canPublishGlobal}
           occurrence={draft.occurrence}
           initialStart={draft.start}
           initialAllDay={draft.allDay}

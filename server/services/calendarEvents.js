@@ -106,7 +106,13 @@ const completionsStatement = db.prepare(
   'SELECT occurrence_start FROM calendar_task_completions WHERE event_id = ?'
 );
 
-function serializeOccurrence(event, occurrence, userId, completions) {
+function serializeOccurrence(event, occurrence, userId, completions, canEditGlobal) {
+  const isOwner = event.owner_id === userId;
+  // Общее событие правит любой администратор или модератор, а не только тот,
+  // кто его завёл: объявление на всю организацию не должно застревать из-за
+  // того, что автор в отпуске.
+  const canEdit = event.scope_kind === 'global' ? canEditGlobal : isOwner;
+
   return {
     // Ключ вхождения, а не события: в сетке их может быть много от одной
     // серии, и React нужен стабильный, различимый id.
@@ -127,7 +133,8 @@ function serializeOccurrence(event, occurrence, userId, completions) {
     scope_kind: event.scope_kind,
     scope_id: event.scope_id,
     owner_id: event.owner_id,
-    is_owner: event.owner_id === userId,
+    is_owner: isOwner,
+    can_edit: canEdit,
     source: 'calendar',
     guests: guestsStatement.all(event.id).map((g) => ({
       user_id: g.user_id,
@@ -138,37 +145,68 @@ function serializeOccurrence(event, occurrence, userId, completions) {
   };
 }
 
-/**
- * События диапазона: свои плюс те, куда пригласили.
- *
- * Отбор по starts_at ограничен снизу окном в год: повторяющаяся серия могла
- * начаться задолго до запрошенного месяца, и без этого запаса она бы просто не
- * попала в выборку. Год покрывает все поддерживаемые правила, включая годовые.
- */
-function listEvents({ userId, from, to, scopeKind = 'personal', scopeId = null }) {
-  const YEAR_MS = 366 * 24 * 60 * 60 * 1000;
+// Повторяющаяся серия могла начаться задолго до запрошенного месяца, поэтому
+// снизу диапазон расширяется на год — без этого запаса такая серия просто не
+// попала бы в выборку. Год покрывает все поддерживаемые правила, включая годовые.
+const LOOKBACK_MS = 366 * 24 * 60 * 60 * 1000;
 
+const RANGE_CONDITION = `
+  e.starts_at <= ?
+  AND (e.recurrence IS NOT NULL OR e.ends_at >= ?)
+`;
+
+/**
+ * Всё, что человек вправе видеть в диапазоне: общие события плюс личные — свои
+ * и те, куда пригласили.
+ *
+ * Слои не разделяются здесь намеренно. Каждое вхождение несёт свой scope_kind,
+ * и группировку делает клиент: переключение слоя не должно ходить на сервер за
+ * тем, что уже загружено. Календари пространств добавятся сюда же условием по
+ * членству, когда пространства появятся.
+ */
+function listVisibleEvents({ userId, from, to, canEditGlobal = false }) {
   const rows = db.prepare(`
     SELECT DISTINCT e.*
     FROM calendar_events e
     LEFT JOIN calendar_event_guests g ON g.event_id = e.id
-    WHERE (e.owner_id = ? OR g.user_id = ?)
-      AND e.scope_kind = ?
-      AND (e.scope_id IS ? OR e.scope_id = ?)
-      AND e.starts_at <= ?
-      AND (e.recurrence IS NOT NULL OR e.ends_at >= ?)
-  `).all(userId, userId, scopeKind, scopeId, scopeId, to, from - YEAR_MS);
+    WHERE (
+      e.scope_kind = 'global'
+      OR (e.scope_kind = 'personal' AND (e.owner_id = ? OR g.user_id = ?))
+    )
+    AND ${RANGE_CONDITION}
+  `).all(userId, userId, to, from - LOOKBACK_MS);
 
+  return buildOccurrences(rows, { userId, from, to, canEditGlobal });
+}
+
+/**
+ * События одной области — для списка внутри пространства и прочих врезок, где
+ * нужен не весь календарь, а конкретный его слой.
+ */
+function listEvents({ userId, from, to, scopeKind = 'personal', scopeId = null, canEditGlobal = false }) {
+  const rows = db.prepare(`
+    SELECT DISTINCT e.*
+    FROM calendar_events e
+    LEFT JOIN calendar_event_guests g ON g.event_id = e.id
+    WHERE e.scope_kind = ?
+      AND (e.scope_id IS ? OR e.scope_id = ?)
+      AND (e.scope_kind = 'global' OR e.owner_id = ? OR g.user_id = ?)
+      AND ${RANGE_CONDITION}
+  `).all(scopeKind, scopeId, scopeId, userId, userId, to, from - LOOKBACK_MS);
+
+  return buildOccurrences(rows, { userId, from, to, canEditGlobal });
+}
+
+function buildOccurrences(rows, { userId, from, to, canEditGlobal }) {
   const result = [];
   for (const event of rows) {
     const completions = new Set(
       completionsStatement.all(event.id).map((row) => row.occurrence_start)
     );
     for (const occurrence of expandOccurrences(event, from, to)) {
-      result.push(serializeOccurrence(event, occurrence, userId, completions));
+      result.push(serializeOccurrence(event, occurrence, userId, completions, canEditGlobal));
     }
   }
-
   return result.sort((a, b) => a.starts_at - b.starts_at);
 }
 
@@ -236,4 +274,10 @@ function listContactBirthdays({ userId, from, to }) {
   return result.sort((a, b) => a.starts_at - b.starts_at);
 }
 
-module.exports = { expandOccurrences, listEvents, listContactBirthdays, parseRecurrence };
+module.exports = {
+  expandOccurrences,
+  listVisibleEvents,
+  listEvents,
+  listContactBirthdays,
+  parseRecurrence,
+};

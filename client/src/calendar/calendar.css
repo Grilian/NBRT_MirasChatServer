@@ -155,8 +155,11 @@
 
 /* ---- Слои ---- */
 .cal-layers-title { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
-.cal-layer { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13.5px; cursor: pointer; }
-.cal-layer input { accent-color: var(--accent); }
+.cal-layer { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13.5px; cursor: pointer; min-width: 0; }
+.cal-layer input { accent-color: var(--accent); flex: none; }
+/* Название слоя может быть длинным — имя пространства задаёт его владелец. */
+.cal-layer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-layer-count { flex: none; font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .cal-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cal-ink, var(--accent)); flex: none; }
 
 /* ---- Месяц ---- */

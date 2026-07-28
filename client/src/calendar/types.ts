@@ -2,7 +2,7 @@
 // показывать внутри пространств. Всё, что отличает один календарь от другого,
 // собрано здесь, в scope — дальше по коду он просто прокидывается вниз, и ни
 // одному представлению не нужно знать, чей календарь оно рисует.
-export type CalendarScopeKind = 'personal' | 'space';
+export type CalendarScopeKind = 'personal' | 'global' | 'space';
 
 export interface CalendarScope {
   kind: CalendarScopeKind;
@@ -65,6 +65,12 @@ export interface CalendarOccurrence {
   scope_id: number | null;
   owner_id: number;
   is_owner: boolean;
+  /**
+   * Права на правку решает сервер, а не клиент: у общего события их имеет любой
+   * администратор или модератор, а не только автор, и вычислять это по
+   * owner_id на клиенте значило бы дублировать правило в двух местах.
+   */
+  can_edit: boolean;
   source: 'calendar' | 'birthday';
   guests: EventGuest[];
 }
@@ -86,11 +92,22 @@ export interface EventDraft {
 }
 
 /**
- * Слои календаря. Пока их два, но список задуман расширяемым: календари
- * пространств лягут сюда же, и переключатель слоёв не придётся переделывать.
+ * Слой календаря — то, что человек включает и выключает в боковой панели.
+ *
+ * Идентификатор строковый и с префиксом (`space:7`), потому что слоёв
+ * пространств будет столько, сколько пространств: перечислением их не задать.
+ * Календарь показывает объединение включённых слоёв, а не одну область.
  */
+export type LayerId = 'global' | 'personal' | 'birthdays' | string;
+
 export interface CalendarLayer {
-  id: 'events' | 'birthdays';
+  id: LayerId;
   label: string;
-  enabled: boolean;
+  /**
+   * Цвет слоя. Он же цвет по умолчанию для событий, создаваемых в этом слое:
+   * когда слоёв много, одинаково синие события из разных источников
+   * перестают читаться в сетке. Цвет конкретного события его переопределяет.
+   */
+  color: EventColor | 'birthday';
+  count: number;
 }

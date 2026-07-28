@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const { listEvents, listContactBirthdays } = require('../services/calendarEvents');
+const { listEvents, listVisibleEvents, listContactBirthdays } = require('../services/calendarEvents');
 
 const router = express.Router();
 
@@ -24,10 +24,20 @@ function parseRange(req) {
   return { from, to };
 }
 
+const SCOPE_KINDS = new Set(['personal', 'global', 'space']);
+
 function parseScope(source) {
-  const kind = source.scope_kind === 'space' ? 'space' : 'personal';
+  const kind = SCOPE_KINDS.has(source.scope_kind) ? source.scope_kind : 'personal';
   const rawId = Number(source.scope_id);
   return { scopeKind: kind, scopeId: kind === 'space' && Number.isFinite(rawId) ? rawId : null };
+}
+
+// Общий календарь наполняют администраторы и модераторы. Роль читаем из базы,
+// а не из токена: обычные токены бессрочные, и роль могли сменить уже после
+// выдачи — та же причина, что и в middleware/requireAdminRole.js.
+function canPublishGlobal(userId) {
+  const user = db.prepare('SELECT role FROM users WHERE id = ?').get(userId);
+  return !!user && (user.role === 'admin' || user.role === 'moderator');
 }
 
 // Приводим тело запроса к строкам таблицы. Клиенту доверять нельзя ни в
@@ -84,6 +94,25 @@ function parseEventBody(body) {
   };
 }
 
+/**
+ * Вправе ли человек писать в эту область. Возвращает текст ошибки или null.
+ *
+ * Проверка обязательна на запись, а не только на чтение: scope приходит прямо
+ * из тела запроса, и без неё любой мог бы объявить своё событие общим, просто
+ * подставив scope_kind.
+ */
+function scopeWriteError(scopeKind, userId) {
+  if (scopeKind === 'global' && !canPublishGlobal(userId)) {
+    return 'Общий календарь ведут администраторы и модераторы';
+  }
+  // Пространств ещё нет, а значит нет и понятия «участник» — принять такое
+  // событие означало бы завести строку, доступ к которой никто не проверяет.
+  if (scopeKind === 'space') {
+    return 'Календари пространств пока не поддерживаются';
+  }
+  return null;
+}
+
 function replaceGuests(eventId, ownerId, guestIds) {
   db.prepare('DELETE FROM calendar_event_guests WHERE event_id = ?').run(eventId);
   const insert = db.prepare(
@@ -95,27 +124,49 @@ function replaceGuests(eventId, ownerId, guestIds) {
   }
 }
 
-function ownedEvent(eventId, userId) {
-  return db.prepare('SELECT * FROM calendar_events WHERE id = ? AND owner_id = ?')
-    .get(eventId, userId);
+/**
+ * Событие, которое этот человек вправе менять. null — нет такого либо нет прав.
+ *
+ * Личное правит владелец. Общее — любой администратор или модератор, а не
+ * только автор: объявление на всю организацию не должно застревать из-за того,
+ * что тот, кто его завёл, в отпуске.
+ */
+function editableEvent(eventId, userId) {
+  const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(eventId);
+  if (!event) return null;
+  if (event.scope_kind === 'global') return canPublishGlobal(userId) ? event : null;
+  return event.owner_id === userId ? event : null;
 }
 
-// Вхождения диапазона. Источники раздельно — клиент показывает их разными
-// слоями и умеет выключать дни рождения, не трогая события.
+/**
+ * Вхождения диапазона.
+ *
+ * Без параметра scope_kind отдаётся всё, что человеку положено видеть, — общее
+ * и личное вперемешку, каждое со своим scope_kind. Разделение на слои делает
+ * клиент: переключить слой не должно значить сходить на сервер.
+ *
+ * С параметром — только указанная область. Это для врезок: список ближайших
+ * событий в карточке пространства, где весь календарь не нужен.
+ */
 router.get('/events', verifyToken, (req, res) => {
   try {
     const range = parseRange(req);
     if (!range) return res.status(400).json({ error: 'Некорректный диапазон' });
 
-    const scope = parseScope(req.query);
-    const events = listEvents({ userId: req.userId, ...range, ...scope });
+    const canEditGlobal = canPublishGlobal(req.userId);
+    const filtered = SCOPE_KINDS.has(req.query.scope_kind);
 
-    // Дни рождения — понятие личное: в календаре пространства им не место.
-    const birthdays = scope.scopeKind === 'personal' && req.query.birthdays !== '0'
+    const events = filtered
+      ? listEvents({ userId: req.userId, ...range, ...parseScope(req.query), canEditGlobal })
+      : listVisibleEvents({ userId: req.userId, ...range, canEditGlobal });
+
+    // Дни рождения — понятие личное: в срезе пространства им не место.
+    const wantsBirthdays = !filtered || req.query.scope_kind === 'personal';
+    const birthdays = wantsBirthdays && req.query.birthdays !== '0'
       ? listContactBirthdays({ userId: req.userId, ...range })
       : [];
 
-    res.json({ events, birthdays });
+    res.json({ events, birthdays, can_publish_global: canEditGlobal });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -125,6 +176,9 @@ router.post('/events', verifyToken, (req, res) => {
   try {
     const parsed = parseEventBody(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const scopeError = scopeWriteError(parsed.value.scope_kind, req.userId);
+    if (scopeError) return res.status(403).json({ error: scopeError });
 
     const now = Date.now();
     const event = parsed.value;
@@ -149,12 +203,17 @@ router.post('/events', verifyToken, (req, res) => {
 router.put('/events/:id', verifyToken, (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!ownedEvent(id, req.userId)) {
+    if (!editableEvent(id, req.userId)) {
       return res.status(404).json({ error: 'Событие не найдено' });
     }
 
     const parsed = parseEventBody(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    // Проверяем и целевую область: иначе правкой можно было бы перенести
+    // личное событие в общий календарь в обход прав.
+    const scopeError = scopeWriteError(parsed.value.scope_kind, req.userId);
+    if (scopeError) return res.status(403).json({ error: scopeError });
 
     const event = parsed.value;
     db.prepare(`
@@ -181,7 +240,7 @@ router.put('/events/:id', verifyToken, (req, res) => {
 router.delete('/events/:id', verifyToken, (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!ownedEvent(id, req.userId)) {
+    if (!editableEvent(id, req.userId)) {
       return res.status(404).json({ error: 'Событие не найдено' });
     }
 
@@ -199,7 +258,7 @@ router.delete('/events/:id', verifyToken, (req, res) => {
 router.post('/events/:id/complete', verifyToken, (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!ownedEvent(id, req.userId)) {
+    if (!editableEvent(id, req.userId)) {
       return res.status(404).json({ error: 'Событие не найдено' });
     }
 
