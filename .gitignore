@@ -149,3 +149,4 @@ server/backups/
 
 # Ключ сервисного аккаунта Firebase — доступ на отправку пушей от имени проекта
 server/fcm-service-account.json
+.claude/launch.json
