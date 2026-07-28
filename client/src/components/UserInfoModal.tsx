@@ -30,23 +30,31 @@ interface ModerationInfo {
   account_type: AccountType;
   role: string | null;
   group_id: number | null;
+  department_id: number | null;
 }
 
 const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate, groups = [], onClose, onMessage }) => {
   const name = nameFor(user);
   const [moderation, setModeration] = useState<ModerationInfo | null>(null);
+  const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
   const [modError, setModError] = useState('');
 
   // Тишина/тип/группа/роль — не публичные поля, подгружаем отдельно и только
   // для тех, у кого есть право ими управлять (проверяется и на сервере).
   useEffect(() => {
     if (!canModerate) return;
+    // Справочник отделов берём отсюда же: маршрут уже под ролью
+    // «Администратор», и второй источник ради того же списка не нужен.
+    api.get('/moderation/departments')
+      .then(({ data }) => setDepartments(data))
+      .catch(() => { /* без списка остальные поля продолжают работать */ });
+
     api.get(`/moderation/users/${user.id}`)
       .then(({ data }) => setModeration(data))
       .catch((err) => setModError(err.response?.data?.error || 'Не удалось загрузить'));
   }, [canModerate, user.id]);
 
-  const updateModeration = async (patch: Partial<{ muted: boolean; account_type: AccountType; group_id: number | null; role: string | null }>) => {
+  const updateModeration = async (patch: Partial<ModerationInfo>) => {
     try {
       const { data } = await api.put(`/moderation/users/${user.id}`, patch);
       setModeration(data);
@@ -148,6 +156,18 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
                     >
                       <option value="">—</option>
                       {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                  </div>
+                  {/* Отдел правится и отсюда, но только админом: им приглашают
+                      на события, и сам себе человек его выставить не может. */}
+                  <div className="user-info-field">
+                    <span className="user-info-label">Отдел</span>
+                    <select
+                      value={moderation.department_id ?? ''}
+                      onChange={(e) => updateModeration({ department_id: e.target.value ? Number(e.target.value) : null })}
+                    >
+                      <option value="">—</option>
+                      {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>
                   <div className="user-info-field">
