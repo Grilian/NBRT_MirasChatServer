@@ -305,12 +305,14 @@ if (!gotLock) {
 // .blockmap; их надо залить вместе с .exe, иначе клиент не увидит новую
 // версию либо не сможет докачать её по частям.
 //
-// autoDownload выключен намеренно: качаем и ставим только по явному нажатию.
-// Обновление закрывает приложение, и делать это без спроса посреди переписки
-// нельзя. autoInstallOnAppQuit — по той же причине: человек закрывает окно,
-// чтобы уйти, а не чтобы попасть на экран установщика.
-autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = false;
+// Обновление накатывается само, без единого нажатия: это замена той же самой
+// программы, а не установка новой, и спрашивать разрешение на каждую версию
+// незачем. Скачиваем фоном, ставим при выходе из приложения.
+//
+// Единственное, чего избегаем, — закрыть приложение прямо посреди переписки.
+// Поэтому момент установки выбирается по состоянию окна (см. update-downloaded).
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
 
 function sendUpdateState(state) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -321,7 +323,21 @@ function sendUpdateState(state) {
 autoUpdater.on('update-available', (info) => sendUpdateState({ status: 'available', version: info.version }));
 autoUpdater.on('update-not-available', () => sendUpdateState({ status: 'idle' }));
 autoUpdater.on('download-progress', (p) => sendUpdateState({ status: 'downloading', percent: Math.round(p.percent) }));
-autoUpdater.on('update-downloaded', (info) => sendUpdateState({ status: 'downloaded', version: info.version }));
+autoUpdater.on('update-downloaded', (info) => {
+  sendUpdateState({ status: 'downloaded', version: info.version });
+
+  // Окно свёрнуто в трей и не в фокусе — за приложением никто не сидит, самое
+  // время перезапуститься: человек вернётся уже к обновлённой версии и ничего
+  // не заметит. Если окно открыто, ждём: autoInstallOnAppQuit накатит
+  // обновление при закрытии приложения.
+  //
+  // Трей здесь принципиален. Закрытие окна прячет приложение, а не завершает
+  // его, так что выхода можно ждать неделями — без этой ветки обновление
+  // висело бы скачанным и неустановленным до перезагрузки машины.
+  const unattended = !mainWindow || mainWindow.isDestroyed()
+    || (!mainWindow.isVisible() && !mainWindow.isFocused());
+  if (unattended) installUpdate();
+});
 autoUpdater.on('error', (e) => {
   // Недоступный сервер обновлений — не повод показывать ошибку человеку,
   // который просто работает в мессенджере. Пишем в лог и молчим.
@@ -339,18 +355,22 @@ function checkForUpdates() {
   autoUpdater.checkForUpdates().catch((e) => console.error('Проверка обновлений не удалась:', e.message));
 }
 
-ipcMain.on('update:check', () => checkForUpdates());
-ipcMain.on('update:download', () => {
-  if (!canUpdate) return;
-  autoUpdater.downloadUpdate().catch((e) => console.error('Загрузка обновления не удалась:', e.message));
-});
-ipcMain.on('update:install', () => {
+function installUpdate() {
   if (!canUpdate) return;
   // Без этого сработает перехват закрытия окна, который прячет приложение
   // в трей, и установщик будет ждать выхода вечно.
   isQuitting = true;
-  autoUpdater.quitAndInstall();
-});
+  // Тихо и с автозапуском после установки: экран установщика человеку тут
+  // показывать не за чем, а приложение должно вернуться само.
+  autoUpdater.quitAndInstall(true, true);
+}
+
+ipcMain.on('update:check', () => checkForUpdates());
+// Обновление ставится само; это на случай, если человек не хочет ждать
+// закрытия приложения и жмёт «Перезапустить» в настройках.
+ipcMain.on('update:install', () => installUpdate());
+
+ipcMain.handle('app:version', () => app.getVersion());
 
 ipcMain.handle('autostart:get', () => app.getLoginItemSettings().openAtLogin);
 ipcMain.handle('autostart:set', (event, enabled) => {

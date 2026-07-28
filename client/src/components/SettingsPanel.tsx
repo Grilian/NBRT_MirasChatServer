@@ -35,6 +35,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [notify, setNotify] = useState<NotificationPrefs>(getNotificationPrefs);
   const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
 
@@ -64,6 +65,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   useEffect(() => {
     if (isElectron) {
       window.electronAPI!.getAutoLaunch().then(setAutoLaunch);
+      window.electronAPI!.getAppVersion().then(setAppVersion);
     }
   }, []);
 
@@ -214,26 +216,36 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </label>
               </div>
 
-              {update.status === 'available' && (
-                <button type="button" className="settings-row" onClick={() => window.electronAPI!.downloadUpdate()}>
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
-                  <span className="label">Доступно обновление {update.version}</span>
-                  <span className="value is-action">Скачать</span>
-                </button>
-              )}
-
-              {update.status === 'downloading' && (
+              {/* Рядом со строкой обновления, а не в подвале: «доступно
+                  обновление 1.3.1» ни о чём не говорит, пока не видно, что
+                  стоит сейчас. Хэш сборки в подвале для этого не годится —
+                  сравнить его с номером версии нельзя. */}
+              {appVersion && (
                 <div className="settings-row static">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
-                  <span className="label">Загрузка обновления</span>
-                  <span className="value">{update.percent}%</span>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>
+                  <span className="label">Версия</span>
+                  <span className="value">{appVersion}</span>
                 </div>
               )}
 
+              {/* Ни «Скачать», ни «Установить» тут нет: обновление идёт само.
+                  Строки ниже — не действия, а отчёт о том, что происходит,
+                  чтобы скачивание на фоне не выглядело чем-то непрошеным. */}
+              {(update.status === 'available' || update.status === 'downloading') && (
+                <div className="settings-row static">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                  <span className="label">Загрузка обновления</span>
+                  <span className="value">{update.status === 'downloading' ? `${update.percent}%` : '…'}</span>
+                </div>
+              )}
+
+              {/* Единственная кнопка во всей механике, и та необязательная:
+                  обновление и так встанет при закрытии приложения. Она для
+                  того, кто увидел строку и хочет получить новую версию сейчас. */}
               {update.status === 'downloaded' && (
                 <button type="button" className="settings-row" onClick={() => window.electronAPI!.installUpdate()}>
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
-                  <span className="label">Обновление {update.version} готово</span>
+                  <span className="label">Обновление {update.version} встанет при закрытии</span>
                   <span className="value is-action">Перезапустить</span>
                 </button>
               )}

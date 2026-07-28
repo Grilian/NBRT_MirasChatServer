@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('window:maximized', listener);
     return () => ipcRenderer.removeListener('window:maximized', listener);
   },
+  getAppVersion: () => ipcRenderer.invoke('app:version'),
   getAutoLaunch: () => ipcRenderer.invoke('autostart:get'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
   setUnreadBadge: (count) => ipcRenderer.send('unread:set', count),
@@ -22,10 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('window:focus-changed', listener);
   },
 
-  // Автообновление. Скачивание и установка запускаются только явным действием
-  // пользователя — приложение не должно закрыться посреди разговора.
+  // Автообновление идёт само: скачивается фоном, ставится при выходе. Наружу
+  // отдаём только состояние для показа и «Перезапустить» для нетерпеливых.
   checkForUpdate: () => ipcRenderer.send('update:check'),
-  downloadUpdate: () => ipcRenderer.send('update:download'),
   installUpdate: () => ipcRenderer.send('update:install'),
   onUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);

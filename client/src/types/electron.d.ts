@@ -15,8 +15,8 @@ declare global {
       focusWindow: () => void;
       flashWindow: () => void;
       onFocusChange: (callback: (isFocused: boolean) => void) => () => void;
+      getAppVersion: () => Promise<string>;
       checkForUpdate: () => void;
-      downloadUpdate: () => void;
       installUpdate: () => void;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
     };
