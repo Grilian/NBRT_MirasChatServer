@@ -325,10 +325,11 @@ pm2 restart MirasChatServer
         alias /var/www/miraschat/updates/;
         default_type application/octet-stream;
         try_files $uri =404;
+        add_header Access-Control-Allow-Origin *;
     }
 ```
 
-`try_files $uri =404` здесь обязателен: он и отменяет фолбэк на `index.html`. Применить:
+`try_files $uri =404` здесь обязателен: он и отменяет фолбэк на `index.html`. `Access-Control-Allow-Origin` — тоже: `android.json` читает `fetch()` изнутри Capacitor-приложения, у которого origin не `https://cagrizzz.ru` (обычно `https://localhost`), и без этого заголовка браузер внутри WebView молча блокирует ответ — `fetch` падает с сетевой ошибкой, которую код проверки обновлений тихо проглатывает. Desktop-клиента это не касается: `electron-updater` не браузер и CORS не проверяет, но заголовок безопасно распространяется на все файлы в этом `location` — раздача публичная, секретов тут нет. Применить:
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx
