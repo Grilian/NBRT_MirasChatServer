@@ -293,4 +293,71 @@ router.put('/update-schedule', verifySuperAdmin, (req, res) => {
   }
 });
 
+// ===== Отделы =====
+// Отдельно от групп: группа — категория с правами (на «Администрация»/«Админы»
+// завязано право писать в режиме тишины), отдел — место в структуре.
+
+router.get('/departments', verifySuperAdmin, (req, res) => {
+  try {
+    const departments = db.prepare(`
+      SELECT d.id, d.name, COUNT(u.id) AS member_count
+      FROM departments d
+      LEFT JOIN users u ON u.department_id = d.id
+      GROUP BY d.id
+      ORDER BY d.name
+    `).all();
+    res.json(departments);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/departments', verifySuperAdmin, (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'Название обязательно' });
+
+    const result = db.prepare('INSERT INTO departments (name) VALUES (?)').run(name);
+    res.json({ id: result.lastInsertRowid, name, member_count: 0 });
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) {
+      return res.status(400).json({ error: 'Отдел с таким названием уже есть' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/departments/:id', verifySuperAdmin, (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'Название обязательно' });
+
+    const result = db.prepare('UPDATE departments SET name = ? WHERE id = ?').run(name, req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Отдел не найден' });
+
+    res.json({ ok: true });
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) {
+      return res.status(400).json({ error: 'Отдел с таким названием уже есть' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/departments/:id', verifySuperAdmin, (req, res) => {
+  try {
+    // Людей не трогаем, только отвязываем: удаление отдела — это перестановка
+    // в структуре, а не увольнение тех, кто в нём числился.
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE users SET department_id = NULL WHERE department_id = ?').run(req.params.id);
+      return db.prepare('DELETE FROM departments WHERE id = ?').run(req.params.id).changes;
+    });
+    const changes = tx();
+    if (changes === 0) return res.status(404).json({ error: 'Отдел не найден' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

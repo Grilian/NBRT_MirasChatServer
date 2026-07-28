@@ -46,9 +46,11 @@ router.get('/', verifyToken, (req, res) => {
     const visibleGroupPlaceholders = INTERNET_VISIBLE_GROUPS.map(() => '?').join(',');
 
     const users = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_path, u.group_id, g.name AS group_name
+      SELECT u.id, u.username, u.display_name, u.avatar_path, u.group_id, g.name AS group_name,
+             u.department_id, d.name AS department
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
+      LEFT JOIN departments d ON d.id = u.department_id
       WHERE u.id != ?
         AND u.username NOT LIKE 'miras\_%' ESCAPE '\\'
         AND (? = 0 OR u.account_type = 'internet' OR g.name IN (${visibleGroupPlaceholders}))
@@ -65,7 +67,12 @@ router.get('/', verifyToken, (req, res) => {
 // (например, role), не заставляя человека перелогиниваться вручную.
 router.get('/me', verifyToken, (req, res) => {
   try {
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.userId);
+    const user = db.prepare(`
+      SELECT u.*, d.name AS department_name
+      FROM users u
+      LEFT JOIN departments d ON d.id = u.department_id
+      WHERE u.id = ?
+    `).get(req.userId);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
     res.json({
@@ -75,7 +82,8 @@ router.get('/me', verifyToken, (req, res) => {
       avatar_path: user.avatar_path || null,
       bio: user.bio || '',
       phone: user.phone || '',
-      department: user.department || '',
+      department: user.department_name || '',
+      department_id: user.department_id || null,
       position: user.position || '',
       birth_date: user.birth_date || '',
       role: user.role || null,
@@ -164,13 +172,21 @@ router.put('/me', verifyToken, (req, res) => {
       params.push(nextPhone);
     }
 
-    if (req.body.department !== undefined) {
-      const nextDepartment = String(req.body.department || '').trim();
-      if (!isValidShortText(nextDepartment)) {
-        return res.status(400).json({ error: 'Отдел: не длиннее 100 символов' });
+    // Отдел выбирается из справочника, а не пишется текстом: свободная строка
+    // означала бы «Автоматизация», «автоматизация» и «Отдел автоматизации» как
+    // три разных отдела, по которым потом не собрать участников события.
+    if (req.body.department_id !== undefined) {
+      const raw = req.body.department_id;
+      if (raw === null || raw === '') {
+        updates.push('department_id = NULL');
+      } else {
+        const departmentId = Number(raw);
+        const exists = Number.isFinite(departmentId)
+          && db.prepare('SELECT 1 FROM departments WHERE id = ?').get(departmentId);
+        if (!exists) return res.status(400).json({ error: 'Такого отдела нет' });
+        updates.push('department_id = ?');
+        params.push(departmentId);
       }
-      updates.push('department = ?');
-      params.push(nextDepartment);
     }
 
     if (req.body.position !== undefined) {
@@ -196,7 +212,13 @@ router.put('/me', verifyToken, (req, res) => {
       db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     }
 
-    const updated = db.prepare('SELECT id, username, display_name, avatar_path, bio, phone, department, position, birth_date FROM users WHERE id = ?').get(user.id);
+    const updated = db.prepare(`
+      SELECT u.id, u.username, u.display_name, u.avatar_path, u.bio, u.phone,
+             u.department_id, d.name AS department, u.position, u.birth_date
+      FROM users u
+      LEFT JOIN departments d ON d.id = u.department_id
+      WHERE u.id = ?
+    `).get(user.id);
     res.json(updated);
   } catch (e) {
     res.status(500).json({ error: e.message });

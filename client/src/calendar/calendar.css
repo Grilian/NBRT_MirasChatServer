@@ -327,9 +327,18 @@
 }
 .cal-guest-chip:hover { background: var(--row-hover); }
 .cal-dialog-suggest { margin-top: 6px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
-.cal-suggest-row { border: none; background: transparent; color: var(--ink); cursor: pointer; text-align: left; padding: 7px 10px; font-size: 13px; }
+.cal-suggest-row {
+  border: none; background: transparent; color: var(--ink); cursor: pointer; text-align: left;
+  padding: 7px 10px; font-size: 13px; display: flex; align-items: center; gap: 8px; min-width: 0;
+}
 .cal-suggest-row:hover { background: var(--row-hover); }
 .cal-suggest-row.is-picked { color: var(--accent); font-weight: 600; }
+/* Отдел, приглашённый частично: видно, что кто-то из него уже позван, но не все. */
+.cal-suggest-row.is-partial { color: var(--accent); }
+.cal-suggest-row.is-partial .cal-suggest-count::after { content: ' · частично'; }
+.cal-suggest-row.is-department { font-weight: 500; }
+.cal-suggest-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-suggest-count { flex: none; font-size: 11.5px; color: var(--ink-faint); font-weight: 400; }
 .cal-dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .cal-dialog-actions .btn-primary { width: auto; padding: 9px 22px; }
 .cal-dialog-delete { border: none; background: transparent; color: var(--unread); cursor: pointer; font-size: 13.5px; padding: 9px 12px; border-radius: var(--radius-sm); margin-right: auto; }

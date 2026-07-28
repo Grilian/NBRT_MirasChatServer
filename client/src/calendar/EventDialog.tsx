@@ -10,10 +10,18 @@ import {
 } from './types';
 import { colorOfLayer } from './layers';
 
-interface Contact {
+interface Person {
   id: number;
   username: string;
   display_name: string | null;
+  department_id: number | null;
+  department: string | null;
+}
+
+interface Department {
+  id: number;
+  name: string;
+  member_count: number;
 }
 
 interface EventDialogProps {
@@ -82,16 +90,24 @@ const EventDialog: React.FC<EventDialogProps> = ({
     editing?.guests.map((guest) => guest.user_id) ?? []
   );
 
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [guestQuery, setGuestQuery] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Справочник целиком, а не только свои контакты: позвать на встречу можно
+  // любого сотрудника, и отделами в том числе — иначе список отделов показывал
+  // бы людей, которых нельзя выбрать.
   useEffect(() => {
     let cancelled = false;
-    api.get('/contacts')
-      .then(({ data }) => { if (!cancelled) setContacts(data); })
-      .catch(() => { /* без контактов диалог остаётся рабочим, просто некого звать */ });
+    Promise.all([api.get('/users'), api.get('/departments')])
+      .then(([usersRes, departmentsRes]) => {
+        if (cancelled) return;
+        setPeople(usersRes.data);
+        setDepartments(departmentsRes.data);
+      })
+      .catch(() => { /* без справочника диалог остаётся рабочим, просто некого звать */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -105,23 +121,54 @@ const EventDialog: React.FC<EventDialogProps> = ({
     setEndDay(shiftedEnd.toISOString().slice(0, 10));
   };
 
-  const filteredContacts = useMemo(() => {
+  // Пока в поиске пусто — предлагаем отделы, не людей. Список сотрудников
+  // целиком длиннее экрана и заставляет вычитывать десятки имён; отделами
+  // зовут чаще, а конкретного человека проще найти по имени, чем выбрать
+  // из общего перечня.
+  const matchedPeople = useMemo(() => {
     const needle = guestQuery.trim().toLowerCase();
-    if (!needle) return contacts.slice(0, 6);
-    return contacts
-      .filter((contact) => nameFor(contact).toLowerCase().includes(needle))
-      .slice(0, 6);
-  }, [contacts, guestQuery]);
+    if (!needle) return [];
+    return people
+      .filter((person) => nameFor(person).toLowerCase().includes(needle))
+      .slice(0, 8);
+  }, [people, guestQuery]);
+
+  const matchedDepartments = useMemo(() => {
+    const needle = guestQuery.trim().toLowerCase();
+    const withPeople = departments.filter((item) => item.member_count > 0);
+    if (!needle) return withPeople;
+    return withPeople.filter((item) => item.name.toLowerCase().includes(needle));
+  }, [departments, guestQuery]);
 
   const selectedGuests = useMemo(
-    () => contacts.filter((contact) => guestIds.includes(contact.id)),
-    [contacts, guestIds]
+    () => people.filter((person) => guestIds.includes(person.id)),
+    [people, guestIds]
   );
 
   const toggleGuest = (id: number) => {
     setGuestIds((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
     );
+  };
+
+  // Отдел — это способ позвать разом, а не отдельная сущность в участниках:
+  // состав отдела может смениться, а приглашены остаются те, кого позвали.
+  const toggleDepartment = (departmentId: number) => {
+    const members = people.filter((person) => person.department_id === departmentId).map((p) => p.id);
+    if (members.length === 0) return;
+
+    setGuestIds((current) => {
+      const allInvited = members.every((id) => current.includes(id));
+      if (allInvited) return current.filter((id) => !members.includes(id));
+      return Array.from(new Set([...current, ...members]));
+    });
+  };
+
+  const departmentState = (departmentId: number) => {
+    const members = people.filter((person) => person.department_id === departmentId).map((p) => p.id);
+    if (members.length === 0) return 'empty';
+    if (members.every((id) => guestIds.includes(id))) return 'all';
+    return members.some((id) => guestIds.includes(id)) ? 'some' : 'none';
   };
 
   const buildDraft = (): EventDraft | string => {
@@ -393,21 +440,45 @@ const EventDialog: React.FC<EventDialogProps> = ({
               id="cal-guests"
               value={guestQuery}
               onChange={(event) => setGuestQuery(event.target.value)}
-              placeholder="Найти среди контактов"
+              placeholder="Отдел целиком или имя сотрудника"
             />
-            {filteredContacts.length > 0 && (
+
+            {(matchedDepartments.length > 0 || matchedPeople.length > 0) && (
               <div className="cal-dialog-suggest">
-                {filteredContacts.map((contact) => (
+                {matchedDepartments.map((item) => {
+                  const state = departmentState(item.id);
+                  return (
+                    <button
+                      key={`dept-${item.id}`}
+                      type="button"
+                      className={`cal-suggest-row is-department${state === 'all' ? ' is-picked' : ''}${state === 'some' ? ' is-partial' : ''}`}
+                      onClick={() => toggleDepartment(item.id)}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /></svg>
+                      <span className="cal-suggest-name">{item.name}</span>
+                      <span className="cal-suggest-count">{item.member_count}</span>
+                    </button>
+                  );
+                })}
+
+                {matchedPeople.map((person) => (
                   <button
-                    key={contact.id}
+                    key={`user-${person.id}`}
                     type="button"
-                    className={`cal-suggest-row${guestIds.includes(contact.id) ? ' is-picked' : ''}`}
-                    onClick={() => toggleGuest(contact.id)}
+                    className={`cal-suggest-row${guestIds.includes(person.id) ? ' is-picked' : ''}`}
+                    onClick={() => toggleGuest(person.id)}
                   >
-                    {nameFor(contact)}
+                    <span className="cal-suggest-name">{nameFor(person)}</span>
+                    {person.department && <span className="cal-suggest-count">{person.department}</span>}
                   </button>
                 ))}
               </div>
+            )}
+
+            {!guestQuery.trim() && (
+              <p className="field-hint">
+                Отделы приглашаются целиком. Отдельного сотрудника найдите по имени.
+              </p>
             )}
           </div>
 

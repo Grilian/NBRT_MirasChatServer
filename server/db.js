@@ -57,6 +57,16 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Отделы. Отдельно от groups намеренно: группа — это категория с правами
+  -- (на «Администрация»/«Админы» завязано право писать в режиме тишины), а
+  -- отдел — место человека в структуре. Смешать их значило бы дать праву
+  -- писать в тишину зависеть от того, в каком отделе человек сидит.
+  CREATE TABLE IF NOT EXISTS departments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS super_admins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
@@ -294,6 +304,37 @@ function ensureGroup(name) {
 
 ensureGroup('Администрация');
 ensureGroup('Кафедры');
+
+// Отдел ссылкой, а не строкой: раньше это было свободное текстовое поле, и
+// переименование отдела в панели осиротило бы всех, кто в нём числится.
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN department_id INTEGER REFERENCES departments(id)`);
+} catch (e) {
+  // Колонка уже есть
+}
+
+function ensureDepartment(name) {
+  const existing = db.prepare('SELECT id FROM departments WHERE name = ?').get(name);
+  if (existing) return existing.id;
+  return db.prepare('INSERT INTO departments (name) VALUES (?)').run(name).lastInsertRowid;
+}
+
+['Автоматизация', 'Зам.дир', 'Ресепшен'].forEach(ensureDepartment);
+
+// Бэкфилл: до появления справочника отдел писали строкой. Заводим отдел под
+// каждое встреченное значение и переводим людей на ссылку — иначе после
+// перехода на выпадающий список у них молча опустело бы поле.
+try {
+  const written = db.prepare(`
+    SELECT DISTINCT TRIM(department) AS name FROM users
+    WHERE department IS NOT NULL AND TRIM(department) != '' AND department_id IS NULL
+  `).all();
+
+  const link = db.prepare('UPDATE users SET department_id = ? WHERE TRIM(department) = ? AND department_id IS NULL');
+  for (const row of written) link.run(ensureDepartment(row.name), row.name);
+} catch (e) {
+  console.error('Ошибка бэкфилла отделов:', e);
+}
 
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {
