@@ -254,6 +254,30 @@ pm2 restart MirasChatServer
 
 Приложение проверяет наличие новой версии через 15 секунд после запуска, дальше раз в четыре часа, и ещё раз при каждом открытии Настроек. Найдя версию новее, показывает в Настройках строку «Доступно обновление». Скачивание и установка запускаются **только по нажатию** — обновление закрывает приложение, и делать это без спроса посреди переписки нельзя.
 
+### Настройка nginx (разово)
+
+Файлы обновлений лежат в `/var/www/miraschat/updates/`, **рядом** с `dist/`, а не внутри него: `dist/` целиком перезаписывается `rsync --delete` при каждой выкладке клиента, и установщик оттуда исчезал бы после первого же деплоя.
+
+Из-за этого нужен отдельный `location`. Без него запрос уходит в блок `location /miraschat/`, где `alias` ведёт в `dist/`, файл не находится и срабатывает SPA-фолбэк `try_files ... /miraschat/index.html`. Внешне всё выглядит рабочим — HTTP 200 на любой URL, — но `electron-updater` получает HTML вместо YAML и обновлений не видит.
+
+В `/etc/nginx/sites-available/cagrizzz.ru`, перед блоком `location /miraschat/`:
+
+```nginx
+    location /miraschat/updates/ {
+        alias /var/www/miraschat/updates/;
+        default_type application/octet-stream;
+        try_files $uri =404;
+    }
+```
+
+`try_files $uri =404` здесь обязателен: он и отменяет фолбэк на `index.html`. Применить:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Сам каталог создаётся один раз: `sudo mkdir -p /var/www/miraschat/updates && sudo chown gri /var/www/miraschat/updates`.
+
 ### Выпуск новой версии
 
 **1.** Поднять `"version"` в `desktop/package.json`. Автоматически она не меняется, а обновление завязано именно на неё: забыли поднять — клиенты просто не увидят новую сборку, молча.
@@ -278,7 +302,6 @@ npm run dist:win
 **4.** Положить их на сервер:
 
 ```bash
-ssh mirachat-prod 'sudo mkdir -p /var/www/miraschat/updates && sudo chown gri /var/www/miraschat/updates'
 scp "desktop/release/MirasChat Setup X.Y.Z.exe" "desktop/release/latest.yml" "desktop/release/MirasChat Setup X.Y.Z.exe.blockmap" mirachat-prod:/var/www/miraschat/updates/
 ```
 
@@ -290,7 +313,7 @@ scp "desktop/release/MirasChat Setup X.Y.Z.exe" "desktop/release/latest.yml" "de
 curl -s https://cagrizzz.ru/miraschat/updates/latest.yml
 ```
 
-Должен вернуться YAML с номером версии, а не HTML страницы приложения. Если пришёл HTML — nginx не нашёл файл и отдал SPA-фолбэк: проверьте путь и права.
+Должен вернуться YAML с номером версии, а не HTML страницы приложения. Пришёл HTML — значит, отсутствует блок `location /miraschat/updates/` из раздела «Настройка nginx» выше, и запрос ушёл в SPA-фолбэк. Проверять стоит именно тело ответа: код в обоих случаях 200, по нему подмену не видно.
 
 ### Про подпись
 
