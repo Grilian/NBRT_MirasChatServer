@@ -1,0 +1,332 @@
+/* Стили календаря живут рядом с модулем, а не в общей теме: виджет
+   переиспользуемый, и всё, что ему нужно, должно уезжать вместе с ним.
+   Токены берутся из темы приложения, поэтому светлая и тёмная работают сами. */
+
+/* Цвета событий именами: в базе лежит 'green', а конкретный оттенок выбирает
+   тема — сохранённый светлый зелёный светился бы в тёмной. */
+:root {
+  --cal-blue: #3390EC;
+  --cal-green: #34A853;
+  --cal-red: #E1524F;
+  --cal-orange: #E8890C;
+  --cal-violet: #8E5CD9;
+  --cal-teal: #12A5A5;
+  --cal-graphite: #6B7785;
+  --cal-birthday: #D9518C;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cal-blue: #61A6E8;
+    --cal-green: #5CC275;
+    --cal-red: #EE7C79;
+    --cal-orange: #F0A945;
+    --cal-violet: #A985E8;
+    --cal-teal: #46BFBF;
+    --cal-graphite: #8996A5;
+    --cal-birthday: #E87CAC;
+  }
+}
+
+:root[data-theme="light"] {
+  --cal-blue: #3390EC;
+  --cal-green: #34A853;
+  --cal-red: #E1524F;
+  --cal-orange: #E8890C;
+  --cal-violet: #8E5CD9;
+  --cal-teal: #12A5A5;
+  --cal-graphite: #6B7785;
+  --cal-birthday: #D9518C;
+}
+
+:root[data-theme="dark"] {
+  --cal-blue: #61A6E8;
+  --cal-green: #5CC275;
+  --cal-red: #EE7C79;
+  --cal-orange: #F0A945;
+  --cal-violet: #A985E8;
+  --cal-teal: #46BFBF;
+  --cal-graphite: #8996A5;
+  --cal-birthday: #E87CAC;
+}
+
+.cal-color-blue { --cal-ink: var(--cal-blue); }
+.cal-color-green { --cal-ink: var(--cal-green); }
+.cal-color-red { --cal-ink: var(--cal-red); }
+.cal-color-orange { --cal-ink: var(--cal-orange); }
+.cal-color-violet { --cal-ink: var(--cal-violet); }
+.cal-color-teal { --cal-ink: var(--cal-teal); }
+.cal-color-graphite { --cal-ink: var(--cal-graphite); }
+.cal-color-birthday { --cal-ink: var(--cal-birthday); }
+
+/* ---- Каркас ---- */
+.cal-root { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--paper); }
+
+.cal-toolbar {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--sidebar);
+}
+.cal-toolbar .back-btn { display: none; }
+.cal-today {
+  border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink);
+  border-radius: var(--radius-pill); padding: 6px 14px; font-size: 13.5px; cursor: pointer;
+}
+.cal-today:hover { background: var(--row-hover); }
+.cal-nav { display: flex; gap: 2px; }
+.cal-heading { flex: 1; margin: 0; font: 600 17px/1.2 var(--font-display); min-width: 0; }
+.cal-views { display: flex; gap: 2px; background: var(--paper-sunken); border-radius: var(--radius-pill); padding: 3px; }
+.cal-view {
+  border: none; background: transparent; color: var(--ink-muted); cursor: pointer;
+  border-radius: var(--radius-pill); padding: 5px 12px; font-size: 13px;
+}
+.cal-view:hover { color: var(--ink); }
+.cal-view.is-active { background: var(--paper-raised); color: var(--ink); box-shadow: var(--shadow-sm); }
+.cal-create { width: auto; display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; }
+.cal-error { margin: 10px 16px 0; }
+
+.cal-body { flex: 1; min-height: 0; display: flex; }
+.cal-side {
+  flex: none; width: 232px; padding: 14px; border-right: 1px solid var(--line);
+  overflow-y: auto; background: var(--sidebar);
+}
+.cal-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* Во время загрузки сетка гаснет, но остаётся на месте: подменять её спиннером
+   значит терять контекст при каждом листании месяца. */
+.cal-main.is-loading { opacity: .55; transition: opacity var(--ease); }
+
+/* ---- Мини-месяц ---- */
+.cal-mini { margin-bottom: 18px; }
+.cal-mini-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cal-mini-title { font: 600 13.5px/1 var(--font-display); }
+.cal-mini-nav {
+  border: none; background: transparent; color: var(--ink-muted); cursor: pointer;
+  width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+.cal-mini-nav:hover { background: var(--row-hover); color: var(--ink); }
+.cal-mini-weekdays, .cal-mini-row { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-mini-weekdays span { text-align: center; font-size: 10.5px; color: var(--ink-faint); padding: 3px 0; }
+.cal-mini-row.is-current-week { background: var(--row-hover); border-radius: var(--radius-sm); }
+.cal-mini-day {
+  border: none; background: transparent; color: var(--ink); cursor: pointer;
+  aspect-ratio: 1; border-radius: 50%; font-size: 12px; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.cal-mini-day:hover { background: var(--paper-sunken); }
+.cal-mini-day.is-outside { color: var(--ink-faint); }
+.cal-mini-day.is-today { color: var(--accent); font-weight: 700; }
+.cal-mini-day.is-selected { background: var(--accent); color: var(--accent-ink); }
+.cal-mini-day.is-marked::after {
+  content: ''; position: absolute; bottom: 3px; width: 3px; height: 3px;
+  border-radius: 50%; background: currentColor; opacity: .6;
+}
+
+/* ---- Слои ---- */
+.cal-layers-title { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+.cal-layer { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13.5px; cursor: pointer; }
+.cal-layer input { accent-color: var(--accent); }
+.cal-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cal-ink, var(--accent)); flex: none; }
+
+/* ---- Месяц ---- */
+.cal-month { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cal-month-head { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--line); }
+.cal-month-weekday { text-align: center; padding: 7px 0; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); }
+.cal-month-weekday.is-weekend { color: var(--ink-faint); }
+.cal-month-grid { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cal-month-row { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(7, 1fr); }
+/* Текущая неделя выделена целиком: сегодняшний день бывает не виден, а
+   понимание «где я» нужно всегда. */
+.cal-month-row.is-current-week { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.cal-month-cell {
+  min-width: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; overflow: hidden;
+}
+.cal-month-cell:last-child { border-right: none; }
+.cal-month-cell.is-outside { background: color-mix(in srgb, var(--paper-sunken) 55%, transparent); }
+.cal-month-cell.is-outside .cal-month-daynum { color: var(--ink-faint); }
+.cal-month-cell.is-weekend .cal-month-daynum { color: var(--ink-muted); }
+.cal-month-daynum {
+  align-self: flex-start; border: none; background: transparent; color: var(--ink); cursor: pointer;
+  min-width: 23px; height: 23px; border-radius: 50%; font-size: 12.5px; font-weight: 500;
+}
+.cal-month-daynum:hover { background: var(--row-hover); }
+.cal-month-cell.is-today .cal-month-daynum { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cal-month-items { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+
+/* ---- Плашка события ---- */
+.cal-chip {
+  display: flex; align-items: center; gap: 5px; width: 100%; text-align: left;
+  border: none; background: transparent; cursor: pointer; padding: 2px 5px;
+  border-radius: 4px; font-size: 12px; color: var(--ink); min-width: 0;
+}
+.cal-chip:hover { background: var(--row-hover); }
+.cal-chip-time { color: var(--ink-muted); font-variant-numeric: tabular-nums; flex: none; }
+.cal-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-chip::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--cal-ink, var(--accent));
+}
+/* На весь день — заливка, а не точка: такое событие относится к целым суткам,
+   и полоса читается как «этот день занят», а не «в этот момент». */
+.cal-chip.is-allday {
+  background: color-mix(in srgb, var(--cal-ink) 16%, transparent);
+  color: var(--cal-ink); font-weight: 500;
+}
+.cal-chip.is-allday::before { display: none; }
+.cal-chip.is-allday:hover { background: color-mix(in srgb, var(--cal-ink) 26%, transparent); }
+.cal-chip.is-done .cal-chip-title { text-decoration: line-through; opacity: .6; }
+.cal-chip-more {
+  border: none; background: transparent; color: var(--ink-muted); cursor: pointer;
+  font-size: 11.5px; text-align: left; padding: 1px 5px; border-radius: 4px;
+}
+.cal-chip-more:hover { background: var(--row-hover); color: var(--ink); }
+
+/* ---- Сетка времени (неделя и день) ---- */
+.cal-grid { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cal-grid-gutter { flex: none; width: 52px; }
+.cal-grid-head { display: flex; border-bottom: 1px solid var(--line); }
+.cal-grid-daylabel {
+  flex: 1; min-width: 0; text-align: center; padding: 6px 0 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+}
+.cal-grid-weekday { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); }
+.cal-grid-daylabel.is-weekend .cal-grid-weekday { color: var(--ink-faint); }
+.cal-grid-daynum {
+  font: 600 17px/1.6 var(--font-display); min-width: 30px; height: 30px; border-radius: 50%;
+}
+.cal-grid-daylabel.is-today .cal-grid-daynum { background: var(--accent); color: var(--accent-ink); }
+
+.cal-grid-allday { display: flex; border-bottom: 1px solid var(--line); max-height: 92px; overflow-y: auto; }
+.cal-grid-allday-label { font-size: 10.5px; color: var(--ink-faint); padding: 6px 6px 0; text-align: right; }
+.cal-grid-allday-cell { flex: 1; min-width: 0; padding: 4px; display: flex; flex-direction: column; gap: 2px; border-left: 1px solid var(--line); }
+
+.cal-grid-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.cal-grid-body { display: flex; position: relative; }
+.cal-grid-hours { position: relative; }
+.cal-grid-hour { position: relative; }
+/* Подпись часа сдвинута вверх на половину строки, чтобы стоять ровно на
+   линии часа, а не под ней. */
+.cal-grid-hour span {
+  position: absolute; top: -7px; right: 8px; font-size: 10.5px;
+  color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
+.cal-grid-column { flex: 1; min-width: 0; position: relative; border-left: 1px solid var(--line); cursor: pointer; }
+.cal-grid-column.is-weekend { background: color-mix(in srgb, var(--paper-sunken) 40%, transparent); }
+.cal-grid-slot { border-bottom: 1px solid var(--line); }
+
+.cal-event {
+  position: absolute; overflow: hidden; text-align: left; cursor: pointer;
+  border: none; border-left: 3px solid var(--cal-ink); border-radius: 4px;
+  background: color-mix(in srgb, var(--cal-ink) 18%, var(--paper));
+  color: var(--ink); padding: 2px 5px; font-size: 11.5px; line-height: 1.25;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.cal-event:hover { background: color-mix(in srgb, var(--cal-ink) 30%, var(--paper)); }
+.cal-event-time { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.cal-event-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.cal-event.is-done .cal-event-title { text-decoration: line-through; opacity: .65; }
+
+.cal-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--unread); z-index: 2; pointer-events: none; }
+.cal-now-dot { position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--unread); }
+
+/* ---- Расписание ---- */
+.cal-agenda { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 32px; max-width: 720px; }
+.cal-agenda-day { padding: 12px 0 4px; border-bottom: 1px solid var(--line); }
+.cal-agenda-caption { margin: 0 0 8px; font: 600 13px/1 var(--font-display); color: var(--ink-muted); }
+.cal-agenda-day.is-today .cal-agenda-caption { color: var(--accent); }
+.cal-agenda-items { display: flex; flex-direction: column; }
+.cal-agenda-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; min-width: 0; }
+.cal-agenda-time { flex: none; width: 68px; font-size: 12.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.cal-agenda-title {
+  flex: 1; min-width: 0; text-align: left; border: none; background: transparent; cursor: pointer;
+  color: var(--ink); font-size: 14px; padding: 2px 6px; border-radius: 5px;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.cal-agenda-title:hover { background: var(--row-hover); }
+.cal-agenda-place { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-agenda-row.is-done .cal-agenda-title { text-decoration: line-through; color: var(--ink-faint); }
+.cal-check {
+  flex: none; width: 17px; height: 17px; border-radius: 50%; cursor: pointer;
+  border: 1.5px solid var(--ink-faint); background: transparent; color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.cal-check:hover { border-color: var(--accent); }
+.cal-check.is-checked { background: var(--accent); border-color: var(--accent); }
+
+.cal-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--ink-muted); font-size: 14px; }
+
+/* ---- Диалог ---- */
+.cal-dialog { max-width: 480px; max-height: 88vh; }
+.cal-dialog-heading { flex: 1; font: 600 15.5px/1 var(--font-display); padding-left: 4px; }
+.cal-dialog-body { overflow-y: auto; padding: 16px 18px 20px; }
+.cal-dialog-types { display: flex; gap: 4px; background: var(--paper-sunken); border-radius: var(--radius-pill); padding: 3px; margin-bottom: 14px; }
+.cal-type { flex: 1; border: none; background: transparent; color: var(--ink-muted); cursor: pointer; border-radius: var(--radius-pill); padding: 6px; font-size: 13px; }
+.cal-type.is-active { background: var(--paper-raised); color: var(--ink); box-shadow: var(--shadow-sm); }
+.cal-dialog-check { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 13.5px; cursor: pointer; }
+.cal-dialog-check input { accent-color: var(--accent); }
+.cal-dialog-when { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cal-dialog-datetime { display: flex; gap: 6px; }
+.cal-dialog-repeat { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cal-dialog-inline { font-size: 13px; color: var(--ink-muted); }
+.cal-dialog-interval { width: 58px; }
+.cal-dialog-body input, .cal-dialog-body select, .cal-dialog-body textarea {
+  border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink);
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13.5px; width: 100%;
+}
+.cal-dialog-body input[type="checkbox"] { width: auto; }
+.cal-dialog-body textarea { resize: vertical; }
+.cal-dialog-body input:focus, .cal-dialog-body select:focus, .cal-dialog-body textarea:focus {
+  border-color: var(--accent); outline: none; box-shadow: 0 0 0 1px var(--accent);
+}
+.cal-dialog-colors { display: flex; gap: 7px; flex-wrap: wrap; }
+.cal-swatch {
+  width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+  background: var(--cal-ink); border: 2px solid transparent;
+}
+.cal-swatch.is-active { border-color: var(--ink); box-shadow: 0 0 0 2px var(--paper-raised) inset; }
+.cal-dialog-guests { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
+.cal-guest-chip {
+  display: inline-flex; align-items: center; gap: 5px; border: none; cursor: pointer;
+  background: var(--paper-sunken); color: var(--ink); border-radius: var(--radius-pill);
+  padding: 4px 9px; font-size: 12.5px;
+}
+.cal-guest-chip:hover { background: var(--row-hover); }
+.cal-dialog-suggest { margin-top: 6px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.cal-suggest-row { border: none; background: transparent; color: var(--ink); cursor: pointer; text-align: left; padding: 7px 10px; font-size: 13px; }
+.cal-suggest-row:hover { background: var(--row-hover); }
+.cal-suggest-row.is-picked { color: var(--accent); font-weight: 600; }
+.cal-dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.cal-dialog-actions .btn-primary { width: auto; padding: 9px 22px; }
+.cal-dialog-delete { border: none; background: transparent; color: var(--unread); cursor: pointer; font-size: 13.5px; padding: 9px 12px; border-radius: var(--radius-sm); margin-right: auto; }
+.cal-dialog-delete:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
+
+/* ---- Карточка просмотра ---- */
+.cal-details { max-width: 400px; }
+.cal-details-body { padding: 14px 20px 22px; }
+.cal-details-title { font: 600 17px/1.3 var(--font-display); margin-bottom: 4px; padding-left: 11px; border-left: 4px solid var(--cal-ink); }
+.cal-details-when { font-size: 13.5px; color: var(--ink-muted); margin-bottom: 12px; padding-left: 15px; }
+.cal-details-row { font-size: 13.5px; color: var(--ink-muted); margin-bottom: 6px; }
+.cal-details-note { font-size: 13.5px; margin: 10px 0 0; white-space: pre-wrap; }
+.cal-details-actions { display: flex; gap: 10px; margin-top: 18px; }
+.cal-details-actions .btn-primary { width: auto; padding: 9px 20px; }
+
+/* ---- Узкий экран ---- */
+@media (max-width: 900px) {
+  .cal-side { display: none; }
+}
+
+@media (max-width: 760px) {
+  .cal-toolbar { flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
+  .cal-toolbar .back-btn { display: inline-flex; }
+  .cal-heading { order: -1; flex-basis: 100%; font-size: 16px; }
+  .cal-views { order: 1; flex: 1; justify-content: center; }
+  .cal-create span { display: none; }
+  .cal-create { padding: 8px 12px; }
+  /* Плашки в месяце сжимаются до цветных полосок: подписи всё равно не
+     читаются в клетке шириной в палец, а занятость дня видно. */
+  .cal-month-cell { padding: 2px; }
+  .cal-chip { font-size: 10.5px; padding: 1px 3px; gap: 3px; }
+  .cal-chip-time { display: none; }
+  .cal-grid-gutter { width: 38px; }
+  .cal-agenda { padding: 8px 12px 32px; }
+  .cal-dialog-when { grid-template-columns: 1fr; }
+}

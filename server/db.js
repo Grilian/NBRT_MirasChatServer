@@ -99,6 +99,67 @@ db.exec(`
     value TEXT,
     updated_at INTEGER
   );
+
+  -- События календаря. Время — unix-миллисекунды, как и остальные наши метки:
+  -- у SQLite CURRENT_TIMESTAMP нет зоны в строке, и для календаря такой сдвиг
+  -- означал бы встречу не в тот день.
+  --
+  -- scope_kind/scope_id заложены сразу, хотя пока используется только
+  -- 'personal': тот же календарь предстоит показывать внутри пространств, и
+  -- добавлять разделение задним числом пришлось бы вместе с миграцией уже
+  -- накопленных событий.
+  CREATE TABLE IF NOT EXISTS calendar_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id INTEGER NOT NULL,
+    scope_kind TEXT NOT NULL DEFAULT 'personal',
+    scope_id INTEGER,
+    title TEXT NOT NULL,
+    description TEXT,
+    location TEXT,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    all_day INTEGER NOT NULL DEFAULT 0,
+    color TEXT NOT NULL DEFAULT 'blue',
+    -- JSON вида {"freq":"weekly","interval":1,"until":null}. Разворачивается
+    -- на сервере при выборке диапазона (см. services/calendarEvents.js).
+    recurrence TEXT,
+    -- Задача отличается от события тем, что её можно выполнить, а не тем, как
+    -- она хранится: у обеих есть момент и место в сетке. Отметка о выполнении
+    -- лежит отдельно (calendar_task_completions) — у повторяющейся задачи
+    -- выполнен конкретный вторник, а не вся серия.
+    is_task INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id)
+  );
+
+  -- Участники события. Отдельной таблицей, а не списком id в колонке: по ней
+  -- нужно искать («какие встречи у меня сегодня»), и ответы участников
+  -- хранятся тут же.
+  CREATE TABLE IF NOT EXISTS calendar_event_guests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    response TEXT NOT NULL DEFAULT 'pending',
+    UNIQUE(event_id, user_id),
+    FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  -- Выполнение задачи — по вхождению, а не по событию: у повторяющейся задачи
+  -- «сдать отчёт каждый понедельник» галочка закрывает один понедельник.
+  CREATE TABLE IF NOT EXISTS calendar_task_completions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    occurrence_start INTEGER NOT NULL,
+    completed_at INTEGER NOT NULL,
+    UNIQUE(event_id, occurrence_start),
+    FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_calendar_owner_range ON calendar_events(owner_id, starts_at);
+  CREATE INDEX IF NOT EXISTS idx_calendar_scope ON calendar_events(scope_kind, scope_id, starts_at);
+  CREATE INDEX IF NOT EXISTS idx_calendar_guests_user ON calendar_event_guests(user_id);
 `);
 
 // Миграция: добавляем колонку status, если БД старая
