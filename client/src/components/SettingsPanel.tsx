@@ -34,6 +34,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
+  const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
   const [notify, setNotify] = useState<NotificationPrefs>(getNotificationPrefs);
   const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
 
@@ -64,6 +65,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     if (isElectron) {
       window.electronAPI!.getAutoLaunch().then(setAutoLaunch);
     }
+  }, []);
+
+  // Состояние автообновления приходит из main-процесса. Проверку запускаем и
+  // при открытии настроек: человек, который сюда зашёл, скорее всего как раз
+  // и хочет узнать, есть ли новая версия, а фоновая проверка идёт раз в
+  // несколько часов.
+  useEffect(() => {
+    if (!isElectron) return;
+    const unsubscribe = window.electronAPI!.onUpdateState(setUpdate);
+    window.electronAPI!.checkForUpdate();
+    return unsubscribe;
   }, []);
 
   const handleAutoLaunchChange = (checked: boolean) => {
@@ -201,6 +213,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <span className="switch-track"><span className="switch-thumb" /></span>
                 </label>
               </div>
+
+              {update.status === 'available' && (
+                <button type="button" className="settings-row" onClick={() => window.electronAPI!.downloadUpdate()}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                  <span className="label">Доступно обновление {update.version}</span>
+                  <span className="value is-action">Скачать</span>
+                </button>
+              )}
+
+              {update.status === 'downloading' && (
+                <div className="settings-row static">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                  <span className="label">Загрузка обновления</span>
+                  <span className="value">{update.percent}%</span>
+                </div>
+              )}
+
+              {update.status === 'downloaded' && (
+                <button type="button" className="settings-row" onClick={() => window.electronAPI!.installUpdate()}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
+                  <span className="label">Обновление {update.version} готово</span>
+                  <span className="value is-action">Перезапустить</span>
+                </button>
+              )}
             </div>
           </>
         )}

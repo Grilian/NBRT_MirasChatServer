@@ -20,5 +20,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event, isFocused) => callback(isFocused);
     ipcRenderer.on('window:focus-changed', listener);
     return () => ipcRenderer.removeListener('window:focus-changed', listener);
+  },
+
+  // Автообновление. Скачивание и установка запускаются только явным действием
+  // пользователя — приложение не должно закрыться посреди разговора.
+  checkForUpdate: () => ipcRenderer.send('update:check'),
+  downloadUpdate: () => ipcRenderer.send('update:download'),
+  installUpdate: () => ipcRenderer.send('update:install'),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('update:state', listener);
+    return () => ipcRenderer.removeListener('update:state', listener);
   }
 });

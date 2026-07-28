@@ -15,6 +15,17 @@ declare global {
       focusWindow: () => void;
       flashWindow: () => void;
       onFocusChange: (callback: (isFocused: boolean) => void) => () => void;
+      checkForUpdate: () => void;
+      downloadUpdate: () => void;
+      installUpdate: () => void;
+      onUpdateState: (callback: (state: UpdateState) => void) => () => void;
     };
   }
+
+  type UpdateState =
+    | { status: 'idle' }
+    | { status: 'available'; version: string }
+    | { status: 'downloading'; percent: number }
+    | { status: 'downloaded'; version: string }
+    | { status: 'error'; message: string };
 }

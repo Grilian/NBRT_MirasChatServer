@@ -887,3 +887,5 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .user-info-admin { width: 100%; margin-top: 4px; text-align: left; }
 .user-info-admin-loading { font-size: 13px; color: var(--ink-faint); padding: 8px 0; }
+
+.settings-row .value.is-action { color: var(--accent); font-weight: 600; }
