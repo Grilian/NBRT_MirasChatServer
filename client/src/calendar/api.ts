@@ -49,6 +49,23 @@ export async function deleteEvent(id: number): Promise<void> {
   await api.delete(`/calendar/events/${id}`);
 }
 
+/**
+ * Правка одного вхождения серии: перенести или переименовать только его.
+ * occurrenceStart — место вхождения в серии, а не новое время.
+ */
+export async function updateOccurrence(
+  id: number,
+  occurrenceStart: number,
+  draft: EventDraft
+): Promise<void> {
+  await api.put(`/calendar/events/${id}/occurrence`, { ...draft, occurrence_start: occurrenceStart });
+}
+
+/** Отменить одно вхождение, оставив серию. */
+export async function deleteOccurrence(id: number, occurrenceStart: number): Promise<void> {
+  await api.delete(`/calendar/events/${id}/occurrence`, { params: { occurrence_start: occurrenceStart } });
+}
+
 export async function setTaskCompleted(
   eventId: number,
   occurrenceStart: number,

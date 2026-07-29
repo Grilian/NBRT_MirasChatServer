@@ -24,6 +24,7 @@ const departmentsRoutes = require('./routes/departments');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { notifyNewMessage } = require('./services/push');
+const calendarScheduler = require('./services/calendarScheduler');
 
 const db = require('./db');
 
@@ -476,4 +477,10 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3010;
-server.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Сервер запущен на порту ${PORT}`);
+  // Планировщик после старта: он ходит в базу и рассылает через io, а оба
+  // должны быть готовы. Состояния в памяти он не держит, так что перезапуск
+  // сервера ничего не теряет.
+  calendarScheduler.start(io);
+});

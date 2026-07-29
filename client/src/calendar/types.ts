@@ -60,6 +60,10 @@ export interface CalendarOccurrence {
   is_task: boolean;
   completed: boolean;
   recurring: boolean;
+  /** Вхождение серии, отличающееся от неё: перенесено или переименовано. */
+  is_exception: boolean;
+  /** За сколько минут напомнить. Пусто — не напоминать. */
+  reminders: number[];
   recurrence: Recurrence | null;
   scope_kind: CalendarScopeKind;
   scope_id: number | null;
@@ -92,9 +96,31 @@ export interface EventDraft {
   recurrence: Recurrence | null;
   is_task: boolean;
   guest_ids: number[];
+  reminders: number[];
   scope_kind: CalendarScopeKind;
   scope_id: number | null;
 }
+
+/**
+ * Что именно правим у повторяющегося события.
+ *
+ * «Только это» заводит исключение в серии, «вся серия» переписывает правило.
+ * У неповторяющегося выбора нет, и спрашивать не о чем.
+ */
+export type SeriesScope = 'occurrence' | 'series';
+
+export const REMINDER_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'В момент начала' },
+  { value: 5, label: 'За 5 минут' },
+  { value: 10, label: 'За 10 минут' },
+  { value: 15, label: 'За 15 минут' },
+  { value: 30, label: 'За 30 минут' },
+  { value: 60, label: 'За час' },
+  { value: 120, label: 'За 2 часа' },
+  { value: 1440, label: 'За день' },
+  { value: 2880, label: 'За 2 дня' },
+  { value: 10080, label: 'За неделю' },
+];
 
 /**
  * Слой календаря — то, что человек включает и выключает в боковой панели.

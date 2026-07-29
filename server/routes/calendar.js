@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { listEvents, listVisibleEvents, listContactBirthdays } = require('../services/calendarEvents');
+const { notifyInvited } = require('../services/calendarNotify');
 
 const router = express.Router();
 
@@ -10,6 +11,11 @@ const router = express.Router();
 // раскрашивает сама (см. --cal-* в theme.css).
 const COLORS = new Set(['blue', 'green', 'red', 'orange', 'violet', 'teal', 'graphite']);
 const FREQUENCIES = new Set(['daily', 'weekly', 'monthly', 'yearly']);
+
+// Напоминания фиксированным набором: произвольное число минут из запроса
+// означало бы «за 100000 минут», а планировщик ищет вхождения в окне восьми
+// суток и такое напоминание просто никогда не сработало бы.
+const REMINDER_CHOICES = new Set([0, 5, 10, 15, 30, 60, 120, 1440, 2880, 10080]);
 
 // Запрошенный диапазон ограничиваем: сетка месяца просит ~6 недель, год —
 // 12 месяцев. Всё, что больше, — это либо ошибка в клиенте, либо попытка
@@ -91,7 +97,27 @@ function parseEventBody(body) {
     guestIds: Array.isArray(body.guest_ids)
       ? [...new Set(body.guest_ids.map(Number).filter(Number.isFinite))]
       : [],
+    reminders: Array.isArray(body.reminders)
+      ? [...new Set(body.reminders.map(Number).filter((m) => REMINDER_CHOICES.has(m)))]
+      : [],
   };
+}
+
+function replaceReminders(eventId, reminders) {
+  db.prepare('DELETE FROM calendar_event_reminders WHERE event_id = ?').run(eventId);
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO calendar_event_reminders (event_id, minutes_before) VALUES (?, ?)'
+  );
+  for (const minutes of reminders) insert.run(eventId, minutes);
+}
+
+/** Кого добавили в участники по сравнению с тем, что было. */
+function newlyInvited(eventId, guestIds) {
+  const existing = new Set(
+    db.prepare('SELECT user_id FROM calendar_event_guests WHERE event_id = ?')
+      .all(eventId).map((row) => row.user_id)
+  );
+  return guestIds.filter((id) => !existing.has(id));
 }
 
 /**
@@ -198,8 +224,16 @@ router.post('/events', verifyToken, (req, res) => {
       event.recurrence, event.is_task, now, now
     );
 
-    replaceGuests(result.lastInsertRowid, req.userId, parsed.guestIds);
-    res.status(201).json({ id: result.lastInsertRowid });
+    const eventId = result.lastInsertRowid;
+    replaceGuests(eventId, req.userId, parsed.guestIds);
+    replaceReminders(eventId, parsed.reminders);
+
+    // Приглашение, о котором не сказали, — это событие, о котором человек
+    // узнает, только если сам заглянет в календарь.
+    const created = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(eventId);
+    notifyInvited(req.app.get('io'), created, parsed.guestIds.filter((id) => id !== req.userId));
+
+    res.status(201).json({ id: eventId });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -232,9 +266,19 @@ router.put('/events/:id', verifyToken, (req, res) => {
     );
 
     // Правка времени или правила смещает вхождения — старые отметки о
-    // выполнении привязаны к моментам, которых больше нет.
+    // выполнении и правки отдельных вхождений привязаны к моментам, которых
+    // больше нет.
     db.prepare('DELETE FROM calendar_task_completions WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM calendar_event_exceptions WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM calendar_reminders_sent WHERE event_id = ?').run(id);
+
+    // Считаем новичков до перезаписи списка, иначе все окажутся «новыми».
+    const invited = newlyInvited(id, parsed.guestIds).filter((guestId) => guestId !== req.userId);
     replaceGuests(id, req.userId, parsed.guestIds);
+    replaceReminders(id, parsed.reminders);
+
+    const saved = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(id);
+    notifyInvited(req.app.get('io'), saved, invited);
 
     res.json({ ok: true });
   } catch (e) {
@@ -251,6 +295,9 @@ router.delete('/events/:id', verifyToken, (req, res) => {
 
     db.prepare('DELETE FROM calendar_task_completions WHERE event_id = ?').run(id);
     db.prepare('DELETE FROM calendar_event_guests WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM calendar_event_reminders WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM calendar_reminders_sent WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM calendar_event_exceptions WHERE event_id = ?').run(id);
     db.prepare('DELETE FROM calendar_events WHERE id = ?').run(id);
 
     res.json({ ok: true });
@@ -304,6 +351,92 @@ router.post('/events/:id/response', verifyToken, (req, res) => {
     ).run(response, id, req.userId);
 
     if (result.changes === 0) return res.status(404).json({ error: 'Приглашение не найдено' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== Одно вхождение серии =====
+//
+// Правка и удаление выше действуют на всю серию. Эти две ручки — про «только
+// это событие»: перенести один вторник, не трогая остальные, или отменить
+// одну планёрку. Ключ — место вхождения в серии (occurrence_start), а не его
+// новое время: иначе повторный перенос завёл бы второе исключение вместо
+// правки первого.
+
+function parseOccurrenceStart(value) {
+  const start = Number(value);
+  return Number.isFinite(start) ? start : null;
+}
+
+router.put('/events/:id/occurrence', verifyToken, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const event = editableEvent(id, req.userId);
+    if (!event) return res.status(404).json({ error: 'Событие не найдено' });
+    if (!event.recurrence) {
+      return res.status(400).json({ error: 'Это не повторяющееся событие' });
+    }
+
+    const occurrenceStart = parseOccurrenceStart(req.body.occurrence_start);
+    if (occurrenceStart === null) return res.status(400).json({ error: 'Некорректное вхождение' });
+
+    const parsed = parseEventBody(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const value = parsed.value;
+    db.prepare(`
+      INSERT INTO calendar_event_exceptions
+        (event_id, occurrence_start, kind, title, description, location, starts_at, ends_at, all_day, color)
+      VALUES (?, ?, 'override', ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(event_id, occurrence_start) DO UPDATE SET
+        kind = 'override',
+        title = excluded.title,
+        description = excluded.description,
+        location = excluded.location,
+        starts_at = excluded.starts_at,
+        ends_at = excluded.ends_at,
+        all_day = excluded.all_day,
+        color = excluded.color
+    `).run(
+      id, occurrenceStart, value.title, value.description, value.location,
+      value.starts_at, value.ends_at, value.all_day, value.color
+    );
+
+    // Время вхождения изменилось — напоминания по нему нужно отправить заново.
+    db.prepare('DELETE FROM calendar_reminders_sent WHERE event_id = ? AND occurrence_start = ?')
+      .run(id, occurrenceStart);
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/events/:id/occurrence', verifyToken, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const event = editableEvent(id, req.userId);
+    if (!event) return res.status(404).json({ error: 'Событие не найдено' });
+    if (!event.recurrence) {
+      return res.status(400).json({ error: 'Это не повторяющееся событие' });
+    }
+
+    const occurrenceStart = parseOccurrenceStart(req.query.occurrence_start);
+    if (occurrenceStart === null) return res.status(400).json({ error: 'Некорректное вхождение' });
+
+    db.prepare(`
+      INSERT INTO calendar_event_exceptions (event_id, occurrence_start, kind)
+      VALUES (?, ?, 'skip')
+      ON CONFLICT(event_id, occurrence_start) DO UPDATE SET
+        kind = 'skip', title = NULL, description = NULL, location = NULL,
+        starts_at = NULL, ends_at = NULL, all_day = NULL, color = NULL
+    `).run(id, occurrenceStart);
+
+    db.prepare('DELETE FROM calendar_task_completions WHERE event_id = ? AND occurrence_start = ?')
+      .run(id, occurrenceStart);
+
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

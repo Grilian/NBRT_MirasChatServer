@@ -128,4 +128,54 @@ async function notifyNewMessage(userId, { chatId, messageId, senderName }) {
   }
 }
 
-module.exports = { notifyNewMessage, isEnabled };
+
+/**
+ * Уведомление календаря — приглашение или напоминание.
+ *
+ * Отдельно от notifyNewMessage: у сообщений своя группировка по чату и свой
+ * заголовок с именем отправителя, а тут в заголовке само событие. Общее у них
+ * только то, как чистятся протухшие токены.
+ */
+async function notifyCalendar(userId, { type, title, body, eventId }) {
+  if (!messaging) return;
+
+  try {
+    const tokens = db
+      .prepare('SELECT token FROM device_tokens WHERE user_id = ?')
+      .all(userId)
+      .map((row) => row.token);
+
+    if (!tokens.length) return;
+
+    const response = await messaging.sendEachForMulticast({
+      tokens,
+      data: {
+        type: String(type),
+        eventId: String(eventId)
+      },
+      notification: { title, body },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: CHANNEL_ID,
+          icon: 'ic_launcher_foreground',
+          // Своя стопка на событие: напоминание не должно смешиваться
+          // с перепиской в одной группе уведомлений.
+          tag: 'calendar_' + eventId
+        }
+      }
+    });
+
+    const dead = [];
+    response.responses.forEach((r, i) => {
+      if (!r.success && r.error && DEAD_TOKEN_CODES.includes(r.error.code)) {
+        dead.push(tokens[i]);
+      }
+    });
+    dropTokens(dead);
+  } catch (e) {
+    console.error('[push] ошибка отправки уведомления календаря:', e.message);
+  }
+}
+
+module.exports = { notifyNewMessage, notifyCalendar, isEnabled };

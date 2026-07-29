@@ -58,26 +58,54 @@ function shiftDay(dayKey, rule, step) {
   }
 }
 
+// Перенесённое вхождение могло уехать из запрошенного окна или, наоборот,
+// приехать в него снаружи. Поэтому при наличии исключений сетку строим с
+// запасом и отбираем уже по итоговому времени — иначе перенос «на неделю
+// вперёд» просто исчезал бы из виду.
+const EXCEPTION_MARGIN_MS = 60 * 24 * 60 * 60 * 1000;
+
 /**
  * Вхождения события, пересекающиеся с [from, to].
  *
  * Длительность берётся от исходного события и переносится на каждое вхождение:
  * так встреча на полтора часа остаётся полуторачасовой в любой неделе, даже
  * если правило сдвинуло её через границу месяца.
+ *
+ * exceptions — правки отдельных вхождений, по ключу «где вхождение стояло по
+ * правилу». Именно по исходному месту, а не по новому: иначе перенос ломал бы
+ * связь с серией и при следующем переносе завёл бы второе исключение.
  */
-function expandOccurrences(event, from, to) {
+function expandOccurrences(event, from, to, exceptions = null) {
   const duration = Math.max(0, event.ends_at - event.starts_at);
   const rule = parseRecurrence(event.recurrence);
 
+  // Применяем правку и решаем, попадает ли получившееся в окно.
+  const materialize = (slot, start, end) => {
+    const exception = exceptions ? exceptions.get(slot) : undefined;
+    if (exception && exception.kind === 'skip') return null;
+
+    const final = exception && exception.kind === 'override'
+      ? {
+        slot,
+        start: exception.starts_at,
+        end: exception.ends_at,
+        overrides: exception,
+      }
+      : { slot, start, end, overrides: null };
+
+    return final.end >= from && final.start <= to ? final : null;
+  };
+
   if (!rule) {
-    return event.starts_at <= to && event.ends_at >= from
-      ? [{ start: event.starts_at, end: event.ends_at }]
-      : [];
+    const single = materialize(event.starts_at, event.starts_at, event.ends_at);
+    return single ? [single] : [];
   }
 
   const baseDay = moscowDayKey(event.starts_at);
   const minutes = moscowMinutes(event.starts_at);
-  const limit = rule.until === null ? to : Math.min(to, rule.until);
+  const hasExceptions = !!(exceptions && exceptions.size);
+  const scanTo = hasExceptions ? to + EXCEPTION_MARGIN_MS : to;
+  const limit = rule.until === null ? scanTo : Math.min(scanTo, rule.until);
 
   const occurrences = [];
   for (let step = 0; step < MAX_OCCURRENCES; step += 1) {
@@ -87,11 +115,29 @@ function expandOccurrences(event, from, to) {
     const start = moscowInstant(dayKey, minutes);
     if (start > limit) break;
 
-    const end = start + duration;
-    if (end >= from && start <= to) occurrences.push({ start, end });
+    const materialized = materialize(start, start, start + duration);
+    if (materialized) occurrences.push(materialized);
   }
 
   return occurrences;
+}
+
+const exceptionsStatement = db.prepare(
+  'SELECT * FROM calendar_event_exceptions WHERE event_id = ?'
+);
+
+const remindersStatement = db.prepare(
+  'SELECT minutes_before FROM calendar_event_reminders WHERE event_id = ? ORDER BY minutes_before'
+);
+
+function remindersFor(eventId) {
+  return remindersStatement.all(eventId).map((row) => row.minutes_before);
+}
+
+function exceptionsFor(eventId) {
+  const map = new Map();
+  for (const row of exceptionsStatement.all(eventId)) map.set(row.occurrence_start, row);
+  return map;
 }
 
 const guestsStatement = db.prepare(`
@@ -120,22 +166,35 @@ function serializeOccurrence(event, occurrence, userId, completions, canEditGlob
     avatar_path: g.avatar_path,
   }));
 
+  // Правка одного вхождения перекрывает поля серии. Пустое поле в исключении
+  // означает «как у серии», а не «пусто»: перенос времени не должен стирать
+  // название.
+  const patch = occurrence.overrides;
+  const pick = (field) => (patch && patch[field] !== null && patch[field] !== undefined
+    ? patch[field]
+    : event[field]);
+
   return {
     // Ключ вхождения, а не события: в сетке их может быть много от одной
     // серии, и React нужен стабильный, различимый id.
-    id: `${event.id}:${occurrence.start}`,
+    id: `${event.id}:${occurrence.slot}`,
     event_id: event.id,
-    occurrence_start: occurrence.start,
-    title: event.title,
-    description: event.description,
-    location: event.location,
+    // Место вхождения в серии, а не его текущее время: по нему привязаны и
+    // отметка о выполнении, и сама правка. После переноса оно не меняется,
+    // иначе следующий перенос завёл бы второе исключение вместо правки первого.
+    occurrence_start: occurrence.slot,
+    title: pick('title'),
+    description: pick('description'),
+    location: pick('location'),
     starts_at: occurrence.start,
     ends_at: occurrence.end,
-    all_day: !!event.all_day,
-    color: event.color,
+    all_day: !!pick('all_day'),
+    color: pick('color'),
     is_task: !!event.is_task,
-    completed: completions.has(occurrence.start),
+    completed: completions.has(occurrence.slot),
     recurring: !!event.recurrence,
+    /** Вхождение серии, отличающееся от неё: перенесено или переименовано. */
+    is_exception: !!patch,
     recurrence: event.recurrence ? JSON.parse(event.recurrence) : null,
     scope_kind: event.scope_kind,
     scope_id: event.scope_id,
@@ -146,6 +205,7 @@ function serializeOccurrence(event, occurrence, userId, completions, canEditGlob
     // «меня позвали» от «я просто вижу общее событие» и предлагает ответить
     // на приглашение там, где отвечать не на что.
     is_guest: guests.some((guest) => guest.user_id === userId),
+    reminders: remindersFor(event.id),
     source: 'calendar',
     guests,
   };
@@ -209,7 +269,8 @@ function buildOccurrences(rows, { userId, from, to, canEditGlobal }) {
     const completions = new Set(
       completionsStatement.all(event.id).map((row) => row.occurrence_start)
     );
-    for (const occurrence of expandOccurrences(event, from, to)) {
+    const exceptions = event.recurrence ? exceptionsFor(event.id) : null;
+    for (const occurrence of expandOccurrences(event, from, to, exceptions)) {
       result.push(serializeOccurrence(event, occurrence, userId, completions, canEditGlobal));
     }
   }
@@ -266,6 +327,8 @@ function listContactBirthdays({ userId, from, to }) {
         is_task: false,
         completed: false,
         recurring: true,
+        is_exception: false,
+        reminders: [],
         recurrence: null,
         scope_kind: 'personal',
         scope_id: null,
@@ -284,6 +347,8 @@ function listContactBirthdays({ userId, from, to }) {
 
 module.exports = {
   expandOccurrences,
+  exceptionsFor,
+  remindersFor,
   listVisibleEvents,
   listEvents,
   listContactBirthdays,

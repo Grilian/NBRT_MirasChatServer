@@ -185,6 +185,51 @@ db.exec(`
     FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
   );
 
+  -- Напоминания о событии: за сколько минут предупредить. Отдельной таблицей,
+  -- а не колонкой, чтобы напоминаний могло быть несколько («за день» и «за
+  -- 10 минут» — обычная пара) без переделки хранения.
+  CREATE TABLE IF NOT EXISTS calendar_event_reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    minutes_before INTEGER NOT NULL,
+    UNIQUE(event_id, minutes_before),
+    FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+  );
+
+  -- Что уже отправили. Без этой таблицы перезапуск сервера или второй тик
+  -- слали бы одно напоминание повторно: планировщик не помнит ничего между
+  -- тиками намеренно, всё состояние — здесь.
+  CREATE TABLE IF NOT EXISTS calendar_reminders_sent (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    occurrence_start INTEGER NOT NULL,
+    minutes_before INTEGER NOT NULL,
+    sent_at INTEGER NOT NULL,
+    UNIQUE(event_id, occurrence_start, minutes_before),
+    FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+  );
+
+  -- Исключение в серии: одно вхождение перенесли или отменили, остальные
+  -- остались как были. Ключ — occurrence_start исходной серии, то есть то
+  -- место, где вхождение стояло по правилу, а не куда его перенесли.
+  CREATE TABLE IF NOT EXISTS calendar_event_exceptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    occurrence_start INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    location TEXT,
+    starts_at INTEGER,
+    ends_at INTEGER,
+    all_day INTEGER,
+    color TEXT,
+    UNIQUE(event_id, occurrence_start),
+    FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_calendar_reminders_event ON calendar_event_reminders(event_id);
+  CREATE INDEX IF NOT EXISTS idx_calendar_exceptions_event ON calendar_event_exceptions(event_id);
   CREATE INDEX IF NOT EXISTS idx_calendar_owner_range ON calendar_events(owner_id, starts_at);
   CREATE INDEX IF NOT EXISTS idx_calendar_scope ON calendar_events(scope_kind, scope_id, starts_at);
   CREATE INDEX IF NOT EXISTS idx_calendar_guests_user ON calendar_event_guests(user_id);

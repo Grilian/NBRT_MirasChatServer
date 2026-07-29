@@ -3,7 +3,10 @@ import {
   DayKey, addDays, addMonths, dayKeyOf, formatClock, formatDayLong, monthShortTitle,
   monthTitle, nextHalfHour, instantOf, todayKey, weekTitle, weekDays,
 } from './dates';
-import { createEvent, deleteEvent, respondToInvite, setTaskCompleted, updateEvent } from './api';
+import {
+  createEvent, deleteEvent, deleteOccurrence, respondToInvite,
+  setTaskCompleted, updateEvent, updateOccurrence,
+} from './api';
 import { useCalendarData } from './useCalendarData';
 import { useCalendarKeys, useStepGestures } from './gestures';
 import AgendaView from './AgendaView';
@@ -11,7 +14,7 @@ import EventDialog from './EventDialog';
 import MiniMonth from './MiniMonth';
 import MonthView from './MonthView';
 import TimeGridView from './TimeGridView';
-import { CalendarOccurrence, CalendarScope, CalendarViewMode, EventDraft } from './types';
+import { CalendarOccurrence, CalendarScope, CalendarViewMode, EventDraft, SeriesScope } from './types';
 import './calendar.css';
 
 interface CalendarWidgetProps {
@@ -132,14 +135,25 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
     }
   };
 
-  const handleSave = async (value: EventDraft, editingId: number | null) => {
-    if (editingId === null) await createEvent(value);
-    else await updateEvent(editingId, value);
+  const handleSave = async (value: EventDraft, editingId: number | null, seriesScope: SeriesScope) => {
+    if (editingId === null) {
+      await createEvent(value);
+    } else if (seriesScope === 'occurrence' && draft?.occurrence) {
+      // Правим одно вхождение: ключом идёт его место в серии, а не новое
+      // время, иначе повторный перенос завёл бы второе исключение.
+      await updateOccurrence(editingId, draft.occurrence.occurrence_start, value);
+    } else {
+      await updateEvent(editingId, value);
+    }
     reload();
   };
 
-  const handleDelete = async (eventId: number) => {
-    await deleteEvent(eventId);
+  const handleDelete = async (eventId: number, seriesScope: SeriesScope) => {
+    if (seriesScope === 'occurrence' && draft?.occurrence) {
+      await deleteOccurrence(eventId, draft.occurrence.occurrence_start);
+    } else {
+      await deleteEvent(eventId);
+    }
     reload();
   };
 

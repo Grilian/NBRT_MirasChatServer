@@ -6,7 +6,7 @@ import {
 } from './dates';
 import {
   CalendarOccurrence, CalendarScope, CalendarScopeKind, EVENT_COLORS, EventColor,
-  EventDraft, RecurrenceFreq,
+  EventDraft, RecurrenceFreq, REMINDER_OPTIONS, SeriesScope,
 } from './types';
 import { colorOfLayer } from './layers';
 
@@ -35,8 +35,8 @@ interface EventDialogProps {
   initialStart: number;
   initialAllDay?: boolean;
   onClose: () => void;
-  onSave: (draft: EventDraft, editingId: number | null) => Promise<void>;
-  onDelete: (eventId: number) => Promise<void>;
+  onSave: (draft: EventDraft, editingId: number | null, seriesScope: SeriesScope) => Promise<void>;
+  onDelete: (eventId: number, seriesScope: SeriesScope) => Promise<void>;
 }
 
 const REPEAT_OPTIONS: { value: RecurrenceFreq | 'none'; label: string }[] = [
@@ -89,6 +89,16 @@ const EventDialog: React.FC<EventDialogProps> = ({
   const [guestIds, setGuestIds] = useState<number[]>(
     editing?.guests.map((guest) => guest.user_id) ?? []
   );
+  // Одно напоминание в интерфейсе, хотя хранение допускает несколько: две
+  // строки «за день» и «за 10 минут» встречаются редко, а выбор из списка
+  // понятнее набора галочек.
+  const [reminder, setReminder] = useState<number | null>(editing?.reminders[0] ?? null);
+
+  // У повторяющегося события правка всегда адресная: либо это вхождение,
+  // либо вся серия. Умолчание — «только это»: перенести одну встречу просят
+  // куда чаще, чем переписать правило, а случайно задеть всю серию неприятнее.
+  const [seriesScope, setSeriesScope] = useState<SeriesScope>('occurrence');
+  const isRecurring = !!editing?.recurring;
 
   const [people, setPeople] = useState<Person[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -119,6 +129,21 @@ const EventDialog: React.FC<EventDialogProps> = ({
     const shiftedEnd = new Date(Date.parse(`${endDay}T00:00:00Z`) + shift);
     setStartDay(value);
     setEndDay(shiftedEnd.toISOString().slice(0, 10));
+  };
+
+  // То же и со временем: перенос встречи с 11:00 на 16:00 не должен требовать
+  // отдельно править конец и упираться в «конец раньше начала». Длительность
+  // сохраняем, при переходе через полночь двигаем и дату конца.
+  const handleStartTimeChange = (value: string) => {
+    if (!value) return;
+    const duration = (instantOf(endDay, minutesFromTimeInput(endTime)))
+      - (instantOf(startDay, minutesFromTimeInput(startTime)));
+    setStartTime(value);
+    if (duration < 0) return;
+
+    const nextEnd = instantOf(startDay, minutesFromTimeInput(value)) + duration;
+    setEndDay(toDateInput(nextEnd));
+    setEndTime(toTimeInput(nextEnd));
   };
 
   // Пока в поиске пусто — предлагаем отделы, не людей. Список сотрудников
@@ -201,6 +226,7 @@ const EventDialog: React.FC<EventDialogProps> = ({
         : { freq, interval: parsedInterval, until: until ? instantOf(until, 24 * 60) : null },
       is_task: isTask,
       guest_ids: guestIds,
+      reminders: reminder === null ? [] : [reminder],
       scope_kind: scopeKind,
       scope_id: scopeKind === 'space' ? scope.id ?? null : null,
     };
@@ -216,7 +242,7 @@ const EventDialog: React.FC<EventDialogProps> = ({
 
     setSaving(true);
     try {
-      await onSave(draft, editing?.event_id ?? null);
+      await onSave(draft, editing?.event_id ?? null, isRecurring ? seriesScope : 'series');
       onClose();
     } catch {
       setError('Не удалось сохранить');
@@ -226,14 +252,16 @@ const EventDialog: React.FC<EventDialogProps> = ({
 
   const handleDelete = async () => {
     if (!editing?.event_id) return;
-    const question = editing.recurring
-      ? 'Удалить всю серию повторяющихся событий?'
+    const question = isRecurring
+      ? (seriesScope === 'occurrence'
+        ? 'Отменить только это событие? Остальные в серии останутся.'
+        : 'Удалить всю серию повторяющихся событий?')
       : 'Удалить событие?';
     if (!window.confirm(question)) return;
 
     setSaving(true);
     try {
-      await onDelete(editing.event_id);
+      await onDelete(editing.event_id, isRecurring ? seriesScope : 'series');
       onClose();
     } catch {
       setError('Не удалось удалить');
@@ -253,6 +281,35 @@ const EventDialog: React.FC<EventDialogProps> = ({
 
         <form className="cal-dialog-body" onSubmit={handleSubmit}>
           {error && <p className="form-error">{error}</p>}
+
+          {/* У повторяющегося события правка всегда адресная. Спрашиваем до
+              полей, а не при сохранении: человек должен видеть, что именно он
+              меняет, пока меняет. */}
+          {isRecurring && (
+            <div className="cal-dialog-series">
+              <div className="cal-dialog-types">
+                <button
+                  type="button"
+                  className={`cal-type${seriesScope === 'occurrence' ? ' is-active' : ''}`}
+                  onClick={() => setSeriesScope('occurrence')}
+                >
+                  Только это событие
+                </button>
+                <button
+                  type="button"
+                  className={`cal-type${seriesScope === 'series' ? ' is-active' : ''}`}
+                  onClick={() => setSeriesScope('series')}
+                >
+                  Вся серия
+                </button>
+              </div>
+              <p className="field-hint">
+                {seriesScope === 'occurrence'
+                  ? 'Изменится только это вхождение, остальные останутся как были.'
+                  : 'Изменится вся серия — время и правило повтора у всех вхождений.'}
+              </p>
+            </div>
+          )}
 
           <div className="field">
             <label htmlFor="cal-title">Название</label>
@@ -327,7 +384,7 @@ const EventDialog: React.FC<EventDialogProps> = ({
                   <input
                     type="time"
                     value={startTime}
-                    onChange={(event) => setStartTime(event.target.value)}
+                    onChange={(event) => handleStartTimeChange(event.target.value)}
                   />
                 )}
               </div>
@@ -389,6 +446,23 @@ const EventDialog: React.FC<EventDialogProps> = ({
             </div>
             {freq !== 'none' && !until && (
               <p className="field-hint">Без даты окончания событие повторяется бессрочно.</p>
+            )}
+          </div>
+
+          <div className="field">
+            <label htmlFor="cal-reminder">Напоминание</label>
+            <select
+              id="cal-reminder"
+              value={reminder === null ? '' : String(reminder)}
+              onChange={(event) => setReminder(event.target.value === '' ? null : Number(event.target.value))}
+            >
+              <option value="">Не напоминать</option>
+              {REMINDER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            {reminder !== null && (
+              <p className="field-hint">Придёт уведомлением всем участникам, кроме отказавшихся.</p>
             )}
           </div>
 
