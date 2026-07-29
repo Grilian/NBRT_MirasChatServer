@@ -8,6 +8,8 @@ import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
 import UserInfoModal from '../components/UserInfoModal';
+import CreateGroupModal, { CreatedGroup } from '../components/CreateGroupModal';
+import GroupInfoModal from '../components/GroupInfoModal';
 import Avatar from '../components/Avatar';
 import NavRail, { SectionId, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
@@ -69,6 +71,15 @@ interface LastMessage {
   text: string;
   created_at: string;
 }
+interface ChatGroupSummary {
+  id: number;
+  chat_id: string;
+  name: string;
+  created_by: number;
+  created_at: number;
+  member_count: number;
+  role: 'owner' | 'member';
+}
 interface AllUser {
   id: number;
   username: string;
@@ -122,6 +133,9 @@ const Chat: React.FC = () => {
   const [settingsView, setSettingsView] = useState<'settings' | 'profile'>('settings');
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
+  const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [groupInfoId, setGroupInfoId] = useState<number | null>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSentAt = useRef(0);
   // Синхронная защёлка «страница истории уже грузится» — см. loadMoreMessages
@@ -266,8 +280,8 @@ const Chat: React.FC = () => {
   // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
   // тот же открытый чат, "назад" снова сворачивает, и так до полного
   // закрытия приложения.
-  const backNavRef = useRef({ section, settingsView, mobileView, directoryOpen, infoModalUserId });
-  backNavRef.current = { section, settingsView, mobileView, directoryOpen, infoModalUserId };
+  const backNavRef = useRef({ section, settingsView, mobileView, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId });
+  backNavRef.current = { section, settingsView, mobileView, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId };
 
   useEffect(() => watchMobileKeyboard(), []);
 
@@ -299,6 +313,8 @@ const Chat: React.FC = () => {
       const nav = backNavRef.current;
       // Модалки поверх всего — закрываются первыми, иначе "назад" уводил
       // экран из-под открытого окна, а само окно оставалось висеть.
+      if (nav.groupInfoId !== null) { setGroupInfoId(null); return; }
+      if (nav.createGroupOpen) { setCreateGroupOpen(false); return; }
       if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
       if (nav.directoryOpen) { setDirectoryOpen(false); return; }
       if (nav.section === 'settings' && nav.settingsView === 'profile') { setSettingsView('settings'); return; }
@@ -367,6 +383,7 @@ const Chat: React.FC = () => {
       api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
       api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
+      api.get('/groups').then(({ data }) => setChatGroups(data)).catch(console.error);
     });
 
     // Список контактов не приходит по сокету целиком (только точечное событие
@@ -447,6 +464,30 @@ const Chat: React.FC = () => {
       // локально мы не знаем, какое сообщение стало последним, если удалили
       // как раз его.
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
+    });
+
+    // Массовое удаление создателем группы — тот же эффект, что и одиночное
+    // message_deleted, но сразу на список id.
+    newSocket.on('messages_deleted', (data: { chat_id: string; ids: number[] }) => {
+      setMessages(prev => prev.map(m => data.ids.includes(m.id) ? { ...m, deleted: true, text: '' } : m));
+      api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
+    });
+
+    // Группу создали (нас позвали), переименовали/добавили-убрали участника,
+    // или её больше нет — синхронизируем список чатов живьём, без опроса.
+    newSocket.on('group_created', (group: ChatGroupSummary) => {
+      setChatGroups(prev => prev.some(g => g.id === group.id) ? prev : [...prev, group]);
+    });
+    newSocket.on('group_updated', (group: ChatGroupSummary) => {
+      setChatGroups(prev => prev.map(g => g.id === group.id ? { ...g, ...group } : g));
+    });
+    newSocket.on('group_removed', (data: { id: number; chat_id: string }) => {
+      setChatGroups(prev => prev.filter(g => g.id !== data.id));
+      setActiveChat(prev => {
+        if (prev !== data.chat_id) return prev;
+        setMobileView('list');
+        return null;
+      });
     });
 
     // Супер-админ (или теперь и обычный "Администратор" из профиля) может
@@ -805,6 +846,8 @@ const Chat: React.FC = () => {
   const handleSelectChat = (chatId: string) => {
     if (chatId === GENERAL_CHAT_ID) {
       setActiveChat(GENERAL_CHAT_ID);
+    } else if (/^group_\d+$/.test(chatId)) {
+      if (chatGroups.some(g => g.chat_id === chatId)) setActiveChat(chatId);
     } else {
       const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === chatId);
       if (user) setActiveChat(chatId);
@@ -862,6 +905,17 @@ const Chat: React.FC = () => {
     }
   };
 
+  // Из раздела «Люди» — добавить в контакты без перехода в переписку, в
+  // отличие от handleStartChat, который сразу открывает чат.
+  const handleAddContact = async (user: { id: number; username: string; display_name: string | null; avatar_path: string | null; group_id: number | null; group_name: string | null }) => {
+    setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, { ...user, bio: null, phone: null, department: null, position: null, birth_date: null }]);
+    try {
+      await api.post(`/contacts/${user.id}`);
+    } catch (e) {
+      console.error('Ошибка добавления контакта:', e);
+    }
+  };
+
   const handleRemoveContact = async (userId: number) => {
     if (activeChat === getChatId(userId)) {
       setActiveChat(null);
@@ -883,6 +937,15 @@ const Chat: React.FC = () => {
   const handleDeleteMessage = (id: number) => {
     if (!socket) return;
     socket.emit('message_delete', { id });
+  };
+
+  // Массовое удаление доступно только создателю группы и не только своих
+  // сообщений — обычный message_delete (сокет) такое не позволяет, поэтому
+  // отдельная REST-ручка. Локальный список messages обновится по ответному
+  // сокет-событию 'messages_deleted', которое сервер разошлёт всем участникам.
+  const handleDeleteMessages = (ids: number[]) => {
+    if (!activeChatMeta?.chatGroupId) return;
+    api.post(`/groups/${activeChatMeta.chatGroupId}/messages/delete`, { ids }).catch(console.error);
   };
 
   const handleTyping = () => {
@@ -978,6 +1041,9 @@ const Chat: React.FC = () => {
   function groupRank(c: { id: string; section: ChatSection; groupLabel: string | null }) {
     if (c.section === 'general') return -1;
     if (favorites.includes(c.id)) return 0;
+    // Групповые чаты (созданные вручную, не отдел из панели супер-админа) —
+    // отдельным блоком сразу после избранного, до отделов настоящих.
+    if (c.section === 'group') return 0.5;
     // groupLabel у "безгруппных" — это плейсхолдер "Без группы", а не реальное
     // название группы. truthy-проверка тут не годится: indexOf вернёт -1,
     // и 2 + (-1) = 0 столкнёт их с избранными вместо конца списка.
@@ -987,10 +1053,18 @@ const Chat: React.FC = () => {
   }
 
   // Формирование списка чатов: Общий чат — всегда первым, дальше избранные
-  // (по свежести), затем реальные группы (настроены в панели супер-админа),
-  // внутри каждой — тоже по свежести.
+  // (по свежести), затем свои групповые чаты, затем реальные группы
+  // (настроены в панели супер-админа), внутри каждой — тоже по свежести.
   const chats = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
+    ...chatGroups.map(g => ({
+      id: g.chat_id,
+      name: g.name,
+      section: 'group' as ChatSection,
+      groupLabel: 'Группы' as string | null,
+      chatGroupId: g.id,
+      avatarPath: null as string | null,
+    })),
     ...allUsers.map(u => {
       const commentData = comments[u.id];
       const baseName = nameFor(u);
@@ -1022,9 +1096,18 @@ const Chat: React.FC = () => {
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
 
   // Данные для шапки переписки — независимо от текущего поискового фильтра списка
-  const activeChatMeta: { name: string; section: ChatSection; online?: boolean; avatarPath?: string | null; userId?: number } | null = (() => {
+  const activeChatMeta: {
+    name: string; section: ChatSection; online?: boolean; avatarPath?: string | null; userId?: number;
+    chatGroupId?: number; memberCount?: number; isGroupOwner?: boolean;
+  } | null = (() => {
     if (!activeChat) return null;
     if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
+    if (/^group_\d+$/.test(activeChat)) {
+      const group = chatGroups.find(g => g.chat_id === activeChat);
+      return group
+        ? { name: group.name, section: 'group', chatGroupId: group.id, memberCount: group.member_count, isGroupOwner: group.role === 'owner' }
+        : null;
+    }
     const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
     return user ? { name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id), avatarPath: user.avatarPath, userId: user.id } : null;
   })();
@@ -1074,6 +1157,8 @@ const Chat: React.FC = () => {
         onMarkAllRead={handleMarkAllRead}
         onRemoveContact={handleRemoveContact}
         onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
+        onOpenGroupInfo={(chatGroupId) => setGroupInfoId(chatGroupId)}
+        onCreateGroup={() => setCreateGroupOpen(true)}
       />
       )}
       {directoryOpen && (
@@ -1081,6 +1166,39 @@ const Chat: React.FC = () => {
           existingContactIds={users.map(u => u.id)}
           onClose={() => setDirectoryOpen(false)}
           onSelectUser={handleStartChat}
+        />
+      )}
+      {createGroupOpen && (
+        <CreateGroupModal
+          onClose={() => setCreateGroupOpen(false)}
+          onCreated={(group: CreatedGroup) => {
+            // Не через handleSelectChat: он сверяется со списком групп в
+            // React-стейте, а setChatGroups выше применится только со
+            // следующим рендером — сразу после вызова список ещё старый, и
+            // проверка отвергла бы только что созданную группу.
+            setChatGroups(prev => prev.some(g => g.id === group.id) ? prev : [...prev, { ...group, role: 'owner' as const }]);
+            setCreateGroupOpen(false);
+            setActiveChat(group.chat_id);
+            setMobileView('chat');
+            setSection('chats');
+          }}
+        />
+      )}
+      {groupInfoId !== null && (
+        <GroupInfoModal
+          groupId={groupInfoId}
+          currentUserId={currentUserId}
+          onClose={() => setGroupInfoId(null)}
+          onUpdated={(group) => {
+            setChatGroups(prev => prev.map(g => g.id === group.id
+              ? { ...g, name: group.name, member_count: group.member_count }
+              : g));
+          }}
+          onGone={(chatId) => {
+            setChatGroups(prev => prev.filter(g => g.chat_id !== chatId));
+            setGroupInfoId(null);
+            if (activeChat === chatId) { setActiveChat(null); setMobileView('list'); }
+          }}
         />
       )}
       {infoModalUser && (
@@ -1144,6 +1262,7 @@ const Chat: React.FC = () => {
             onlineUserIds={onlineUsers}
             onOpenChat={handleStartChat}
             onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
+            onAddContact={handleAddContact}
           />
         </main>
       )}
@@ -1171,14 +1290,18 @@ const Chat: React.FC = () => {
               <button
                 type="button"
                 className="conv-head-identity"
-                onClick={() => activeChatMeta.userId && setInfoModalUserId(activeChatMeta.userId)}
-                disabled={!activeChatMeta.userId}
+                onClick={() => {
+                  if (activeChatMeta.userId) setInfoModalUserId(activeChatMeta.userId);
+                  else if (activeChatMeta.chatGroupId) setGroupInfoId(activeChatMeta.chatGroupId);
+                }}
+                disabled={!activeChatMeta.userId && !activeChatMeta.chatGroupId}
               >
                 <Avatar
                   name={activeChatMeta.name}
                   avatarPath={activeChatMeta.avatarPath}
                   size="sm"
                   isGeneral={activeChatMeta.section === 'general'}
+                  isGroup={activeChatMeta.section === 'group'}
                 />
                 <div className="conv-title">
                   <div className="name">{activeChatMeta.name}</div>
@@ -1187,9 +1310,11 @@ const Chat: React.FC = () => {
                       переписка прокручена не до конца. */}
                   {typingText ? (
                     <div className="status is-typing">
-                      {activeChatMeta.section === 'general' ? `${typingText} печатает` : 'печатает'}
+                      {activeChatMeta.section === 'general' || activeChatMeta.section === 'group' ? `${typingText} печатает` : 'печатает'}
                       <span className="typing-dots"><span /><span /><span /></span>
                     </div>
+                  ) : activeChatMeta.section === 'group' ? (
+                    <div className="status">{activeChatMeta.memberCount} участников</div>
                   ) : (
                     <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
                       {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
@@ -1206,7 +1331,9 @@ const Chat: React.FC = () => {
             chatId={activeChat}
             messages={messages}
             currentUserId={currentUserId}
-            showAuthors={activeChat === GENERAL_CHAT_ID}
+            showAuthors={activeChat === GENERAL_CHAT_ID || activeChatMeta?.section === 'group'}
+            canDeleteAnyMessage={!!activeChatMeta?.isGroupOwner}
+            onDeleteMessages={handleDeleteMessages}
             onScrollTop={loadMoreMessages}
             hasMore={hasMore}
             loadingMore={loadingMore}

@@ -234,6 +234,14 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+
+  // Таблица растёт вместе со штатом — при паре сотен строк пролистывать её
+  // без поиска до нужного человека уже неудобно.
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? users.filter((u) => (u.display_name || '').toLowerCase().includes(needle) || u.username.toLowerCase().includes(needle))
+    : users;
 
   const update = async (id: number, patch: Record<string, unknown>) => {
     try {
@@ -281,8 +289,18 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
 
   return (
     <div className="sa-card">
-      <h2>Пользователи</h2>
+      <div className="sa-card-head">
+        <h2>Пользователи <span className="sa-count">{filtered.length}</span></h2>
+        <input
+          type="text"
+          className="sa-search"
+          placeholder="Поиск по имени или логину"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
       {error && <p className="form-error">{error}</p>}
+      <div className="sa-table-wrap">
       <table className="sa-table">
         <thead>
           <tr>
@@ -298,7 +316,10 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
           </tr>
         </thead>
         <tbody>
-          {users.map((u) => (
+          {filtered.length === 0 && (
+            <tr><td colSpan={9} className="sa-empty">Никого не найдено</td></tr>
+          )}
+          {filtered.map((u) => (
             <tr key={u.id} className={u.muted ? 'sa-row-muted' : ''}>
               <td>
                 {renamingId === u.id ? (
@@ -376,6 +397,7 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -556,12 +578,26 @@ function UpdateSchedulePanel() {
   );
 }
 
+type Tab = 'users' | 'groups' | 'departments' | 'updates';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'users', label: 'Пользователи' },
+  { id: 'groups', label: 'Группы' },
+  { id: 'departments', label: 'Отделы' },
+  { id: 'updates', label: 'Обновления' },
+];
+
 export default function SuperAdminApp() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('superadmin_token'));
   const [groups, setGroups] = useState<Group[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [departments, setDepartments] = useState<Group[]>([]);
   const [loadError, setLoadError] = useState('');
+  // Вкладки вместо одной длинной страницы: таблица пользователей растёт и
+  // сама по себе занимает экран целиком, а прокручивать её вперемешку с
+  // тремя другими карточками неудобно — переключение держит взгляд на одном
+  // разделе за раз.
+  const [tab, setTab] = useState<Tab>('users');
 
   const load = async () => {
     try {
@@ -608,12 +644,26 @@ export default function SuperAdminApp() {
         <button type="button" className="sa-btn-ghost" onClick={handleLogout}>Выйти</button>
       </header>
 
+      <nav className="sa-tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={'sa-tab' + (tab === t.id ? ' is-active' : '')}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+            {t.id === 'users' && <span className="sa-tab-count">{users.length}</span>}
+          </button>
+        ))}
+      </nav>
+
       <main className="sa-main">
         {loadError && <p className="form-error">{loadError}</p>}
-        <GroupsPanel groups={groups} onChanged={load} />
-        <DepartmentsPanel departments={departments} onChanged={load} />
-        <UsersPanel users={users} groups={groups} departments={departments} onChanged={load} />
-        <UpdateSchedulePanel />
+        {tab === 'users' && <UsersPanel users={users} groups={groups} departments={departments} onChanged={load} />}
+        {tab === 'groups' && <GroupsPanel groups={groups} onChanged={load} />}
+        {tab === 'departments' && <DepartmentsPanel departments={departments} onChanged={load} />}
+        {tab === 'updates' && <UpdateSchedulePanel />}
       </main>
     </div>
   );

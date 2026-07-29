@@ -1,3 +1,5 @@
+const db = require('../db');
+
 // chat_id для переписки с админом имеет вид miras_admin_<login>_<localUserId>,
 // чтобы у каждого сотрудника был свой отдельный тред с админом, а не один
 // общий на всех, кто ему когда-либо писал.
@@ -23,6 +25,15 @@ function participantsForChatId(chatId) {
 
   const adminChat = parseAdminChatId(chatId);
   if (adminChat) return [Number(adminChat.employeeId)];
+
+  // Групповой чат — состав читаем из БД на каждый вызов, а не кэшируем:
+  // список участников меняется (добавили/убрали), и устаревший кэш пустил бы
+  // сообщение мимо нового участника или, наоборот, к уже удалённому.
+  const groupMatch = String(chatId).match(/^group_(\d+)$/);
+  if (groupMatch) {
+    const rows = db.prepare('SELECT user_id FROM chat_group_members WHERE chat_group_id = ?').all(Number(groupMatch[1]));
+    return rows.map((row) => row.user_id);
+  }
 
   const match = String(chatId).match(/^chat_(\d+)_(\d+)$/);
   if (match) return [Number(match[1]), Number(match[2])];

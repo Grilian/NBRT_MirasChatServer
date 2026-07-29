@@ -18,6 +18,7 @@ interface PeopleSectionProps {
   onlineUserIds: number[];
   onOpenChat: (user: DirectoryUser) => void;
   onOpenUserInfo: (userId: number) => void;
+  onAddContact: (user: DirectoryUser) => void;
 }
 
 const NO_GROUP = 'Без подразделения';
@@ -34,7 +35,7 @@ function pluralPeople(n: number): string {
 // экран и с группировкой по подразделениям: из рельса им пользуются не чтобы
 // быстро начать чат, а чтобы посмотреть, кто вообще есть в организации.
 const PeopleSection: React.FC<PeopleSectionProps> = ({
-  currentUserId, existingContactIds, onlineUserIds, onOpenChat, onOpenUserInfo
+  currentUserId, existingContactIds, onlineUserIds, onOpenChat, onOpenUserInfo, onAddContact
 }) => {
   const [users, setUsers] = useState<DirectoryUser[]>([]);
   const [query, setQuery] = useState('');
@@ -142,9 +143,21 @@ const PeopleSection: React.FC<PeopleSectionProps> = ({
                       <div className="row-preview">
                         {onlineUserIds.includes(user.id) ? 'в сети' : `@${user.username}`}
                       </div>
-                      {existingContactIds.includes(user.id) && (
-                        <div className="row-actions"><span className="people-tag">в чатах</span></div>
-                      )}
+                      <div className="row-actions">
+                        {existingContactIds.includes(user.id) ? (
+                          <span className="people-tag">в чатах</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="people-add-btn"
+                            onClick={(e) => { e.stopPropagation(); onAddContact(user); }}
+                            title="Добавить в контакты"
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 5v14M5 12h14" /></svg>
+                            Добавить
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

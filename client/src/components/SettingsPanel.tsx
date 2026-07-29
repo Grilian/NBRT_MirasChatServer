@@ -13,6 +13,7 @@ import { playIncomingSound } from '../utils/sound';
 import { formatMoscowDateTime } from '../utils/time';
 import { MobileUpdateInfo, checkMobileUpdate, mobileVersionName, openMobileUpdate } from '../utils/mobileUpdate';
 import { APP_VERSION, BUILT_AT } from '../version';
+import AndroidQrModal from './AndroidQrModal';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
@@ -41,6 +42,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [mobileUpdate, setMobileUpdate] = useState<MobileUpdateInfo | null>(null);
   const [notify, setNotify] = useState<NotificationPrefs>(getNotificationPrefs);
   const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
+  const [qrOpen, setQrOpen] = useState(false);
 
   const handleThemeChange = (value: ThemePreference) => {
     setTheme(value);
@@ -279,6 +281,22 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </>
         )}
+
+        {/* На самом телефоне сканировать QR своего же приложения незачем —
+            кнопка для тех, кто ставит Android-версию с компьютера или веба. */}
+        {!isNativeMobile && (
+          <>
+            <div className="settings-section-title">Android-приложение</div>
+            <div className="settings-group">
+              <button type="button" className="settings-row" onClick={() => setQrOpen(true)}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><path d="M14 14h3v3h-3zM21 14v3M14 21h3M21 21v-1" /></svg>
+                <span className="label">QR-код для установки на телефон</span>
+                <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
+              </button>
+            </div>
+          </>
+        )}
+        {qrOpen && <AndroidQrModal onClose={() => setQrOpen(false)} />}
 
         <div className="settings-section-title">Аккаунт</div>
         <div className="settings-group">

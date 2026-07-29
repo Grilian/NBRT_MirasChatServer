@@ -60,6 +60,25 @@ export async function checkMobileUpdate(): Promise<MobileUpdateInfo | null> {
   }
 }
 
+/**
+ * Ссылка на APK для QR-кода в Настройках на ПК — не зависит от платформы и
+ * не сравнивается с уже установленной версией: она нужна и тому, у кого
+ * Android-приложения ещё нет вовсе.
+ */
+export async function fetchApkDownloadInfo(): Promise<MobileUpdateInfo | null> {
+  const url = manifestUrl();
+  if (!url) return null;
+
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return null;
+    const manifest: Manifest = await response.json();
+    return { versionName: manifest.versionName, url: manifest.url };
+  } catch {
+    return null;
+  }
+}
+
 /** Номер установленной версии для показа в настройках. */
 export async function mobileVersionName(): Promise<string | null> {
   if (!isNativeMobile) return null;

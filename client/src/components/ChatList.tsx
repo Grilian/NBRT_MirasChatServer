@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Avatar from './Avatar';
 import { formatChatListTime } from '../utils/time';
 
-export type ChatSection = 'general' | 'staff';
+export type ChatSection = 'general' | 'staff' | 'group';
 
 interface Chat {
   id: string;
@@ -13,6 +13,8 @@ interface Chat {
   userId?: number;
   avatarPath?: string | null;
   deletable?: boolean;
+  /** Только у групповых чатов — id для GroupInfoModal, отличный от chat.id ('group_<id>'). */
+  chatGroupId?: number;
 }
 
 interface LastMessage {
@@ -41,27 +43,41 @@ interface ChatListProps {
   onMarkAllRead: () => void;
   onRemoveContact: (userId: number) => void;
   onOpenUserInfo: (userId: number) => void;
+  onOpenGroupInfo: (chatGroupId: number) => void;
+  onCreateGroup: () => void;
 }
 
-function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void) {
-  const avatar = <Avatar name={chat.name} avatarPath={chat.avatarPath} online={chat.online} isGeneral={chat.section === 'general'} />;
-  if (!chat.userId) return avatar;
-  return (
-    <button
-      type="button"
-      className="row-avatar-btn"
-      onClick={(e) => { e.stopPropagation(); onOpenUserInfo(chat.userId!); }}
-      aria-label="Профиль"
-    >
-      {avatar}
-    </button>
+function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOpenGroupInfo: (chatGroupId: number) => void) {
+  const avatar = (
+    <Avatar
+      name={chat.name}
+      avatarPath={chat.avatarPath}
+      online={chat.online}
+      isGeneral={chat.section === 'general'}
+      isGroup={chat.section === 'group'}
+    />
   );
+  if (chat.userId) {
+    return (
+      <button type="button" className="row-avatar-btn" onClick={(e) => { e.stopPropagation(); onOpenUserInfo(chat.userId!); }} aria-label="Профиль">
+        {avatar}
+      </button>
+    );
+  }
+  if (chat.chatGroupId) {
+    return (
+      <button type="button" className="row-avatar-btn" onClick={(e) => { e.stopPropagation(); onOpenGroupInfo(chat.chatGroupId!); }} aria-label="О группе">
+        {avatar}
+      </button>
+    );
+  }
+  return avatar;
 }
 
 const ChatList: React.FC<ChatListProps> = ({
   chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
-  onMarkAllRead, onRemoveContact, onOpenUserInfo
+  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup
 }) => {
   const [editingComment, setEditingComment] = useState<number | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -111,6 +127,9 @@ const ChatList: React.FC<ChatListProps> = ({
           <button type="button" className="icon-btn-ghost new-chat-btn" title="Найти сотрудника" onClick={onOpenDirectory}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
           </button>
+          <button type="button" className="icon-btn-ghost new-chat-btn" title="Создать группу" onClick={onCreateGroup}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+          </button>
         </div>
       </div>
 
@@ -136,7 +155,7 @@ const ChatList: React.FC<ChatListProps> = ({
                 onClick={() => onSelectChat(chat.id)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChat(chat.id); } }}
               >
-                {renderAvatar(chat, onOpenUserInfo)}
+                {renderAvatar(chat, onOpenUserInfo, onOpenGroupInfo)}
                 <div className="row-body">
                   <div className="row-top">
                     <div className="row-name">

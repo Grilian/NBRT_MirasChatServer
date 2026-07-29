@@ -166,13 +166,15 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
             <Avatar name={nameFor({ username, display_name: displayName })} avatarPath={avatarPath} />
           </button>
           <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarChange} style={{ display: 'none' }} />
+          <div className="profile-avatar-name">{displayName || username}</div>
+          <div className="profile-avatar-username">@{username}</div>
           <div className="profile-avatar-actions">
             <button type="button" onClick={handleAvatarPick} disabled={avatarBusy}>Сменить фото</button>
             {avatarPath && <button type="button" onClick={handleAvatarRemove} disabled={avatarBusy}>Убрать</button>}
           </div>
         </div>
 
-        <form className="profile-form" onSubmit={handleSubmit} style={{ maxWidth: 360 }}>
+        <form className="profile-form profile-form-card" onSubmit={handleSubmit} style={{ maxWidth: 360 }}>
           <div className="field">
             <label>Имя</label>
             <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />

@@ -233,6 +233,38 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_calendar_owner_range ON calendar_events(owner_id, starts_at);
   CREATE INDEX IF NOT EXISTS idx_calendar_scope ON calendar_events(scope_kind, scope_id, starts_at);
   CREATE INDEX IF NOT EXISTS idx_calendar_guests_user ON calendar_event_guests(user_id);
+
+  -- Групповые чаты. Названы chat_groups, а не groups: имя groups занято
+  -- ролевыми группами ("Администрация", "Кафедры") — это разные сущности
+  -- (см. комментарий у departments), совпадение имени лишь запутало бы.
+  -- Переписка группы хранится в messages как обычно, chat_id вида
+  -- 'group_<id>' — видимость решает participantsForChatId по составу
+  -- chat_group_members, отдельная система рассылки не нужна.
+  CREATE TABLE IF NOT EXISTS chat_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+
+  -- Права на старте минимальны: 'owner' может переименовать, добавлять и
+  -- убирать участников, удалять чужие сообщения и удалить группу целиком;
+  -- 'member' может только писать и выйти сам. Более тонкие роли — когда
+  -- появится конкретный сценарий, которому текущих двух не хватит.
+  CREATE TABLE IF NOT EXISTS chat_group_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_group_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    joined_at INTEGER NOT NULL,
+    UNIQUE(chat_group_id, user_id),
+    FOREIGN KEY (chat_group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_chat_group_members_user ON chat_group_members(user_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_group_members_group ON chat_group_members(chat_group_id);
 `);
 
 // Миграция: добавляем колонку status, если БД старая

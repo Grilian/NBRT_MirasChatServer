@@ -8,14 +8,25 @@ interface AvatarProps {
   size?: 'sm' | 'md';
   online?: boolean;
   isGeneral?: boolean;
+  isGroup?: boolean;
 }
 
-const Avatar: React.FC<AvatarProps> = ({ name, avatarPath, size, online, isGeneral }) => {
+const Avatar: React.FC<AvatarProps> = ({ name, avatarPath, size, online, isGeneral, isGroup }) => {
   if (isGeneral) {
     return (
       <div className="avatar avatar-general">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (isGroup) {
+    return (
+      <div className={'avatar avatar-group' + (size === 'sm' ? ' avatar-sm' : '')}>
+        <svg width={size === 'sm' ? '15' : '18'} height={size === 'sm' ? '15' : '18'} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       </div>
     );

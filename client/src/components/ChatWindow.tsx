@@ -27,6 +27,9 @@ interface ChatWindowProps {
   unreadCount?: number;
   onEditMessage: (id: number, text: string) => void;
   onDeleteMessage: (id: number) => void;
+  /** Создатель группы может удалять чужие сообщения — не только свои. */
+  canDeleteAnyMessage?: boolean;
+  onDeleteMessages?: (ids: number[]) => void;
 }
 
 const LONG_PRESS_MS = 450;
@@ -91,7 +94,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
-  onEditMessage, onDeleteMessage
+  onEditMessage, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -104,6 +107,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const [editText, setEditText] = useState('');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Массовое удаление — только у создателя группы, поэтому режим выбора
+  // существует лишь когда canDeleteAnyMessage true; при уходе из чата и на
+  // смену прав гасим его, а не оставляем висеть с чужими id.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Позиция прокрутки на момент запроса следующей страницы истории —
   // подробности в useLayoutEffect ниже.
@@ -144,6 +153,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     pendingRestoreRef.current = null;
     setMenuFor(null);
     setEditingId(null);
+    setSelectMode(false);
+    setSelectedIds(new Set());
   }, [chatId]);
 
   // Закрытие контекстного меню по клику снаружи
@@ -182,7 +193,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   const openMenuAt = (msg: Message, x: number, y: number) => {
-    if (msg.sender_id !== currentUserId || msg.deleted) return;
+    if (selectMode || msg.sender_id !== currentUserId || msg.deleted) return;
     setMenuFor({ id: msg.id, x, y });
   };
 
@@ -228,6 +239,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const confirmBulkDelete = () => {
+    if (selectedIds.size === 0 || !onDeleteMessages) return;
+    if (window.confirm(`Удалить выбранные сообщения (${selectedIds.size}) без возможности восстановления?`)) {
+      onDeleteMessages(Array.from(selectedIds));
+      exitSelectMode();
+    }
+  };
+
   if (!chatId) {
     return (
       <div className="conv-empty">
@@ -240,6 +272,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   return (
     <div className="conv-wrap">
+      {canDeleteAnyMessage && !selectMode && (
+        <button type="button" className="select-messages-btn" onClick={() => setSelectMode(true)} title="Выбрать сообщения">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+        </button>
+      )}
+      {selectMode && (
+        <div className="select-toolbar">
+          <button type="button" className="icon-btn" onClick={exitSelectMode} aria-label="Отмена">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+          <span className="select-toolbar-count">Выбрано: {selectedIds.size}</span>
+          <button type="button" className="select-toolbar-delete" onClick={confirmBulkDelete} disabled={selectedIds.size === 0}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+            Удалить
+          </button>
+        </div>
+      )}
       <div
         ref={messagesContainerRef}
         className="conv-body"
@@ -257,11 +306,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const isDeleted = !!msg.deleted;
           const isEditing = editingId === msg.id;
 
+          const isSelected = selectedIds.has(msg.id);
           const className = [
             'msg',
             mine ? 'mine' : 'theirs',
             startsGroup ? 'starts-group' : '',
             endsGroup ? 'ends-group' : '',
+            selectMode ? 'is-selectable' : '',
+            isSelected ? 'is-selected' : '',
           ].filter(Boolean).join(' ');
 
           return (
@@ -269,11 +321,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               {daySeparator && <div className="date-sep">{daySeparator}</div>}
               <div
                 className={className}
-                onContextMenu={mine ? (e) => handleContextMenu(e, msg) : undefined}
-                onTouchStart={mine ? (e) => handleTouchStart(e, msg) : undefined}
-                onTouchEnd={mine ? clearLongPress : undefined}
-                onTouchMove={mine ? clearLongPress : undefined}
+                onClick={selectMode && !isDeleted ? () => toggleSelected(msg.id) : undefined}
+                onContextMenu={!selectMode && mine ? (e) => handleContextMenu(e, msg) : undefined}
+                onTouchStart={!selectMode && mine ? (e) => handleTouchStart(e, msg) : undefined}
+                onTouchEnd={!selectMode && mine ? clearLongPress : undefined}
+                onTouchMove={!selectMode && mine ? clearLongPress : undefined}
               >
+                {selectMode && !isDeleted && (
+                  <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
+                )}
                 {isEditing ? (
                   <div className="bubble bubble-editing">
                     <input

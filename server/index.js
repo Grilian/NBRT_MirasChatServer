@@ -21,6 +21,7 @@ const updatesRoutes = require('./routes/updates');
 const calendarRoutes = require('./routes/calendar');
 const sessionRoutes = require('./routes/session');
 const departmentsRoutes = require('./routes/departments');
+const groupsRoutes = require('./routes/groups');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { notifyNewMessage } = require('./services/push');
@@ -68,6 +69,7 @@ app.use('/api/updates', updatesRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/session', sessionRoutes);
 app.use('/api/departments', departmentsRoutes);
+app.use('/api/groups', verifyToken, groupsRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
 // на каждый файл (как публичные CDN-ссылки на фото профиля у большинства
@@ -288,6 +290,10 @@ io.on('connection', (socket) => {
         const everyoneElse = db.prepare('SELECT id FROM users WHERE id != ?').all(senderId).map((r) => r.id);
         recipientOnline = everyoneElse.some((id) => isUserOnline(id));
         offlineRecipients.push(...everyoneElse.filter((id) => !isUserOnline(id)));
+      } else if (/^group_\d+$/.test(data.chatId)) {
+        const others = (participants || []).filter((id) => id !== senderId);
+        recipientOnline = others.some((id) => isUserOnline(id));
+        offlineRecipients.push(...others.filter((id) => !isUserOnline(id)));
       } else {
         const match = data.chatId.match(/^chat_(\d+)_(\d+)$/);
         if (match) {

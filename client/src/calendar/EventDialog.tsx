@@ -494,6 +494,21 @@ const EventDialog: React.FC<EventDialogProps> = ({
 
           <div className="field">
             <label htmlFor="cal-guests">Участники</label>
+            <div className="cal-guests-toolbar">
+              <button
+                type="button"
+                className="cal-guests-toolbar-btn"
+                onClick={() => setGuestIds(people.map((person) => person.id))}
+                disabled={people.length === 0 || guestIds.length === people.length}
+              >
+                Выбрать всех
+              </button>
+              {guestIds.length > 0 && (
+                <button type="button" className="cal-guests-toolbar-btn" onClick={() => setGuestIds([])}>
+                  Снять всех
+                </button>
+              )}
+            </div>
             {selectedGuests.length > 0 && (
               <div className="cal-dialog-guests">
                 {selectedGuests.map((guest) => (

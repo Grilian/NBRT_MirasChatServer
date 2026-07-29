@@ -319,6 +319,13 @@
   background: var(--cal-ink); border: 2px solid transparent;
 }
 .cal-swatch.is-active { border-color: var(--ink); box-shadow: 0 0 0 2px var(--paper-raised) inset; }
+.cal-guests-toolbar { display: flex; gap: 8px; margin-bottom: 6px; }
+.cal-guests-toolbar-btn {
+  border: none; background: none; color: var(--accent); cursor: pointer;
+  font-size: 12px; font-weight: 600; padding: 0;
+}
+.cal-guests-toolbar-btn:hover { text-decoration: underline; }
+.cal-guests-toolbar-btn:disabled { color: var(--ink-faint); cursor: default; text-decoration: none; }
 .cal-dialog-guests { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
 .cal-guest-chip {
   display: inline-flex; align-items: center; gap: 5px; border: none; cursor: pointer;

@@ -75,9 +75,11 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
         </div>
 
         <div className="user-info-body">
-          <Avatar name={name} avatarPath={user.avatarPath} size="md" />
-          <div className="user-info-name">{name}</div>
-          <div className={'user-info-status' + (online ? ' is-online' : '')}>{online ? 'в сети' : 'не в сети'}</div>
+          <div className="user-info-hero">
+            <Avatar name={name} avatarPath={user.avatarPath} size="md" />
+            <div className="user-info-name">{name}</div>
+            <div className={'user-info-status' + (online ? ' is-online' : '')}>{online ? 'в сети' : 'не в сети'}</div>
+          </div>
 
           <div className="user-info-fields">
             {user.groupName && (
