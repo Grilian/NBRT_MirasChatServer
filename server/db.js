@@ -265,6 +265,23 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_chat_group_members_user ON chat_group_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_chat_group_members_group ON chat_group_members(chat_group_id);
+
+  -- Кто из скольки получателей реально прочитал сообщение в общем/групповом
+  -- чате. У messages.status один статус на всё сообщение — для личной
+  -- переписки этого достаточно (получатель ровно один), но в чате с
+  -- несколькими получателями общий 'read' не может означать "прочитано
+  -- мной": как только его выставит первый прочитавший, счётчик непрочитанного
+  -- молча пропадает у всех остальных, даже если они сообщение не открывали.
+  CREATE TABLE IF NOT EXISTS message_reads (
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    read_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id),
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id);
 `);
 
 // Миграция: добавляем колонку status, если БД старая

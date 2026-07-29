@@ -45,7 +45,12 @@ const TimeGridView: React.FC<TimeGridViewProps> = ({
     const isToday = days.includes(today);
     const focusMinutes = isToday ? Math.max(minutesOf(Date.now()) - 90, 0) : 8 * 60;
     container.scrollTop = (focusMinutes / 60) * HOUR_HEIGHT;
-  }, [anchor, days, today]);
+    // scrollRef — объект от useRef что снаружи, что localScrollRef внутри —
+    // стабилен между рендерами, так что добавление в зависимости не даёт
+    // лишних срабатываний, а линтер перестаёт жаловаться по делу: без него
+    // эффект мог бы читать протухший ref, если бы источник ref когда-нибудь
+    // сменился на лету.
+  }, [anchor, days, today, scrollRef]);
 
   const allDayByDay = days.map((day) => occurrencesOn(occurrences, day).filter((item) => item.all_day));
   const hasAllDay = allDayByDay.some((items) => items.length > 0);

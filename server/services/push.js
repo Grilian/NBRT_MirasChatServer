@@ -80,7 +80,7 @@ const CHANNEL_ID = 'messages_v2';
  * priority: 'high' — иначе в Doze доставка откладывается до maintenance-окна,
  * то есть ровно в том случае, ради которого пуш и нужен.
  */
-async function notifyNewMessage(userId, { chatId, messageId, senderName }) {
+async function notifyNewMessage(userId, { chatId, messageId, senderName, chatLabel }) {
   if (!messaging) return;
 
   try {
@@ -91,6 +91,11 @@ async function notifyNewMessage(userId, { chatId, messageId, senderName }) {
 
     if (!tokens.length) return;
 
+    // chatLabel приходит только для общего чата и групп — там у сообщения
+    // много получателей, и заголовок "Имя" один в один выглядел бы как
+    // личное сообщение от этого человека, хотя видят его все участники.
+    const title = chatLabel ? `${senderName || 'MirasChat'} · ${chatLabel}` : (senderName || 'MirasChat');
+
     const response = await messaging.sendEachForMulticast({
       tokens,
       data: {
@@ -99,7 +104,7 @@ async function notifyNewMessage(userId, { chatId, messageId, senderName }) {
         messageId: String(messageId)
       },
       notification: {
-        title: senderName || 'MirasChat',
+        title,
         body: 'Новое сообщение'
       },
       android: {

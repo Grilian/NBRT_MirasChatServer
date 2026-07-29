@@ -15,6 +15,7 @@ export interface ToastNotification {
   body: string;
   avatarPath?: string | null;
   isGeneral?: boolean;
+  isGroup?: boolean;
   /** Сколько сообщений из этого чата слилось в это уведомление */
   count: number;
   /** Растёт при каждом новом сообщении в стопку — перезапускает таймер показа */
@@ -71,7 +72,7 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
       onMouseLeave={() => setPaused(false)}
     >
       <button type="button" className="toast-main" onClick={() => onOpen(toast.chatId)}>
-        <Avatar name={toast.title} avatarPath={toast.avatarPath} isGeneral={toast.isGeneral} />
+        <Avatar name={toast.title} avatarPath={toast.avatarPath} isGeneral={toast.isGeneral} isGroup={toast.isGroup} />
         <div className="toast-text">
           <div className="toast-title">{toast.title}</div>
           <div className="toast-body">{toast.body}</div>

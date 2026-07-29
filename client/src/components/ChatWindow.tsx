@@ -173,6 +173,25 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     };
   }, [menuFor]);
 
+  // Меню открывается ровно в точке клика/долгого нажатия — у сообщения
+  // близко к правому или нижнему краю экрана оно раньше вылезало за
+  // видимую область (особенно у своих реплик, прижатых вправо). Подправляем
+  // после первой отрисовки, когда уже известны реальные размеры меню:
+  // если что-то не помещается, отодвигаем ровно настолько, чтобы влезло.
+  useLayoutEffect(() => {
+    if (!menuFor || !menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const overflowX = rect.right - window.innerWidth;
+    const overflowY = rect.bottom - window.innerHeight;
+    if (overflowX <= 0 && overflowY <= 0) return;
+
+    setMenuFor((prev) => prev && ({
+      ...prev,
+      x: overflowX > 0 ? Math.max(4, prev.x - overflowX) : prev.x,
+      y: overflowY > 0 ? Math.max(4, prev.y - overflowY) : prev.y,
+    }));
+  }, [menuFor]);
+
   const handleScroll = () => {
     if (!messagesContainerRef.current) return;
 
@@ -192,8 +211,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Раньше меню открывалось только на своих сообщениях — скопировать текст
+  // чужой реплики было нельзя вовсе. Теперь оно доступно на любом
+  // непустом сообщении; какие пункты в нём показать (только «Копировать»
+  // или ещё и «Редактировать»/«Удалить»), решает уже сам рендер меню по
+  // мере сравнения sender_id с currentUserId.
   const openMenuAt = (msg: Message, x: number, y: number) => {
-    if (selectMode || msg.sender_id !== currentUserId || msg.deleted) return;
+    if (selectMode || msg.deleted) return;
     setMenuFor({ id: msg.id, x, y });
   };
 
@@ -237,6 +261,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (window.confirm('Удалить сообщение без возможности восстановления?')) {
       onDeleteMessage(id);
     }
+  };
+
+  const copyMessageText = (msg: Message) => {
+    setMenuFor(null);
+    navigator.clipboard?.writeText(msg.text).catch((e) => console.error('Не удалось скопировать:', e));
   };
 
   const toggleSelected = (id: number) => {
@@ -322,10 +351,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               <div
                 className={className}
                 onClick={selectMode && !isDeleted ? () => toggleSelected(msg.id) : undefined}
-                onContextMenu={!selectMode && mine ? (e) => handleContextMenu(e, msg) : undefined}
-                onTouchStart={!selectMode && mine ? (e) => handleTouchStart(e, msg) : undefined}
-                onTouchEnd={!selectMode && mine ? clearLongPress : undefined}
-                onTouchMove={!selectMode && mine ? clearLongPress : undefined}
+                onContextMenu={!selectMode && !isDeleted ? (e) => handleContextMenu(e, msg) : undefined}
+                onTouchStart={!selectMode && !isDeleted ? (e) => handleTouchStart(e, msg) : undefined}
+                onTouchEnd={!selectMode && !isDeleted ? clearLongPress : undefined}
+                onTouchMove={!selectMode && !isDeleted ? clearLongPress : undefined}
               >
                 {selectMode && !isDeleted && (
                   <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
@@ -380,25 +409,38 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         </button>
       )}
 
-      {menuFor && (
-        <div
-          ref={menuRef}
-          className="msg-context-menu"
-          style={{ left: menuFor.x, top: menuFor.y }}
-        >
-          <button type="button" onClick={() => {
-            const msg = messages.find(m => m.id === menuFor.id);
-            if (msg) startEdit(msg);
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-            Редактировать
-          </button>
-          <button type="button" className="danger" onClick={() => confirmDelete(menuFor.id)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
-            Удалить
-          </button>
-        </div>
-      )}
+      {menuFor && (() => {
+        const menuMsg = messages.find(m => m.id === menuFor.id);
+        if (!menuMsg) return null;
+        const menuMine = menuMsg.sender_id === currentUserId;
+
+        return (
+          <div
+            ref={menuRef}
+            className="msg-context-menu"
+            style={{ left: menuFor.x, top: menuFor.y }}
+          >
+            {/* Копировать — на любом сообщении, не только своём: раньше меню
+                вообще не открывалось на чужих репликах. */}
+            <button type="button" onClick={() => copyMessageText(menuMsg)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              Копировать
+            </button>
+            {menuMine && (
+              <>
+                <button type="button" onClick={() => startEdit(menuMsg)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                  Редактировать
+                </button>
+                <button type="button" className="danger" onClick={() => confirmDelete(menuFor.id)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+                  Удалить
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

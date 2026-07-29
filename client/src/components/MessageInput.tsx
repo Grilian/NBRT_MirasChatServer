@@ -57,6 +57,22 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled,
     }
   };
 
+  // На телефоне не у всех клавиатур есть удобная кнопка "Вставить" рядом с
+  // полем — а раскладка с ссылкой/кодом в буфере обмена как раз частый
+  // случай для рабочего чата. Дописываем к тому, что уже набрано, а не
+  // заменяем — так же ведёт себя вставка через системное меню.
+  const handlePaste = async () => {
+    try {
+      const clip = await navigator.clipboard.readText();
+      if (!clip) return;
+      setText((prev) => (prev + clip).slice(0, MAX_LENGTH));
+      textareaRef.current?.focus();
+      if (onTyping && clip.trim()) onTyping();
+    } catch (e) {
+      console.error('Не удалось прочитать буфер обмена:', e);
+    }
+  };
+
   const remaining = MAX_LENGTH - text.length;
 
   return (
@@ -73,6 +89,9 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled,
         />
         {remaining < 200 && <span className="composer-counter">{remaining}</span>}
       </div>
+      <button type="button" className="paste-btn" onClick={handlePaste} disabled={disabled} aria-label="Вставить из буфера обмена" title="Вставить">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3" /></svg>
+      </button>
       <button type="submit" className="send-btn" disabled={disabled || !text.trim()} aria-label="Отправить">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.6 22 12 3.4 3.4 3 10l13 2-13 2z" /></svg>
       </button>

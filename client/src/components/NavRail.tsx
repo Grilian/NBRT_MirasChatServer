@@ -65,7 +65,7 @@ export const SECTIONS: SectionMeta[] = [
   {
     id: 'calendar',
     label: 'Календарь',
-    ready: false,
+    ready: true,
     summary:
       'Совещания и события подразделения: приглашения прямо из чата, напоминания и общий график занятости.',
     icon: (

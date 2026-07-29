@@ -162,9 +162,20 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
+              // При входе (не регистрации) поле не обязательно: если пароль
+              // сбросил администратор, сервер определяет это по самому
+              // аккаунту и не смотрит, что здесь введено — можно оставить
+              // пустым. required тут раньше не пускал отправить форму вовсе,
+              // и человек, забывший старый пароль, упирался в тупик: ввести
+              // нечего, а форма не отправляется.
+              required={isRegister}
             />
             {isRegister && <div className="field-hint">{PASSWORD_HINT}</div>}
+            {!isRegister && (
+              <div className="field-hint">
+                Администратор сбросил пароль или вы его не помните? Оставьте поле пустым и нажмите «Войти».
+              </div>
+            )}
           </div>
           {isRegister && (
             <div className="field">

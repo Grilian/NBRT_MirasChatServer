@@ -1,0 +1,51 @@
+const db = require('../db');
+
+// Личный чат — ровно один возможный получатель, поэтому общий messages.status
+// однозначно значит "прочитано этим человеком". Общий чат и группы — получателей
+// несколько, и там status нужен только для галочек у отправителя ("прочитано хоть
+// кем-то"); кто именно прочитал конкретный человек, знает только message_reads.
+const SHARED_CHAT_RE = /^(general|group_\d+)$/;
+function isSharedChat(chatId) {
+  return SHARED_CHAT_RE.test(String(chatId));
+}
+
+const insertRead = db.prepare('INSERT OR IGNORE INTO message_reads (message_id, user_id, read_at) VALUES (?, ?, ?)');
+
+/**
+ * Отмечает переданные id сообщений прочитанными для конкретного человека в
+ * конкретном чате. Возвращает те id, что реально стали прочитанными только
+ * что (не были прочитаны раньше) — их и нужно разослать дальше.
+ */
+function markRead(userId, chatId, ids) {
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+
+  if (isSharedChat(chatId)) {
+    const candidates = db.prepare(`
+      SELECT id FROM messages WHERE id IN (${placeholders}) AND chat_id = ? AND sender_id != ?
+    `).all(...ids, chatId, userId).map((row) => row.id);
+    if (!candidates.length) return [];
+
+    const now = Date.now();
+    const newlyRead = candidates.filter((id) => insertRead.run(id, userId, now).changes > 0);
+    if (!newlyRead.length) return [];
+
+    // Общий status двигаем следом, но только вперёд: он тут — просто отметка
+    // "видел хоть один человек" для галочек у отправителя, а не источник
+    // истины про конкретного читателя.
+    const newPlaceholders = newlyRead.map(() => '?').join(',');
+    db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${newPlaceholders}) AND status != 'read'`).run(...newlyRead);
+    return newlyRead;
+  }
+
+  const affected = db.prepare(`
+    SELECT id FROM messages WHERE id IN (${placeholders}) AND chat_id = ? AND sender_id != ? AND status != 'read'
+  `).all(...ids, chatId, userId).map((row) => row.id);
+  if (!affected.length) return [];
+
+  const affectedPlaceholders = affected.map(() => '?').join(',');
+  db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${affectedPlaceholders})`).run(...affected);
+  return affected;
+}
+
+module.exports = { isSharedChat, markRead };

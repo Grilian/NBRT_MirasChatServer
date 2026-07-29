@@ -168,6 +168,7 @@ const Chat: React.FC = () => {
   const liveRef = useRef({
     activeChat: null as string | null,
     allUsers: [] as AllUser[],
+    chatGroups: [] as ChatGroupSummary[],
     windowFocused: true,
     conversationVisible: false,
     prefs: notificationPrefs,
@@ -240,11 +241,25 @@ const Chat: React.FC = () => {
     document.addEventListener('visibilitychange', update);
     const unsubscribeElectron = window.electronAPI?.onFocusChange?.((isFocused) => setWindowFocused(isFocused));
 
+    // На нативном Android document.hasFocus()/visibilitychange — это события
+    // WebView, а не приложения: они не всегда срабатывают, когда приложение
+    // сворачивают кнопкой "Домой" или уходят в переключатель задач, из-за чего
+    // windowFocused иногда застревал в "true", пока приложение реально было
+    // в фоне — и системное уведомление тогда не показывалось вовсе (см.
+    // ветку showMobileNotification ниже, она условие на !focused). appStateChange
+    // — собственное событие жизненного цикла Capacitor, ему можно доверять.
+    let unsubscribeCapacitor: (() => void) | undefined;
+    if (isNativeMobile) {
+      const listenerPromise = CapApp.addListener('appStateChange', ({ isActive }) => setWindowFocused(isActive));
+      unsubscribeCapacitor = () => { listenerPromise.then((h) => h.remove()); };
+    }
+
     return () => {
       window.removeEventListener('focus', update);
       window.removeEventListener('blur', update);
       document.removeEventListener('visibilitychange', update);
       unsubscribeElectron?.();
+      unsubscribeCapacitor?.();
     };
   }, []);
 
@@ -567,7 +582,7 @@ const Chat: React.FC = () => {
     if (!socket) return;
 
     const handler = (message: Message) => {
-      const { activeChat: liveActiveChat, allUsers: liveUsers, windowFocused: focused, conversationVisible, prefs } = liveRef.current;
+      const { activeChat: liveActiveChat, allUsers: liveUsers, chatGroups: liveGroups, windowFocused: focused, conversationVisible, prefs } = liveRef.current;
       const chatId = message.chat_id;
       const isMine = message.sender_id === currentUserId;
       const isActiveChat = !!chatId && chatId === liveActiveChat;
@@ -615,11 +630,16 @@ const Chat: React.FC = () => {
 
       const otherUser = liveUsers.find(u => chatIdFor(currentUserId, u.id) === chatId);
       const isGeneral = chatId === GENERAL_CHAT_ID;
-      const chatName = isGeneral ? 'Общий чат' : (otherUser ? nameFor(otherUser) : nameFor(message));
+      const group = liveGroups.find(g => g.chat_id === chatId);
+      // Групповой чат раньше сюда не заглядывал вовсе: otherUser не находился
+      // (у группы нет "второго участника"), и уведомление показывало имя
+      // отправителя как заголовок — неотличимо от личного сообщения, хотя
+      // сообщение видят все в группе.
+      const chatName = isGeneral ? 'Общий чат' : group ? group.name : (otherUser ? nameFor(otherUser) : nameFor(message));
 
-      // В общем чате важно, кто именно написал — иначе все уведомления
-      // выглядят одинаково и по ним не понять, стоит ли отвлекаться.
-      const body = isGeneral ? `${nameFor(message)}: ${message.text}` : message.text;
+      // В общем чате и в группах важно, кто именно написал — иначе все
+      // уведомления выглядят одинаково и по ним не понять, стоит ли отвлекаться.
+      const body = (isGeneral || group) ? `${nameFor(message)}: ${message.text}` : message.text;
 
       // На мобильном в фоне звук играет сама ОС по каналу уведомления —
       // свой в этот момент не воспроизвести (приложение усыплено), да и
@@ -633,7 +653,8 @@ const Chat: React.FC = () => {
         title: chatName,
         body,
         avatarPath: otherUser?.avatarPath ?? null,
-        isGeneral
+        isGeneral,
+        isGroup: !!group
       });
 
       if (!focused) {
@@ -841,7 +862,7 @@ const Chat: React.FC = () => {
 
   // Обновляем снимок для обработчика сокета на каждом рендере — присваивание
   // должно идти после объявления allUsers, иначе получим TDZ.
-  liveRef.current = { activeChat, allUsers, windowFocused, conversationVisible, prefs: notificationPrefs };
+  liveRef.current = { activeChat, allUsers, chatGroups, windowFocused, conversationVisible, prefs: notificationPrefs };
 
   const handleSelectChat = (chatId: string) => {
     if (chatId === GENERAL_CHAT_ID) {
@@ -1245,7 +1266,7 @@ const Chat: React.FC = () => {
             <SettingsPanel
               username={currentDisplayName}
               avatarPath={currentAvatarPath}
-              onClose={() => setSection('chats')}
+              onClose={() => goToSection('chats')}
               onOpenProfile={() => setSettingsView('profile')}
               onDeleteAccount={handleDeleteSelf}
               onLogout={handleLogout}
@@ -1269,13 +1290,13 @@ const Chat: React.FC = () => {
 
       {section === 'calendar' && (
         <main className="section-host">
-          <CalendarSection section={activeSection} onBack={() => setSection('chats')} />
+          <CalendarSection section={activeSection} onBack={() => goToSection('chats')} />
         </main>
       )}
 
       {!isChats && section !== 'settings' && section !== 'people' && section !== 'calendar' && (
         <main className="section-host">
-          <SectionStub section={activeSection} onBack={() => setSection('chats')} />
+          <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>
       )}
 

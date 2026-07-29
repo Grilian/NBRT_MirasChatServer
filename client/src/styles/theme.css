@@ -697,6 +697,15 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .send-btn:disabled { opacity: .45; cursor: default; }
 .send-btn:active:not(:disabled) { transform: scale(.94); }
 
+.paste-btn {
+  flex: none; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--paper-sunken); color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; align-self: flex-end; margin-bottom: 2px;
+}
+.paste-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
+.paste-btn:disabled { opacity: .45; cursor: default; }
+.paste-btn:active:not(:disabled) { transform: scale(.94); }
+
 /* ===== Всплывающие уведомления ===== */
 /* Правый верхний угол, а не нижний: снизу поле ввода и кнопка «отправить», и
    уведомление перекрывало бы их ровно в тот момент, когда человек собирается
@@ -937,6 +946,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* «old» — не версия, а её отсутствие: приглушаем, чтобы взгляд цеплялся за
    тех, у кого версия есть, но старая. */
 .sa-version.is-old { background: none; color: var(--ink-faint); font-style: italic; padding-left: 0; }
+.sa-user-modal { max-width: 380px; }
+.sa-user-modal-body { padding: 4px 20px 22px; }
+.sa-user-modal-body .user-info-field { font-size: 13.5px; }
+.sa-muted-tag { margin-left: 6px; font-size: 12px; }
 .sa-inline-form { display: flex; gap: 8px; margin-top: 14px; }
 .sa-inline-form input { flex: 1; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px; }
 .sa-btn-ghost { border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 6px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }

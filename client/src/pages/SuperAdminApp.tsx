@@ -230,11 +230,93 @@ function GroupsPanel({ groups, onChanged }: { groups: Group[]; onChanged: () => 
   );
 }
 
+// Тип/группа/отдел/роль/тишина — раньше пять колонок прямо в строке таблицы,
+// из-за чего она не помещалась и разъезжалась по горизонтали. Здесь их место
+// заняла одна кнопка «Изменить», а сами поля переехали в модалку — строка
+// стала узкой, а правка осталась настолько же быстрой (каждое поле сохраняется
+// сразу по onChange, отдельной кнопки «Сохранить» как и раньше нет).
+function UserSettingsModal({
+  user, groups, departments, onChange, onClose
+}: {
+  user: UserRow; groups: Group[]; departments: Group[];
+  onChange: (id: number, patch: Record<string, unknown>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card sa-user-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="conv-head">
+          <div className="conv-title"><div className="settings-title">{user.display_name || user.username}</div></div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="sa-user-modal-body">
+          <div className="user-info-field">
+            <span className="user-info-label">Тип</span>
+            <select value={user.account_type} onChange={(e) => onChange(user.id, { account_type: e.target.value })}>
+              {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="user-info-field">
+            <span className="user-info-label">Группа</span>
+            <select
+              value={user.group_id ?? ''}
+              onChange={(e) => onChange(user.id, { group_id: e.target.value ? Number(e.target.value) : null })}
+            >
+              <option value="">—</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </div>
+
+          {/* Отдел назначается только здесь: им приглашают на события, и
+              возможность выставить его себе означала бы выданный себе
+              доступ к чужим встречам. */}
+          <div className="user-info-field">
+            <span className="user-info-label">Отдел</span>
+            <select
+              value={user.department_id ?? ''}
+              onChange={(e) => onChange(user.id, { department_id: e.target.value ? Number(e.target.value) : null })}
+            >
+              <option value="">—</option>
+              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+
+          <div className="user-info-field">
+            <span className="user-info-label">Роль</span>
+            <select value={user.role ?? ''} onChange={(e) => onChange(user.id, { role: e.target.value || null })}>
+              <option value="">— не назначена —</option>
+              {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="user-info-field">
+            <span className="user-info-label">Тишина</span>
+            <label className="switch">
+              <input type="checkbox" checked={user.muted} onChange={(e) => onChange(user.id, { muted: e.target.checked })} />
+              <span className="switch-track"><span className="switch-thumb" /></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[]; groups: Group[]; departments: Group[]; onChanged: () => void }) {
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  const [settingsUserId, setSettingsUserId] = useState<number | null>(null);
+  const settingsUser = users.find((u) => u.id === settingsUserId) || null;
 
   // Таблица растёт вместе со штатом — при паре сотен строк пролистывать её
   // без поиска до нужного человека уже неудобно.
@@ -305,19 +387,15 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
         <thead>
           <tr>
             <th>Имя (Логин)</th>
-            <th>Тип</th>
-            <th>Группа</th>
-            <th>Отдел</th>
-            <th>Роль</th>
-            <th>Тишина</th>
             <th>Пароль</th>
             <th>Версия</th>
+            <th></th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {filtered.length === 0 && (
-            <tr><td colSpan={9} className="sa-empty">Никого не найдено</td></tr>
+            <tr><td colSpan={5} className="sa-empty">Никого не найдено</td></tr>
           )}
           {filtered.map((u) => (
             <tr key={u.id} className={u.muted ? 'sa-row-muted' : ''}>
@@ -338,46 +416,9 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
                 )}
               </td>
               <td>
-                <select value={u.account_type} onChange={(e) => update(u.id, { account_type: e.target.value })}>
-                  {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </td>
-              <td>
-                <select
-                  value={u.group_id ?? ''}
-                  onChange={(e) => update(u.id, { group_id: e.target.value ? Number(e.target.value) : null })}
-                >
-                  <option value="">—</option>
-                  {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                </select>
-              </td>
-              {/* Отдел назначается только здесь: им приглашают на события, и
-                  возможность выставить его себе означала бы выданный себе
-                  доступ к чужим встречам. */}
-              <td>
-                <select
-                  value={u.department_id ?? ''}
-                  onChange={(e) => update(u.id, { department_id: e.target.value ? Number(e.target.value) : null })}
-                >
-                  <option value="">—</option>
-                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </td>
-              <td>
-                <select value={u.role ?? ''} onChange={(e) => update(u.id, { role: e.target.value || null })}>
-                  <option value="">— не назначена —</option>
-                  {Object.entries(ROLE_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </td>
-              <td>
-                <label className="switch">
-                  <input type="checkbox" checked={u.muted} onChange={(e) => update(u.id, { muted: e.target.checked })} />
-                  <span className="switch-track"><span className="switch-thumb" /></span>
-                </label>
+                <button type="button" className="sa-btn-ghost" onClick={() => setSettingsUserId(u.id)}>
+                  Изменить{u.muted && <span className="sa-muted-tag" title="Тишина включена">🔇</span>}
+                </button>
               </td>
               <td>
                 <button type="button" className="sa-btn-ghost" onClick={() => resetPassword(u)}>Сменить</button>
@@ -398,6 +439,16 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
         </tbody>
       </table>
       </div>
+
+      {settingsUser && (
+        <UserSettingsModal
+          user={settingsUser}
+          groups={groups}
+          departments={departments}
+          onChange={update}
+          onClose={() => setSettingsUserId(null)}
+        />
+      )}
     </div>
   );
 }

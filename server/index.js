@@ -24,6 +24,7 @@ const departmentsRoutes = require('./routes/departments');
 const groupsRoutes = require('./routes/groups');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
+const { isSharedChat, markRead } = require('./services/readReceipts');
 const { notifyNewMessage } = require('./services/push');
 const calendarScheduler = require('./services/calendarScheduler');
 
@@ -309,11 +310,22 @@ io.on('connection', (socket) => {
       // телефоне приложение выпадает из онлайна само по pingTimeout, так что
       // оно попадает в эту ветку.
       const senderName = senderRow ? (senderRow.display_name || senderRow.username) : undefined;
+      // В общем чате и в группах у сообщения много получателей — заголовок
+      // пуша должен показывать, откуда оно, иначе выглядит как личное
+      // сообщение от этого человека, хотя видят его все.
+      let chatLabel;
+      if (data.chatId === 'general') {
+        chatLabel = 'Общий чат';
+      } else if (/^group_\d+$/.test(data.chatId)) {
+        const group = db.prepare('SELECT name FROM chat_groups WHERE id = ?').get(data.chatId.slice('group_'.length));
+        chatLabel = group ? group.name : undefined;
+      }
       for (const userId of offlineRecipients) {
         notifyNewMessage(userId, {
           chatId: data.chatId,
           messageId: result.lastInsertRowid,
-          senderName
+          senderName,
+          chatLabel
         });
       }
 
@@ -358,19 +370,8 @@ io.on('connection', (socket) => {
       const ids = messageIds.map(Number).filter(Number.isInteger).slice(0, MAX_READ_BATCH);
       if (!ids.length) return;
 
-      const placeholders = ids.map(() => '?').join(',');
-
-      // Сначала выбираем те id, которые действительно поменяются, чтобы в
-      // рассылку ушёл честный список, а не всё, что прислал клиент.
-      const affected = db.prepare(`
-        SELECT id FROM messages
-        WHERE id IN (${placeholders}) AND chat_id = ? AND sender_id != ? AND status != 'read'
-      `).all(...ids, chatId, userId).map((row) => row.id);
-
+      const affected = markRead(userId, chatId, ids);
       if (!affected.length) return;
-
-      const affectedPlaceholders = affected.map(() => '?').join(',');
-      db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${affectedPlaceholders})`).run(...affected);
 
       emitToChat(chatId, 'message_status_bulk', { chatId, messageIds: affected, status: 'read' }, userId);
     } catch (e) {
@@ -407,12 +408,23 @@ io.on('connection', (socket) => {
     if (!userId) return;
 
     try {
-      const candidates = db.prepare(
+      // Личные чаты: кандидаты по общему status, как и раньше — там он
+      // однозначен. Общие/групповые: кандидатами могут быть сообщения,
+      // у которых status уже 'read' (его выставил кто-то другой), поэтому их
+      // ищем отдельно — по отсутствию личной отметки в message_reads.
+      const personalCandidates = db.prepare(
         "SELECT id, chat_id FROM messages WHERE sender_id != ? AND status != 'read'"
-      ).all(userId);
+      ).all(userId).filter((row) => !isSharedChat(row.chat_id));
+
+      const sharedCandidates = db.prepare(`
+        SELECT m.id, m.chat_id FROM messages m
+        LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
+        WHERE m.sender_id != ? AND r.message_id IS NULL
+          AND (m.chat_id = 'general' OR m.chat_id LIKE 'group\\_%' ESCAPE '\\')
+      `).all(userId, userId);
 
       const byChat = {};
-      for (const row of candidates) {
+      for (const row of [...personalCandidates, ...sharedCandidates]) {
         const participants = participantsForChatId(row.chat_id);
         const isParticipant = participants === null || participants.includes(Number(userId));
         if (isParticipant) {
@@ -420,14 +432,9 @@ io.on('connection', (socket) => {
         }
       }
 
-      const allIds = Object.values(byChat).flat();
-      if (!allIds.length) return;
-
-      const placeholders = allIds.map(() => '?').join(',');
-      db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${placeholders})`).run(...allIds);
-
-      for (const [chatId, messageIds] of Object.entries(byChat)) {
-        emitToChat(chatId, 'message_status_bulk', { chatId, messageIds, status: 'read' });
+      for (const [chatId, ids] of Object.entries(byChat)) {
+        const affected = markRead(userId, chatId, ids);
+        if (affected.length) emitToChat(chatId, 'message_status_bulk', { chatId, messageIds: affected, status: 'read' });
       }
     } catch (e) {
       console.error('Ошибка при массовой отметке прочитанного:', e);
