@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { nameFor } from '../utils/user';
 import { formatDaySeparator, formatMoscowTime, moscowDayKey } from '../utils/time';
+import { onKeyboardShow } from '../utils/mobileKeyboard';
 
 interface Message {
   id: number;
@@ -129,6 +130,31 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     prevMessagesLengthRef.current = messages.length;
   }, [messages, shouldScrollToBottom]);
+
+  // Появление экранной клавиатуры на Android физически уменьшает высоту
+  // WebView (adjustResize) — flex-раскладка тут же сжимает conv-body под
+  // новый размер, но её scrollTop остаётся прежним числом. Раньше «дно»
+  // ленты просто уезжало под новый нижний край: последние сообщения
+  // оказывались за пределами видимой области, и добраться до них можно было
+  // только ручной прокруткой. Довозвращаем прокрутку к концу сами — и только
+  // если человек и так были внизу: если он читает историю выше, набор
+  // сообщения не должен выдёргивать его обратно к последним репликам.
+  const shouldScrollRef = useRef(shouldScrollToBottom);
+  shouldScrollRef.current = shouldScrollToBottom;
+
+  useEffect(() => {
+    return onKeyboardShow(() => {
+      if (!shouldScrollRef.current) return;
+      // Двойной rAF: колбэк плагина срабатывает раньше, чем WebView
+      // фактически перестроился под новую высоту (scrollHeight ещё старый) —
+      // один кадр на применение резайза, второй на коммит разметки.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        });
+      });
+    });
+  }, []);
 
   // Подгрузка истории добавляет сообщения СВЕРХУ, из-за чего содержимое
   // уезжает вниз, а прокрутка остаётся на месте — визуально это выглядело

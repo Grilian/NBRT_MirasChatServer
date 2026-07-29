@@ -21,8 +21,11 @@ interface UserInfoModalProps {
   online?: boolean;
   canModerate?: boolean;
   groups?: { id: number; name: string }[];
+  /** Личная заметка о человеке — раньше правилась прямо в списке чатов
+      отдельной кнопкой на строке; переехала сюда. */
+  comment?: string;
+  onUpdateComment?: (comment: string) => void;
   onClose: () => void;
-  onMessage: () => void;
 }
 
 interface ModerationInfo {
@@ -33,11 +36,32 @@ interface ModerationInfo {
   department_id: number | null;
 }
 
-const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate, groups = [], onClose, onMessage }) => {
+const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate, groups = [], comment, onUpdateComment, onClose }) => {
   const name = nameFor(user);
   const [moderation, setModeration] = useState<ModerationInfo | null>(null);
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
   const [modError, setModError] = useState('');
+
+  const [editingComment, setEditingComment] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+
+  // Открыли другой профиль поверх этого же модала (закрыть/открыть заново не
+  // требуется — Chat.tsx просто меняет id) — незакрытая форма редактирования
+  // иначе осталась бы висеть поверх уже чужой заметки.
+  useEffect(() => {
+    setEditingComment(false);
+    setCommentDraft('');
+  }, [user.id]);
+
+  const startEditComment = () => {
+    setCommentDraft(comment || '');
+    setEditingComment(true);
+  };
+
+  const saveComment = () => {
+    onUpdateComment?.(commentDraft.trim());
+    setEditingComment(false);
+  };
 
   // Тишина/тип/группа/роль — не публичные поля, подгружаем отдельно и только
   // для тех, у кого есть право ими управлять (проверяется и на сервере).
@@ -118,9 +142,35 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
                 <span>{user.phone}</span>
               </div>
             )}
+            {onUpdateComment && (
+              <div className="user-info-field">
+                <span className="user-info-label">Комментарий</span>
+                {editingComment ? (
+                  <div className="user-info-comment-edit">
+                    <input
+                      type="text"
+                      value={commentDraft}
+                      onChange={(e) => setCommentDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); saveComment(); }
+                        if (e.key === 'Escape') { e.preventDefault(); setEditingComment(false); }
+                      }}
+                      placeholder="Заметка о человеке"
+                      autoFocus
+                    />
+                    <button type="button" className="icon-btn-ghost" onClick={saveComment} aria-label="Сохранить">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M20 6 9 17l-5-5" /></svg>
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" className="user-info-comment-value" onClick={startEditComment}>
+                    {comment ? <span>{comment}</span> : <span className="user-info-comment-placeholder">Добавить</span>}
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-
-          <button type="button" className="btn-primary" onClick={onMessage}>Написать</button>
 
           {canModerate && (
             <div className="user-info-admin">

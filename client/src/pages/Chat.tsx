@@ -94,7 +94,42 @@ interface AllUser {
   groupName?: string | null;
 }
 
+// Справочник сотрудников (не только контактов) — тем же набором полей, что и
+// /contacts, начиная с сервера. Нужен только для одной вещи: чтобы окно
+// профиля открывалось и для человека, которого ещё не добавили в контакты
+// (в «Люди» аватар кликабелен для всех, не только для уже добавленных).
+interface DirectoryUser {
+  id: number;
+  username: string;
+  display_name: string | null;
+  avatar_path: string | null;
+  bio: string | null;
+  phone: string | null;
+  department: string | null;
+  position: string | null;
+  birth_date: string | null;
+  group_name: string | null;
+}
+
 const GENERAL_CHAT_ID = 'general';
+
+// Экран целиком: раздел рельса, открыта ли поверх списка сама переписка (это
+// имеет смысл только на узком экране) и подэкран внутри «Настроек».
+interface ChatView {
+  section: SectionId;
+  conversation: boolean;
+  settings: 'settings' | 'profile';
+}
+
+// Два готовых экрана-константы: открытая переписка и список чатов. Вынесены
+// сюда, чтобы ни одно место не собирало состояние по кусочкам и не могло
+// открыть чат, забыв про раздел (или наоборот).
+const VIEW_CONVERSATION: ChatView = { section: 'chats', conversation: true, settings: 'settings' };
+const VIEW_CHAT_LIST: ChatView = { section: 'chats', conversation: false, settings: 'settings' };
+
+// Сколько держать анимацию панелей выключенной после закрытия клавиатуры —
+// чуть дольше самого перехода (.3s), чтобы захватить и перестроение WebView.
+const PANE_ANIM_SKIP_MS = 400;
 
 // Больше четырёх карточек на экране — уже не уведомление, а стена, за которой
 // не видно приложения. Самые старые уступают место новым (в них всё равно
@@ -114,6 +149,7 @@ const Chat: React.FC = () => {
   // иначе он врал бы при обрыве связи, когда сообщения уже никуда не уходят.
   const [socketConnected, setSocketConnected] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
+  const [directory, setDirectory] = useState<DirectoryUser[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<number[]>([]);
@@ -125,12 +161,23 @@ const Chat: React.FC = () => {
   const [comments, setComments] = useState<Record<number, { username: string; display_name: string | null; comment: string }>>({});
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
-  // Верхний уровень навигации — раздел из рельса. Внутри «Настроек» есть свой
-  // подэкран «Профиль», поэтому он отдельным состоянием, а не восьмым разделом:
-  // в рельсе профиль открывается тем же пунктом «Настройки».
-  const [section, setSection] = useState<SectionId>('chats');
-  const [settingsView, setSettingsView] = useState<'settings' | 'profile'>('settings');
+  // Навигация — ОДИН стейт, а не три независимых.
+  //
+  // Раньше раздел (section), открытость переписки на узком экране (mobileView) и
+  // подэкран настроек (settingsView) жили порознь, и каждый переход обязан был
+  // вручную привести в порядок остальные. Стоило одному месту забыть сбросить
+  // mobileView — и раздел «Чаты» открывался сразу в последней переписке, где
+  // рельс разделов скрыт и выйти уже некуда. Так уже ломались кнопки «назад» в
+  // настройках, календаре и заглушках разделов; чинили их по одной, а место для
+  // следующей такой ошибки оставалось.
+  //
+  // Теперь состояние экрана меняется только целиком, поэтому «переписка
+  // открыта» физически не может пережить смену раздела.
+  const [view, setView] = useState<ChatView>({ section: 'chats', conversation: false, settings: 'settings' });
+  const { section, settings: settingsView } = view;
+  // Ещё один пояс: даже если переписка каким-то образом окажется помеченной
+  // открытой вне раздела «Чаты», показывать её мы не станем.
+  const conversationOpen = view.section === 'chats' && view.conversation;
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
@@ -160,7 +207,7 @@ const Chat: React.FC = () => {
   // узком экране можно уйти назад к списку чатов, не закрывая сам чат. Во всех
   // этих случаях сообщение человеку не видно, значит его нельзя считать
   // прочитанным и нельзя проглатывать уведомление о нём.
-  const conversationVisible = windowFocused && section === 'chats' && mobileView === 'chat';
+  const conversationVisible = windowFocused && conversationOpen;
 
   const currentUserId = Number(localStorage.getItem('userId'));
 
@@ -291,36 +338,55 @@ const Chat: React.FC = () => {
   // поэтому старая подписка могла пережить свою отмену (например, если
   // приложение свернули ровно в этот момент — мост встаёт вместе с WebView).
   // Дальше на "назад" срабатывали обе, причём осиротевшая — первой, со своим
-  // замороженным состоянием: она видела mobileView === 'list' при открытом
+  // замороженным состоянием: она видела «переписка закрыта» при открытом
   // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
   // тот же открытый чат, "назад" снова сворачивает, и так до полного
   // закрытия приложения.
-  const backNavRef = useRef({ section, settingsView, mobileView, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId });
-  backNavRef.current = { section, settingsView, mobileView, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId };
+  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId });
+  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId };
 
   useEffect(() => watchMobileKeyboard(), []);
 
-  // Любой уход с экрана переписки — сначала убрать клавиатуру и дать WebView
-  // перестроиться, и только потом переключать панель. Перестроение под
-  // закрывающуюся клавиатуру поверх CSS-перехода роняет анимацию на полпути
-  // (подробности в mobileKeyboard.ts).
-  const leaveConversation = useCallback(() => {
-    hideMobileKeyboard().then(() => setMobileView('list'));
+  // Уход с экрана переписки и переход между разделами — синхронные и
+  // безусловные. Клавиатуре просто отдаём команду закрыться в том же кадре.
+  //
+  // Раньше и то и другое переключало экран только внутри
+  // hideMobileKeyboard().then(...) — ждали, пока WebView перестроится под
+  // уезжающую клавиатуру, чтобы не рвать CSS-переход. Цена оказалась
+  // несопоставимой: промис ходил в нативный мост, а .catch() у него не было, и
+  // единственный отказ моста навсегда убивал сразу все способы уйти с открытой
+  // переписки — включая аппаратную «назад», которая зовёт этот же
+  // leaveConversation. Рельс разделов в переписке скрыт, так что выйти
+  // становилось нечем: помогал только перезапуск приложения.
+  //
+  // Испорченная анимация — косметика, запертый экран — блокер, поэтому
+  // навигация больше не зависит от ответа нативной части ничем. Сама проблема
+  // с анимацией решается иначе: если клавиатура была открыта, переход между
+  // панелями просто проходит без анимации — рвать нечего.
+  const [skipPaneAnim, setSkipPaneAnim] = useState(false);
+  const paneAnimTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const closeKeyboard = useCallback(() => {
+    if (!hideMobileKeyboard()) return;
+    setSkipPaneAnim(true);
+    if (paneAnimTimer.current) clearTimeout(paneAnimTimer.current);
+    paneAnimTimer.current = setTimeout(() => setSkipPaneAnim(false), PANE_ANIM_SKIP_MS);
   }, []);
 
+  useEffect(() => () => { if (paneAnimTimer.current) clearTimeout(paneAnimTimer.current); }, []);
+
+  const leaveConversation = useCallback(() => {
+    closeKeyboard();
+    setView(VIEW_CHAT_LIST);
+  }, [closeKeyboard]);
+
   const goToSection = useCallback((id: SectionId) => {
-    hideMobileKeyboard().then(() => {
-      setSection(id);
-      // Возврат в «Настройки» всегда открывает сам список настроек, а не
-      // подэкран профиля, на котором человек был в прошлый раз.
-      if (id === 'settings') setSettingsView('settings');
-      // То же и с «Чатами»: раздел открывается списком, а не последней
-      // перепиской. Иначе выходит ловушка — уйти из чатов, не нажав «назад» в
-      // шапке, оставляет mobileView в 'chat', и возврат в раздел роняет сразу
-      // в переписку, где на узком экране рельс разделов скрыт и выйти некуда.
-      if (id === 'chats') setMobileView('list');
-    });
-  }, []);
+    closeKeyboard();
+    // Раздел всегда открывается «сначала»: «Чаты» — списком, а не последней
+    // перепиской, «Настройки» — списком настроек, а не подэкраном профиля, на
+    // котором человек был в прошлый раз.
+    setView({ section: id, conversation: false, settings: 'settings' });
+  }, [closeKeyboard]);
 
   useEffect(() => {
     if (!isNativeMobile) return;
@@ -332,14 +398,18 @@ const Chat: React.FC = () => {
       if (nav.createGroupOpen) { setCreateGroupOpen(false); return; }
       if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
       if (nav.directoryOpen) { setDirectoryOpen(false); return; }
-      if (nav.section === 'settings' && nav.settingsView === 'profile') { setSettingsView('settings'); return; }
+      if (nav.view.section === 'settings' && nav.view.settings === 'profile') {
+        setView({ section: 'settings', conversation: false, settings: 'settings' });
+        return;
+      }
       // Тот же сброс, что и в goToSection: аппаратная кнопка «назад» возвращает
       // к списку чатов, а не в переписку, открытую до ухода в другой раздел.
-      if (nav.section !== 'chats') { setSection('chats'); setMobileView('list'); return; }
-      if (nav.mobileView === 'chat') { leaveConversation(); return; }
+      if (nav.view.section !== 'chats') { setView(VIEW_CHAT_LIST); return; }
+      if (nav.view.conversation) { leaveConversation(); return; }
+      // Со списка чатов — сворачиваем, а не убиваем процесс.
       CapApp.minimizeApp();
     });
-    return () => { listenerPromise.then((h) => h.remove()); };
+    return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
   }, [leaveConversation]);
 
   // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
@@ -399,6 +469,9 @@ const Chat: React.FC = () => {
       api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
       api.get('/groups').then(({ data }) => setChatGroups(data)).catch(console.error);
+      // Только для профиля людей, ещё не добавленных в контакты — см.
+      // DirectoryUser выше и infoModalUser ниже.
+      api.get('/users').then(({ data }) => setDirectory(data)).catch(console.error);
     });
 
     // Список контактов не приходит по сокету целиком (только точечное событие
@@ -498,11 +571,13 @@ const Chat: React.FC = () => {
     });
     newSocket.on('group_removed', (data: { id: number; chat_id: string }) => {
       setChatGroups(prev => prev.filter(g => g.id !== data.id));
-      setActiveChat(prev => {
-        if (prev !== data.chat_id) return prev;
-        setMobileView('list');
-        return null;
-      });
+      // Читаем текущий чат из liveRef, а не вызываем setView внутри updater'а
+      // setActiveChat: обновляющая функция обязана быть чистой, а в StrictMode
+      // React выполняет её дважды.
+      if (liveRef.current.activeChat === data.chat_id) {
+        setActiveChat(null);
+        setView(VIEW_CHAT_LIST);
+      }
     });
 
     // Супер-админ (или теперь и обычный "Администратор" из профиля) может
@@ -541,20 +616,35 @@ const Chat: React.FC = () => {
   // встроенный реконнект теоретически должен сработать сам, но ждать его
   // внутренний backoff не нужно — сразу форсируем попытку и на всякий случай
   // подтягиваем то, что могло не долететь, пока соединение было мертво.
+  //
+  // Подписываемся один раз, а сокет и открытый чат читаем из ref — по той же
+  // причине, что и в обработчике аппаратной «назад»: эффект с deps
+  // [socket, activeChat] пересоздавал нативную подписку на каждое открытие
+  // чата, а remove() уходит в мост асинхронно и может не успеть. Пережившая
+  // отмену подписка помнила свой activeChat и при возврате из фона затирала
+  // messages историей уже закрытого чата.
+  const resumeRef = useRef<{ socket: Socket | null; activeChat: string | null }>({ socket: null, activeChat: null });
+  resumeRef.current = { socket, activeChat };
+
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('appStateChange', ({ isActive }) => {
       if (!isActive) return;
 
-      if (socket && !socket.connected) {
-        socket.connect();
+      const { socket: liveSocket, activeChat: liveActiveChat } = resumeRef.current;
+
+      if (liveSocket && !liveSocket.connected) {
+        liveSocket.connect();
       }
 
       api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
 
-      if (activeChat) {
-        api.get(`/messages/${activeChat}?limit=50&offset=0`)
+      if (liveActiveChat) {
+        api.get(`/messages/${liveActiveChat}?limit=50&offset=0`)
           .then(({ data }) => {
+            // Пока ответ шёл, человек мог уйти в другой чат — тогда эта история
+            // уже чужая и применять её нельзя.
+            if (resumeRef.current.activeChat !== liveActiveChat) return;
             if (data.messages) {
               setMessages(data.messages);
               setHasMore(data.hasMore);
@@ -566,8 +656,8 @@ const Chat: React.FC = () => {
           .catch(console.error);
       }
     });
-    return () => { listenerPromise.then((h) => h.remove()); };
-  }, [socket, activeChat]);
+    return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
+  }, []);
 
   // Единый обработчик новых сообщений.
   //
@@ -830,11 +920,15 @@ const Chat: React.FC = () => {
     }
   };
 
-  // Комментарии
+  // Комментарии. Теперь редактируются из профиля (UserInfoModal), который
+  // открывается и для людей, ещё не добавленных в контакты, — поэтому имя для
+  // локального эха ищем не только среди contacts (allUsers), но и в
+  // справочнике (directory), иначе для не-контакта комментарий уходил бы на
+  // сервер, но не показался бы в списке чатов до следующей перезагрузки.
   const updateComment = async (targetUserId: number, comment: string) => {
     try {
       await api.post('/comments', { target_user_id: targetUserId, comment });
-      const user = allUsers.find(u => u.id === targetUserId);
+      const user = allUsers.find(u => u.id === targetUserId) || directory.find(u => u.id === targetUserId);
       if (user) {
         setComments(prev => ({
           ...prev,
@@ -865,18 +959,30 @@ const Chat: React.FC = () => {
   liveRef.current = { activeChat, allUsers, chatGroups, windowFocused, conversationVisible, prefs: notificationPrefs };
 
   const handleSelectChat = (chatId: string) => {
-    if (chatId === GENERAL_CHAT_ID) {
-      setActiveChat(GENERAL_CHAT_ID);
-    } else if (/^group_\d+$/.test(chatId)) {
-      if (chatGroups.some(g => g.chat_id === chatId)) setActiveChat(chatId);
-    } else {
-      const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === chatId);
-      if (user) setActiveChat(chatId);
+    // Сначала выясняем, знаем ли мы вообще такой чат. Раньше проверка стояла
+    // только вокруг setActiveChat, а панель переключалась на переписку в любом
+    // случае — и при неизвестном chat_id (тап по уведомлению от человека,
+    // который ещё не подгрузился в список контактов) открывался ПРОШЛЫЙ чат:
+    // activeChat оставался старым, а вид уже был перепиской.
+    const known =
+      chatId === GENERAL_CHAT_ID
+        ? true
+        : /^group_\d+$/.test(chatId)
+          ? chatGroups.some(g => g.chat_id === chatId)
+          : allUsers.some(u => u.source === 'local' && getChatId(u.id) === chatId);
+
+    if (!known) {
+      // Показываем список чатов: там нужный диалог появится, как только
+      // доедет ростер, — это честнее, чем открыть чужую переписку.
+      setView(VIEW_CHAT_LIST);
+      return;
     }
-    setMobileView('chat');
+
+    setActiveChat(chatId);
+    closeKeyboard();
     // Открытые Настройки/Профиль/другой раздел иначе продолжали закрывать собой
     // область переписки — activeChat менялся, а видимая панель оставалась прежней.
-    setSection('chats');
+    setView(VIEW_CONVERSATION);
   };
 
   // Тап по системному уведомлению на Android — открыть тот же чат, откуда
@@ -917,8 +1023,8 @@ const Chat: React.FC = () => {
     setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, { ...user, bio: null, phone: null, department: null, position: null, birth_date: null }]);
     setDirectoryOpen(false);
     setActiveChat(getChatId(user.id));
-    setMobileView('chat');
-    setSection('chats');
+    closeKeyboard();
+    setView(VIEW_CONVERSATION);
     try {
       await api.post(`/contacts/${user.id}`);
     } catch (e) {
@@ -940,7 +1046,7 @@ const Chat: React.FC = () => {
   const handleRemoveContact = async (userId: number) => {
     if (activeChat === getChatId(userId)) {
       setActiveChat(null);
-      setMobileView('list');
+      setView(VIEW_CHAT_LIST);
     }
     setUsers(prev => prev.filter(u => u.id !== userId));
     try {
@@ -1133,17 +1239,48 @@ const Chat: React.FC = () => {
     return user ? { name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id), avatarPath: user.avatarPath, userId: user.id } : null;
   })();
 
-  const infoModalUser = infoModalUserId ? allUsers.find(u => u.id === infoModalUserId) : null;
+  // Раньше искали только среди контактов (allUsers) — окно профиля молча не
+  // открывалось для человека из «Люди», которого ещё не добавили в чаты
+  // (аватар там кликабелен для всех, не только для уже добавленных). Теперь
+  // при промахе смотрим в справочник (directory), который приходит с теми же
+  // полями профиля — см. DirectoryUser выше.
+  const infoModalUser: AllUser | null = (() => {
+    if (infoModalUserId === null) return null;
+    const contact = allUsers.find(u => u.id === infoModalUserId);
+    if (contact) return contact;
+    const dirUser = directory.find(u => u.id === infoModalUserId);
+    if (!dirUser) return null;
+    return {
+      id: dirUser.id,
+      username: dirUser.username,
+      display_name: dirUser.display_name,
+      avatarPath: dirUser.avatar_path,
+      bio: dirUser.bio,
+      phone: dirUser.phone,
+      department: dirUser.department,
+      position: dirUser.position,
+      birthDate: dirUser.birth_date,
+      source: 'local' as const,
+      groupName: dirUser.group_name,
+    };
+  })();
 
   const isChats = section === 'chats';
   const activeSection = sectionById(section);
 
-  const openOwnProfile = () => { setSection('settings'); setSettingsView('profile'); };
+  // Через setView целиком, а не setSection + setSettingsView по отдельности:
+  // раньше этот переход менял раздел, не трогая состояние переписки, — та же
+  // ловушка, что чинили в кнопках «назад» у настроек и календаря.
+  const openOwnProfile = () => {
+    closeKeyboard();
+    setView({ section: 'settings', conversation: false, settings: 'profile' });
+  };
 
   return (
     <div className={'chat-layout'
       + (isChats ? '' : ' is-single-pane')
-      + (isChats && mobileView === 'chat' ? ' is-conversation-view' : '')}>
+      + (conversationOpen ? ' is-conversation-view' : '')
+      + (skipPaneAnim ? ' is-no-pane-anim' : '')}>
       <NotificationStack
         toasts={toasts}
         durationMs={notificationPrefs.durationMs}
@@ -1173,13 +1310,12 @@ const Chat: React.FC = () => {
         unreadCounts={unreadCounts}
         favorites={favorites}
         onToggleFavorite={toggleFavorite}
-        onUpdateComment={updateComment}
-        comments={comments}
         onMarkAllRead={handleMarkAllRead}
         onRemoveContact={handleRemoveContact}
         onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
         onOpenGroupInfo={(chatGroupId) => setGroupInfoId(chatGroupId)}
         onCreateGroup={() => setCreateGroupOpen(true)}
+        onOpenSettings={() => goToSection('settings')}
       />
       )}
       {directoryOpen && (
@@ -1200,8 +1336,7 @@ const Chat: React.FC = () => {
             setChatGroups(prev => prev.some(g => g.id === group.id) ? prev : [...prev, { ...group, role: 'owner' as const }]);
             setCreateGroupOpen(false);
             setActiveChat(group.chat_id);
-            setMobileView('chat');
-            setSection('chats');
+            setView(VIEW_CONVERSATION);
           }}
         />
       )}
@@ -1218,7 +1353,7 @@ const Chat: React.FC = () => {
           onGone={(chatId) => {
             setChatGroups(prev => prev.filter(g => g.chat_id !== chatId));
             setGroupInfoId(null);
-            if (activeChat === chatId) { setActiveChat(null); setMobileView('list'); }
+            if (activeChat === chatId) { setActiveChat(null); setView(VIEW_CHAT_LIST); }
           }}
         />
       )}
@@ -1239,11 +1374,9 @@ const Chat: React.FC = () => {
           online={onlineUsers.includes(infoModalUser.id)}
           canModerate={currentUserRole === 'admin'}
           groups={groups}
+          comment={comments[infoModalUser.id]?.comment || ''}
+          onUpdateComment={(comment) => updateComment(infoModalUser.id, comment)}
           onClose={() => setInfoModalUserId(null)}
-          onMessage={() => {
-            handleSelectChat(getChatId(infoModalUser.id));
-            setInfoModalUserId(null);
-          }}
         />
       )}
       {section === 'settings' && (
@@ -1258,7 +1391,7 @@ const Chat: React.FC = () => {
               currentDepartment={currentDepartment}
               currentPosition={currentPosition}
               currentBirthDate={currentBirthDate}
-              onBack={() => setSettingsView('settings')}
+              onBack={() => setView(v => ({ ...v, settings: 'settings' }))}
               onSaved={handleProfileSaved}
               onAvatarChanged={handleAvatarChanged}
             />
@@ -1267,7 +1400,7 @@ const Chat: React.FC = () => {
               username={currentDisplayName}
               avatarPath={currentAvatarPath}
               onClose={() => goToSection('chats')}
-              onOpenProfile={() => setSettingsView('profile')}
+              onOpenProfile={() => setView(v => ({ ...v, settings: 'profile' }))}
               onDeleteAccount={handleDeleteSelf}
               onLogout={handleLogout}
             />

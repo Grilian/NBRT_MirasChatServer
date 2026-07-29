@@ -33,6 +33,11 @@ const stroke = {
   strokeLinejoin: 'round' as const,
 };
 
+// «Настройки» на узком экране скрыты из нижней панели (см. .rail-item-settings
+// в theme.css) — семи пунктам там банально не хватает ширины без горизонтальной
+// прокрутки. Точка входа переехала в шапку списка чатов (см. roster-settings-btn
+// в ChatList), а на самом рельсе пункт остаётся только для десктопной
+// вертикальной раскладки.
 export const SECTIONS: SectionMeta[] = [
   {
     id: 'chats',
@@ -153,7 +158,7 @@ const NavRail: React.FC<NavRailProps> = ({
             <button
               key={section.id}
               type="button"
-              className={'rail-item' + (isActive ? ' is-active' : '')}
+              className={'rail-item' + (isActive ? ' is-active' : '') + (section.id === 'settings' ? ' rail-item-settings' : '')}
               aria-current={isActive ? 'page' : undefined}
               title={section.label}
               onClick={() => onSelect(section.id)}

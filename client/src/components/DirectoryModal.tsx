@@ -30,7 +30,12 @@ const DirectoryModal: React.FC<DirectoryModalProps> = ({ existingContactIds, onC
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = users.filter(u => nameFor(u).toLowerCase().includes(query.toLowerCase()));
+  // Этот справочник — только для НОВЫХ переписок: тех, кто уже в списке чатов,
+  // тут незачем показывать снова (открыть их можно прямо из списка), только
+  // множило бы дубликаты на одно и то же имя.
+  const filtered = users
+    .filter(u => !existingContactIds.includes(u.id))
+    .filter(u => nameFor(u).toLowerCase().includes(query.toLowerCase()));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -55,16 +60,17 @@ const DirectoryModal: React.FC<DirectoryModalProps> = ({ existingContactIds, onC
 
         <div className="directory-list">
           {loading && <div className="roster-empty">Загрузка...</div>}
-          {!loading && filtered.length === 0 && <div className="roster-empty">Ничего не найдено</div>}
+          {!loading && filtered.length === 0 && (
+            <div className="roster-empty">
+              {query.trim() ? 'Ничего не найдено' : 'Все сотрудники уже в списке чатов'}
+            </div>
+          )}
           {filtered.map(user => (
             <div key={user.id} className="row directory-row" role="button" tabIndex={0} onClick={() => onSelectUser(user)}>
               <Avatar name={nameFor(user)} avatarPath={user.avatar_path} />
               <div className="row-body">
                 <div className="row-name"><span>{nameFor(user)}</span></div>
-                <div className="row-preview">
-                  {user.group_name || 'Без группы'}
-                  {existingContactIds.includes(user.id) && ' · уже в списке чатов'}
-                </div>
+                <div className="row-preview">{user.group_name || 'Без группы'}</div>
               </div>
             </div>
           ))}

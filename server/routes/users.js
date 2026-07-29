@@ -45,9 +45,14 @@ router.get('/', verifyToken, (req, res) => {
     const restrictToInternet = requester && requester.account_type === 'internet';
     const visibleGroupPlaceholders = INTERNET_VISIBLE_GROUPS.map(() => '?').join(',');
 
+    // bio/phone/position/birth_date добавлены ради профиля (UserInfoModal):
+    // раньше справочник отдавал только то, что нужно для строки в списке, и
+    // окно профиля, открытое не для контакта (а для любого сотрудника из
+    // «Люди»), оставалось наполовину пустым по сравнению с тем же профилем,
+    // открытым из уже добавленного контакта (там эти поля берутся из /contacts).
     const users = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_path, u.group_id, g.name AS group_name,
-             u.department_id, d.name AS department
+      SELECT u.id, u.username, u.display_name, u.avatar_path, u.bio, u.phone, u.position, u.birth_date,
+             u.group_id, g.name AS group_name, u.department_id, d.name AS department
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
       LEFT JOIN departments d ON d.id = u.department_id

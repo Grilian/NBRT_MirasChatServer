@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Avatar from './Avatar';
 import { formatChatListTime } from '../utils/time';
 
@@ -22,11 +22,6 @@ interface LastMessage {
   created_at: string;
 }
 
-interface Comment {
-  username: string;
-  comment: string;
-}
-
 interface ChatListProps {
   chats: Chat[];
   activeChat: string | null;
@@ -38,13 +33,14 @@ interface ChatListProps {
   unreadCounts: Record<string, number>;
   favorites: string[];
   onToggleFavorite: (chatId: string) => void;
-  onUpdateComment: (userId: number, comment: string) => void;
-  comments: Record<number, Comment>;
   onMarkAllRead: () => void;
   onRemoveContact: (userId: number) => void;
   onOpenUserInfo: (userId: number) => void;
   onOpenGroupInfo: (chatGroupId: number) => void;
   onCreateGroup: () => void;
+  /** Только для узкого экрана — на нём в нижней панели «Настройкам» не хватило
+      места (см. .rail-item-settings в theme.css), поэтому вход туда здесь. */
+  onOpenSettings: () => void;
 }
 
 function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOpenGroupInfo: (chatGroupId: number) => void) {
@@ -76,18 +72,9 @@ function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOp
 
 const ChatList: React.FC<ChatListProps> = ({
   chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
-  lastMessages, unreadCounts, favorites, onToggleFavorite, onUpdateComment, comments,
-  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup
+  lastMessages, unreadCounts, favorites, onToggleFavorite,
+  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings
 }) => {
-  const [editingComment, setEditingComment] = useState<number | null>(null);
-  const [commentText, setCommentText] = useState('');
-
-  const handleCommentSubmit = (userId: number) => {
-    onUpdateComment(userId, commentText);
-    setEditingComment(null);
-    setCommentText('');
-  };
-
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
   const filtered = chats.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -115,6 +102,18 @@ const ChatList: React.FC<ChatListProps> = ({
               </button>
             </>
           )}
+          {/* Видна только на узком экране — там же скрыт пункт «Настройки» в
+              нижней панели (не помещался без прокрутки). На десктопе вход в
+              настройки остаётся на рельсе, поэтому здесь дублировать не нужно. */}
+          <button
+            type="button"
+            className="roster-settings-btn"
+            title="Настройки"
+            aria-label="Настройки"
+            onClick={onOpenSettings}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z" /></svg>
+          </button>
         </div>
         <div className="search">
           <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
@@ -171,20 +170,6 @@ const ChatList: React.FC<ChatListProps> = ({
                     <div className="row-preview">{last ? last.text : ''}</div>
                     <div className="row-actions">
                       {unreadCount > 0 && <span className="row-unread">{unreadCount}</span>}
-                      {chat.userId && (
-                        <button
-                          type="button"
-                          className="icon-btn-ghost"
-                          title="Добавить комментарий"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingComment(chat.userId!);
-                            setCommentText(comments[chat.userId!]?.comment || '');
-                          }}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
-                        </button>
-                      )}
                       <button
                         type="button"
                         className={'icon-btn-ghost star' + (isFavorite ? ' is-fav' : '')}
@@ -213,22 +198,6 @@ const ChatList: React.FC<ChatListProps> = ({
                     </div>
                   </div>
                 </div>
-
-                {editingComment === chat.userId && (
-                  <div className="comment-popover" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="text"
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      placeholder="Комментарий..."
-                      autoFocus
-                    />
-                    <div className="comment-popover-actions">
-                      <button type="button" className="save" onClick={() => handleCommentSubmit(chat.userId!)}>Сохранить</button>
-                      <button type="button" className="cancel" onClick={() => setEditingComment(null)}>Отмена</button>
-                    </div>
-                  </div>
-                )}
               </div>
             </React.Fragment>
           );
