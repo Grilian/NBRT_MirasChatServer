@@ -383,13 +383,20 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
       </div>
       {error && <p className="form-error">{error}</p>}
       <div className="sa-table-wrap">
-      <table className="sa-table">
+      <table className="sa-table sa-table-users">
+        <colgroup>
+          <col className="col-name" />
+          <col className="col-settings" />
+          <col className="col-password" />
+          <col className="col-version" />
+          <col className="col-delete" />
+        </colgroup>
         <thead>
           <tr>
-            <th>Имя (Логин)</th>
+            <th>Имя (логин)</th>
+            <th>Настройки</th>
             <th>Пароль</th>
             <th>Версия</th>
-            <th></th>
             <th></th>
           </tr>
         </thead>
@@ -409,7 +416,11 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
                     onBlur={() => saveRename(u.id)}
                   />
                 ) : (
-                  <span className="sa-link" onClick={() => startRename(u)}>
+                  <span
+                    className="sa-link sa-user-cell"
+                    onClick={() => startRename(u)}
+                    title={`${u.display_name || u.username} (${u.username})`}
+                  >
                     {u.display_name || u.username} ({u.username})
                     {u.account_type === 'staff' && <span className="sa-verified-badge" title="Подтверждённая учётная запись">✓</span>}
                   </span>

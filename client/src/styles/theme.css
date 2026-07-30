@@ -937,14 +937,27 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .sa-table th {
   text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint);
-  padding: 8px 10px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--paper-raised); z-index: 1;
+  padding: 8px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--paper-raised); z-index: 1;
 }
-.sa-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.sa-table td { padding: 8px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.sa-table th:first-child, .sa-table td:first-child { padding-left: 4px; }
+.sa-table th:last-child, .sa-table td:last-child { padding-right: 4px; text-align: right; }
 .sa-table tr:last-child td { border-bottom: none; }
 .sa-table tbody tr:hover td { background: var(--row-hover); }
 .sa-table select, .sa-table input[type="text"], .sa-table input[type="password"] {
   border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: 6px; padding: 6px 9px; font-size: 13px;
 }
+/* Таблица пользователей растёт быстрее остальных и легче всего расползается
+   вбок — колонка с именем раньше не была ничем ограничена и тянула за собой
+   всю строку. Фиксируем ширины через colgroup и обрезаем длинные имена
+   многоточием; полное имя и логин остаются в title (всплывающая подсказка). */
+.sa-table-users { table-layout: fixed; }
+.sa-table-users .col-name { width: 34%; }
+.sa-table-users .col-settings { width: 16%; }
+.sa-table-users .col-password { width: 24%; }
+.sa-table-users .col-version { width: 16%; }
+.sa-table-users .col-delete { width: 10%; }
+.sa-user-cell { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .sa-row-muted { opacity: .6; }
 .sa-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .sa-link:hover { color: var(--accent); }
