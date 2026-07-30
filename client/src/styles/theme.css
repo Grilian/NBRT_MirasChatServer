@@ -923,6 +923,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-tab.is-active .sa-tab-count { background: var(--accent); color: var(--accent-ink); }
 .sa-main { max-width: 1120px; margin: 0 auto; padding: 22px 24px 40px; display: flex; flex-direction: column; gap: 20px; }
 .sa-card { background: var(--paper-raised); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); }
+/* Группы/Отделы/Обновления — короткие списки и формы, растягивать их на всю
+   ширину карточки пользователей незачем: выглядит пусто и расшатывает ритм
+   вкладок между собой. */
+.sa-card--compact { max-width: 560px; margin-left: auto; margin-right: auto; }
 .sa-card h2 { margin: 0 0 14px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
 .sa-card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
 .sa-card-head h2 { margin: 0; }
@@ -954,7 +958,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    тянуть за собой пустое пространство). Длинные имена обрезаются
    многоточием по фиксированной ширине; полное имя и логин остаются в title
    (всплывающая подсказка). */
-.sa-table-users { width: auto; max-width: 100%; }
+.sa-table-users { width: auto; max-width: 100%; margin: 0 auto; }
 .sa-user-cell { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .sa-row-muted { opacity: .6; }
 .sa-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
@@ -976,6 +980,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-muted-tag { margin-left: 6px; font-size: 12px; }
 .sa-inline-form { display: flex; gap: 8px; margin-top: 14px; }
 .sa-inline-form input { flex: 1; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px; }
+/* .btn-primary по умолчанию width: 100% — рассчитан на форму логина.
+   Внутри flex-строки это заставляло кнопку раздуваться и отжимать поле
+   ввода в узкую полоску. */
+.sa-inline-form .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; white-space: nowrap; }
 .sa-btn-ghost { border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 6px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }
 .sa-btn-ghost:hover { background: var(--paper-sunken); }
 .sa-btn-danger { border: none; background: none; color: var(--unread); font-size: 12.5px; cursor: pointer; padding: 4px 6px; }

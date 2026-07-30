@@ -185,7 +185,7 @@ function GroupsPanel({ groups, onChanged }: { groups: Group[]; onChanged: () => 
   };
 
   return (
-    <div className="sa-card">
+    <div className="sa-card sa-card--compact">
       <h2>Группы</h2>
       {error && <p className="form-error">{error}</p>}
       <table className="sa-table">
@@ -503,7 +503,7 @@ function DepartmentsPanel({ departments, onChanged }: { departments: Group[]; on
   };
 
   return (
-    <div className="sa-card">
+    <div className="sa-card sa-card--compact">
       <h2>Отделы</h2>
       <p className="sa-hint">
         Из этого списка выбирают отдел в профиле; по нему же приглашают на события целыми отделами.
@@ -602,7 +602,7 @@ function UpdateSchedulePanel() {
   };
 
   return (
-    <div className="sa-card">
+    <div className="sa-card sa-card--compact">
       <h2>Обновления</h2>
       {error && <p className="form-error">{error}</p>}
 
