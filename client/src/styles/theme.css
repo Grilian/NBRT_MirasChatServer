@@ -949,15 +949,13 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 /* Таблица пользователей растёт быстрее остальных и легче всего расползается
    вбок — колонка с именем раньше не была ничем ограничена и тянула за собой
-   всю строку. Фиксируем ширины через colgroup и обрезаем длинные имена
-   многоточием; полное имя и логин остаются в title (всплывающая подсказка). */
-.sa-table-users { table-layout: fixed; }
-.sa-table-users .col-name { width: 34%; }
-.sa-table-users .col-settings { width: 16%; }
-.sa-table-users .col-password { width: 24%; }
-.sa-table-users .col-version { width: 16%; }
-.sa-table-users .col-delete { width: 10%; }
-.sa-user-cell { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+   всю строку. width: auto вместо 100% — таблица не растягивается на всю
+   карточку, а обжимается по содержимому (короткие кнопки и бейджи не должны
+   тянуть за собой пустое пространство). Длинные имена обрезаются
+   многоточием по фиксированной ширине; полное имя и логин остаются в title
+   (всплывающая подсказка). */
+.sa-table-users { width: auto; max-width: 100%; }
+.sa-user-cell { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .sa-row-muted { opacity: .6; }
 .sa-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .sa-link:hover { color: var(--accent); }

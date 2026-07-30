@@ -384,13 +384,6 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
       {error && <p className="form-error">{error}</p>}
       <div className="sa-table-wrap">
       <table className="sa-table sa-table-users">
-        <colgroup>
-          <col className="col-name" />
-          <col className="col-settings" />
-          <col className="col-password" />
-          <col className="col-version" />
-          <col className="col-delete" />
-        </colgroup>
         <thead>
           <tr>
             <th>Имя (логин)</th>
