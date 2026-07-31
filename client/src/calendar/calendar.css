@@ -72,6 +72,9 @@
   border-radius: var(--radius-pill); padding: 6px 14px; font-size: 13.5px; cursor: pointer;
 }
 .cal-today:hover { background: var(--row-hover); }
+/* Открыт именно сегодняшний день — иначе кнопка выглядит как обычная, и
+   непонятно, ты уже «дома» или нет. */
+.cal-today.is-active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
 .cal-nav { display: flex; gap: 2px; }
 .cal-heading { flex: 1; margin: 0; font: 600 17px/1.2 var(--font-display); min-width: 0; }
 .cal-views { display: flex; gap: 2px; background: var(--paper-sunken); border-radius: var(--radius-pill); padding: 3px; }

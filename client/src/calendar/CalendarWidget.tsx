@@ -190,7 +190,11 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
           </button>
         )}
 
-        <button type="button" className="cal-today" onClick={() => setAnchor(todayKey())}>
+        <button
+          type="button"
+          className={`cal-today${anchor === todayKey() ? ' is-active' : ''}`}
+          onClick={() => setAnchor(todayKey())}
+        >
           Сегодня
         </button>
 

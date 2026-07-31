@@ -91,6 +91,7 @@ const TimeGridView: React.FC<TimeGridViewProps> = ({
                   key={item.id}
                   type="button"
                   className={`cal-chip cal-color-${item.color} is-allday${item.completed ? ' is-done' : ''}`}
+                  title={item.location ? `${item.title} · ${item.location}` : item.title}
                   onClick={() => onOpenEvent(item)}
                 >
                   <span className="cal-chip-title">{item.title}</span>
@@ -136,6 +137,7 @@ const TimeGridView: React.FC<TimeGridViewProps> = ({
                       left: `calc(${(lane / lanes) * 100}% + 2px)`,
                       width: `calc(${(1 / lanes) * 100}% - 4px)`,
                     }}
+                    title={occurrence.location ? `${occurrence.title} · ${occurrence.location}` : occurrence.title}
                     onClick={(event) => { event.stopPropagation(); onOpenEvent(occurrence); }}
                   >
                     <span className="cal-event-time">{formatClock(occurrence.starts_at)}</span>

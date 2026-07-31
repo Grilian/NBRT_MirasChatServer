@@ -88,6 +88,7 @@ const MonthView: React.FC<MonthViewProps> = ({
                           + (item.all_day ? ' is-allday' : '')
                           + (item.completed ? ' is-done' : '')
                         }
+                        title={item.location ? `${item.title} · ${item.location}` : item.title}
                         onClick={() => onOpenEvent(item)}
                       >
                         {!item.all_day && <span className="cal-chip-time">{formatClock(item.starts_at)}</span>}
