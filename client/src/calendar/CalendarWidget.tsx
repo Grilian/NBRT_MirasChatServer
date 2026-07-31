@@ -294,7 +294,8 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
                 selected={anchor}
                 occurrences={occurrences}
                 onOpenDay={(day) => { setAnchor(day); setMode('day'); }}
-                onCreate={(day) => { setAnchor(day); openCreate(day, null); }}
+                onSelectDay={setAnchor}
+                onCreate={(day) => openCreate(day, null)}
                 onOpenEvent={openOccurrence}
               />
             )}

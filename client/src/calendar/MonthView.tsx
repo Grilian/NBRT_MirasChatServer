@@ -12,6 +12,7 @@ interface MonthViewProps {
   selected: DayKey;
   occurrences: CalendarOccurrence[];
   onOpenDay: (day: DayKey) => void;
+  onSelectDay: (day: DayKey) => void;
   onCreate: (day: DayKey) => void;
   onOpenEvent: (occurrence: CalendarOccurrence) => void;
 }
@@ -22,7 +23,7 @@ interface MonthViewProps {
 const VISIBLE_PER_DAY = 3;
 
 const MonthView: React.FC<MonthViewProps> = ({
-  anchor, selected, occurrences, onOpenDay, onCreate, onOpenEvent,
+  anchor, selected, occurrences, onOpenDay, onSelectDay, onCreate, onOpenEvent,
 }) => {
   const weeks = monthGrid(anchor);
   const today = todayKey();
@@ -62,11 +63,20 @@ const MonthView: React.FC<MonthViewProps> = ({
                     + (day === selected ? ' is-selected' : '')
                   }
                   onClick={(event) => {
-                    // Клик по пустому месту плитки — быстрое создание события
-                    // на этот день; клик по числу или по плашке события несёт
-                    // свой обработчик и сюда доходить не должен.
+                    // Клик по пустому месту плитки — клик по числу или по
+                    // плашке события несёт свой обработчик и сюда доходить
+                    // не должен.
                     if ((event.target as HTMLElement).closest('button')) return;
-                    onCreate(day);
+                    // Создание события — только вторым кликом, когда клетка
+                    // уже выбрана: первый клик по чужой клетке должен просто
+                    // перевести выбор на неё, а не сразу открывать диалог —
+                    // иначе беглый клик мимо, чтобы посмотреть на другой день,
+                    // каждый раз всплывал бы созданием события.
+                    if (day === selected) {
+                      onCreate(day);
+                    } else {
+                      onSelectDay(day);
+                    }
                   }}
                 >
                   <button
