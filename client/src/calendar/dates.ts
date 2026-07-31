@@ -86,6 +86,11 @@ export function isSameMonth(a: DayKey, b: DayKey): boolean {
   return a.slice(0, 7) === b.slice(0, 7);
 }
 
+/** «2026-07» из дня — ключ месяца, которому он принадлежит. */
+export function monthKeyOf(day: DayKey): string {
+  return day.slice(0, 7);
+}
+
 export function dayNumber(day: DayKey): number {
   return Number(day.slice(8, 10));
 }

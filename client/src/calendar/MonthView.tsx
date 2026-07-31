@@ -8,6 +8,8 @@ import { CalendarOccurrence } from './types';
 
 interface MonthViewProps {
   anchor: DayKey;
+  /** Выбранный день — подсвечивается отдельно от сегодняшнего числа. */
+  selected: DayKey;
   occurrences: CalendarOccurrence[];
   onOpenDay: (day: DayKey) => void;
   onCreate: (day: DayKey) => void;
@@ -20,7 +22,7 @@ interface MonthViewProps {
 const VISIBLE_PER_DAY = 3;
 
 const MonthView: React.FC<MonthViewProps> = ({
-  anchor, occurrences, onOpenDay, onCreate, onOpenEvent,
+  anchor, selected, occurrences, onOpenDay, onCreate, onOpenEvent,
 }) => {
   const weeks = monthGrid(anchor);
   const today = todayKey();
@@ -57,8 +59,15 @@ const MonthView: React.FC<MonthViewProps> = ({
                     + (isSameMonth(day, anchor) ? '' : ' is-outside')
                     + (isWeekend(day) ? ' is-weekend' : '')
                     + (day === today ? ' is-today' : '')
+                    + (day === selected ? ' is-selected' : '')
                   }
-                  onDoubleClick={() => onCreate(day)}
+                  onClick={(event) => {
+                    // Клик по пустому месту плитки — быстрое создание события
+                    // на этот день; клик по числу или по плашке события несёт
+                    // свой обработчик и сюда доходить не должен.
+                    if ((event.target as HTMLElement).closest('button')) return;
+                    onCreate(day);
+                  }}
                 >
                   <button
                     type="button"

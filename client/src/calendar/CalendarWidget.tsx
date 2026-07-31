@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  DayKey, addDays, addMonths, dayKeyOf, formatClock, formatDayLong, monthShortTitle,
+  DayKey, addDays, addMonths, dayKeyOf, formatClock, formatDayLong, monthKeyOf, monthShortTitle,
   monthTitle, nextHalfHour, instantOf, todayKey, weekTitle, weekDays,
 } from './dates';
 import {
@@ -275,17 +275,22 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Кал�
 
           {/* key на обёртке: смена даты пересоздаёт узел, и анимация въезда
               запускается заново. Без этого CSS-анимация отработала бы один раз
-              за всю жизнь компонента. */}
+              за всю жизнь компонента. В месяце ключом идёт сам месяц, а не
+              день: выбор даты в маленьком календаре (например, в мини-окошке
+              внутри того же месяца) не должен пересоздавать всю сетку и
+              переигрывать анимацию въезда — меняется только подсветка
+              выбранного дня. */}
           <div
-            key={`${mode}:${anchor}`}
+            key={`${mode}:${mode === 'month' ? monthKeyOf(anchor) : anchor}`}
             className={`cal-page${pageable ? (direction >= 0 ? ' is-next' : ' is-prev') : ''}`}
           >
             {mode === 'month' && (
               <MonthView
                 anchor={anchor}
+                selected={anchor}
                 occurrences={occurrences}
                 onOpenDay={(day) => { setAnchor(day); setMode('day'); }}
-                onCreate={(day) => openCreate(day, null)}
+                onCreate={(day) => { setAnchor(day); openCreate(day, null); }}
                 onOpenEvent={openOccurrence}
               />
             )}
