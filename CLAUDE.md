@@ -21,7 +21,7 @@
 - `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height`. Все идемпотентны, накатаны на проде.
 
 **Текущая версия и деплой**
-- Прод сейчас: 1.5.6 на всех платформах (сервер/веб/Windows/Android) — versionCode 23 для Android.
+- Прод сейчас: 1.5.7 на всех платформах (сервер/веб/Windows/Android) — versionCode 24 для Android.
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
