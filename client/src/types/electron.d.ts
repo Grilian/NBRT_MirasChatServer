@@ -15,6 +15,12 @@ declare global {
       focusWindow: () => void;
       flashWindow: () => void;
       onFocusChange: (callback: (isFocused: boolean) => void) => () => void;
+      // Уведомления рисует главный процесс: в рендерере с origin file://
+      // Notification API запрещён Chromium (см. utils/desktopNotify.ts).
+      showNotification?: (options: { title: string; body: string; tag: string }) => void;
+      closeNotification?: (tag: string) => void;
+      closeAllNotifications?: () => void;
+      onNotificationClick?: (callback: (tag: string) => void) => () => void;
       getAppVersion: () => Promise<string>;
       checkForUpdate: () => void;
       installUpdate: () => void;

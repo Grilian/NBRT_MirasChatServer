@@ -367,6 +367,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .section-column { max-width: 720px; margin: 0 auto; padding: 14px 14px 40px; }
 .people-search { margin-bottom: 6px; }
 .people-tag { font-size: 11px; color: var(--ink-faint); background: var(--paper-sunken); border-radius: var(--radius-pill); padding: 2px 8px; }
+/* Статус собеседника в строке списка чатов — справа от имени, приглушённо:
+   это подпись к человеку, а не второе имя. Сжимается первым, имя важнее. */
+.row-status {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; font-weight: 400; color: var(--ink-faint);
+}
 .people-add-btn {
   display: flex; align-items: center; gap: 4px; border: none; cursor: pointer;
   background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
@@ -611,6 +617,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
 }
 .bubble-image:only-child { margin-bottom: -7px; border-radius: var(--radius-md); }
+/* В общем чате и группах над картинкой стоит имя автора — отрицательный
+   верхний отступ затягивал её прямо на эту строку, и картинка налезала на имя.
+   Под именем картинка встаёт обычным блоком, со всеми скруглёнными углами. */
+.bubble-author + .bubble-image { margin-top: 4px; border-radius: var(--radius-md); }
 .bubble-image img { width: 100%; height: 100%; object-fit: cover; display: block; max-height: 320px; }
 
 .lightbox-overlay {
@@ -704,6 +714,9 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .composer {
   flex: none; display: flex; align-items: flex-end; gap: 10px; padding: 10px 18px 14px;
   background: var(--sidebar); border-top: 1px solid var(--line);
+  /* Панель смайликов позиционируется от composer'а — она разворачивается
+     вверх, поверх ленты сообщений. */
+  position: relative;
   border-radius: 0; transition: background var(--ease);
 }
 /* Перетаскивание картинки прямо на composer — та же метафора, что вставка
@@ -739,6 +752,29 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   width: 22px; height: 22px; border-radius: 50%; font-size: 15px; line-height: 1; flex: none;
 }
 .composer-attachment-remove:hover { background: var(--row-hover); color: var(--unread); }
+
+/* Панель «Редактирование» над полем ввода — как в Telegram. Раньше правка шла
+   прямо в пузыре, в однострочном поле: у длинного сообщения это была щель на
+   пару слов, где текст не помещался и его нельзя было просмотреть целиком. */
+.composer-editing {
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  border-left: 2px solid var(--accent); background: var(--paper-sunken);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.composer-editing-icon { flex: none; color: var(--accent); }
+.composer-editing-body { flex: 1; min-width: 0; }
+.composer-editing-title { font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.composer-editing-text {
+  font-size: 13px; color: var(--ink-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.composer-editing-cancel {
+  flex: none; border: none; background: none; color: var(--ink-faint); cursor: pointer;
+  width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+.composer-editing-cancel:hover { background: var(--row-hover); color: var(--ink); }
+/* Правящееся сообщение подсвечено в ленте, чтобы было видно, что именно правим. */
+.msg.is-editing .bubble { outline: 2px solid var(--accent); outline-offset: 1px; }
 .composer textarea {
   width: 100%; border: none; background: transparent; color: var(--ink); resize: none;
   padding: 11px 16px; font-size: 14.5px; line-height: 1.35; max-height: 180px; overflow-y: auto;
@@ -759,14 +795,45 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .send-btn:disabled { opacity: .45; cursor: default; }
 .send-btn:active:not(:disabled) { transform: scale(.94); }
 
-.attach-btn {
+.attach-btn, .emoji-btn {
   flex: none; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
   background: var(--paper-sunken); color: var(--ink-muted);
   display: flex; align-items: center; justify-content: center; align-self: flex-end; margin-bottom: 2px;
 }
-.attach-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
-.attach-btn:disabled { opacity: .45; cursor: default; }
-.attach-btn:active:not(:disabled) { transform: scale(.94); }
+.attach-btn:hover:not(:disabled), .emoji-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
+.attach-btn:disabled, .emoji-btn:disabled { opacity: .45; cursor: default; }
+.attach-btn:active:not(:disabled), .emoji-btn:active:not(:disabled) { transform: scale(.94); }
+.emoji-btn.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* ===== Панель смайликов ===== */
+/* На компьютере разворачивается вверх от поля ввода. На узком экране занимает
+   всю ширину и фиксированную высоту — там она встаёт на место клавиатуры. */
+.emoji-picker {
+  position: absolute; bottom: calc(100% + 8px); left: 12px; z-index: 20;
+  width: 340px; max-width: calc(100vw - 24px);
+  background: var(--paper-raised); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-md, 0 8px 28px rgba(16, 35, 47, .18));
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.emoji-tabs { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.emoji-tab {
+  display: flex; align-items: center; gap: 5px; border: none; background: none; cursor: pointer;
+  padding: 6px 10px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; color: var(--ink-muted);
+  font-size: 12.5px; white-space: nowrap;
+}
+.emoji-tab:hover { background: var(--row-hover); color: var(--ink); }
+.emoji-tab.is-active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.emoji-tab-icon { font-size: 15px; }
+.emoji-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 2px; padding: 8px; max-height: 260px; overflow-y: auto;
+}
+.emoji-cell {
+  border: none; background: none; cursor: pointer; font-size: 22px; line-height: 1;
+  padding: 6px 0; border-radius: var(--radius-sm);
+}
+.emoji-cell:hover { background: var(--row-hover); }
+.emoji-empty { grid-column: 1 / -1; padding: 18px 10px; text-align: center; font-size: 13px; color: var(--ink-faint); }
 
 /* ===== Всплывающие уведомления ===== */
 /* Правый верхний угол, а не нижний: снизу поле ввода и кнопка «отправить», и
@@ -931,23 +998,36 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   .roster, .conversation, .section-host {
     position: absolute; inset: 0 0 58px; width: 100%; height: auto; border-right: none;
   }
-  /* Едут только список чатов и переписка — они и переключаются друг с другом.
-     У .section-host перехода нет намеренно: раздел не выезжает, он просто
-     появляется вместо чатов, а анимировать элемент, который в этот же момент
-     создаётся и уничтожается, — значит оставлять композитору WebView слой,
-     чью анимацию оборвали на полпути. */
-  .roster, .conversation { transition: transform .3s cubic-bezier(.22, .61, .36, 1); }
+  /* Панель на телефоне ровно одна: список чатов ИЛИ переписка (см.
+     useNarrowLayout в Chat.tsx). Прятать вторую трансформом, оставляя её в
+     DOM, больше нельзя — именно так и возникала «чат-ловушка»: стоило
+     композитору WebView потерять трансформ (перестроение под клавиатуру,
+     возврат из фона, оборванный переход), переписка оставалась поверх списка,
+     хотя состояние уже говорило «список». Выйти было нечем: и «назад», и
+     рельс вели туда, где мы и так были. Поэтому вместо перехода между двумя
+     постоянными элементами — короткий въезд той панели, которая появилась. */
+  .chat-layout.is-conversation-view .conversation { inset: 0; }
+  .conversation { animation: pane-in .26s cubic-bezier(.22, .61, .36, 1); }
+  @keyframes pane-in {
+    from { transform: translateX(12%); opacity: .4; }
+    to { transform: translateX(0); opacity: 1; }
+  }
   /* Уход с экрана при открытой клавиатуре: Android в этот же момент меняет
-     размер WebView, и его композитор роняет анимацию на полпути — экран
-     застывает в промежуточном положении. Переключаем панели без анимации:
-     рвать тогда нечего. */
-  .chat-layout.is-no-pane-anim .roster, .chat-layout.is-no-pane-anim .conversation { transition: none; }
-  .conversation { transform: translateX(100%); }
-  .chat-layout.is-conversation-view .roster { transform: translateX(-100%); }
-  .chat-layout.is-conversation-view .conversation { transform: translateX(0); inset: 0; }
+     размер WebView и роняет анимацию на полпути — тогда обходимся вовсе без неё. */
+  .chat-layout.is-no-pane-anim .roster, .chat-layout.is-no-pane-anim .conversation { animation: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .conversation { animation: none; }
+  }
   .conv-head .back-btn { display: inline-flex; }
   .conv-body { padding: 12px 10px 14px; }
   .msg { max-width: 86%; }
+
+  /* Панель смайликов на телефоне встаёт на место клавиатуры: во всю ширину,
+     фиксированной высоты — иначе она либо занимала бы весь экран, либо
+     показывала два ряда. */
+  .emoji-picker { left: 8px; right: 8px; width: auto; max-width: none; bottom: calc(100% + 6px); }
+  .emoji-grid { max-height: 42vh; }
+  .emoji-tab-name { display: none; }
 
   /* На узком экране — во всю ширину под шапкой */
   .toast-stack { top: 10px; left: 10px; right: 10px; width: auto; }
@@ -1030,6 +1110,23 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-user-modal-body { padding: 4px 20px 22px; }
 .sa-user-modal-body .user-info-field { font-size: 13.5px; }
 .sa-muted-tag { margin-left: 6px; font-size: 12px; }
+/* Пак смайликов в панели управления */
+.sa-emoji-pack { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; }
+.sa-emoji-pack-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.sa-emoji-pack-name {
+  flex: 1; min-width: 0; border: 1px solid transparent; background: none; color: var(--ink);
+  font-size: 14px; font-weight: 600; border-radius: 6px; padding: 5px 7px;
+}
+.sa-emoji-pack-name:focus { outline: none; border-color: var(--accent); background: var(--paper-sunken); }
+.sa-emoji-input {
+  width: 100%; border: 1px solid var(--line); background: var(--paper-sunken); color: var(--ink);
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 18px; line-height: 1.5;
+  font-family: inherit; resize: vertical;
+}
+.sa-emoji-input:focus { outline: none; border-color: var(--accent); }
+.sa-emoji-pack-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.sa-emoji-pack-foot .sa-hint { margin: 0; }
+
 .sa-inline-form { display: flex; gap: 8px; margin-top: 14px; }
 .sa-inline-form input { flex: 1; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px; }
 /* .btn-primary по умолчанию width: 100% — рассчитан на форму логина.

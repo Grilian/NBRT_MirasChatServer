@@ -15,6 +15,8 @@ interface Chat {
   deletable?: boolean;
   /** Только у групповых чатов — id для GroupInfoModal, отличный от chat.id ('group_<id>'). */
   chatGroupId?: number;
+  /** Статус собеседника («в отпуске» и т.п.) — показывается справа от имени. */
+  status?: { emoji: string; label: string } | null;
 }
 
 interface LastMessage {
@@ -160,6 +162,11 @@ const ChatList: React.FC<ChatListProps> = ({
                   <div className="row-top">
                     <div className="row-name">
                       <span>{chat.name}</span>
+                      {chat.status && (
+                        <span className="row-status" title={chat.status.label}>
+                          {chat.status.emoji} {chat.status.label}
+                        </span>
+                      )}
                     </div>
                     {last && (
                       <div className="row-time">

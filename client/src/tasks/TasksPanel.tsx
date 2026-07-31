@@ -7,6 +7,13 @@ import { TaskItem, TaskStatus } from './types';
 
 interface TasksPanelProps {
   currentUserId: number;
+  /**
+   * Меняется, когда сервер сообщил, что задачи изменились (событие
+   * 'tasks_changed'). Без этого статус, поставленный другим причастным, не
+   * появлялся на экране, пока не переключишь вкладку и список не
+   * перезапросится сам.
+   */
+  changeToken?: number;
 }
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -25,7 +32,7 @@ function dueLabel(task: TaskItem): { text: string; overdue: boolean } | null {
   return { text: formatDayLong(dayKeyOf(task.due_at)), overdue };
 }
 
-const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId }) => {
+const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 }) => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -40,7 +47,8 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId }) => {
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [changeToken]);
 
   const mine = tasks.filter((t) => t.created_by.id !== currentUserId);
   const authored = tasks.filter((t) => t.created_by.id === currentUserId);

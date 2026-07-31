@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const { notifyTaskCreated, notifyTaskStatusChanged } = require('../services/taskNotify');
+const { notifyTaskCreated, notifyTaskStatusChanged, notifyTasksChanged } = require('../services/taskNotify');
 
 const router = express.Router();
 
@@ -126,6 +126,7 @@ router.post('/', verifyToken, (req, res) => {
 
     const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
     notifyTaskCreated(req.app.get('io'), created, participantIds);
+    notifyTasksChanged(req.app.get('io'), taskId, req.userId);
 
     res.status(201).json(serializeTask(created, req.userId));
   } catch (e) {
@@ -151,9 +152,18 @@ router.put('/:id', verifyToken, (req, res) => {
       UPDATE tasks SET title = ?, description = ?, due_at = ?, updated_at = ? WHERE id = ?
     `).run(value.title, value.description, value.due_at, Date.now(), id);
 
-    replaceParticipants(id, parsed.participantIds.filter((pid) => pid !== req.userId));
+    // Считаем новичков до перезаписи списка — иначе после неё все выглядят
+    // новыми, и уведомление ушло бы повторно всем причастным.
+    const alreadyIn = new Set(
+      db.prepare('SELECT user_id FROM task_participants WHERE task_id = ?').all(id).map((r) => r.user_id)
+    );
+    const nextParticipants = parsed.participantIds.filter((pid) => pid !== req.userId);
+    replaceParticipants(id, nextParticipants);
 
     const saved = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    notifyTaskCreated(req.app.get('io'), saved, nextParticipants.filter((pid) => !alreadyIn.has(pid)));
+    notifyTasksChanged(req.app.get('io'), id, saved.created_by);
+
     res.json(serializeTask(saved, req.userId));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -178,6 +188,7 @@ router.put('/:id/status', verifyToken, (req, res) => {
 
     const saved = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     notifyTaskStatusChanged(req.app.get('io'), saved, req.userId);
+    notifyTasksChanged(req.app.get('io'), id, saved.created_by);
 
     res.json(serializeTask(saved, req.userId));
   } catch (e) {
@@ -193,6 +204,9 @@ router.delete('/:id', verifyToken, (req, res) => {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
+    // Сигнал шлём до удаления: после него состав причастных уже не собрать
+    // (task_participants уходит каскадом).
+    notifyTasksChanged(req.app.get('io'), id, task.created_by);
     db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
     res.json({ ok: true });
   } catch (e) {

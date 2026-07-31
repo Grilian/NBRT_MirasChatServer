@@ -129,23 +129,32 @@ router.get('/:chatId', verifyToken, (req, res) => {
     // created_at совпадает (точность SQLite CURRENT_TIMESTAMP — секунда), и
     // порядок внутри такой пары был неопределённым — при перезагрузке чата
     // соседние реплики могли меняться местами.
+    // read_by_me — личная отметка о прочтении из message_reads. Нужна именно в
+    // общих чатах и группах: там m.status значит лишь «прочитано хоть кем-то»,
+    // и клиент, отбирая по нему непрочитанное, пропускал сообщения, которые
+    // прочитал кто-то другой, — они навсегда оставались непрочитанными лично
+    // для этого человека, и бейдж возвращался при каждом обновлении счётчиков.
     const messages = useCursor
       ? db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
+                 (r.message_id IS NOT NULL) AS read_by_me
           FROM messages m
           JOIN users u ON m.sender_id = u.id
+          LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
           WHERE m.chat_id = ? AND m.id < ?
           ORDER BY m.id DESC
           LIMIT ?
-        `).all(chatId, before, limit)
+        `).all(req.userId, chatId, before, limit)
       : db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
+                 (r.message_id IS NOT NULL) AS read_by_me
           FROM messages m
           JOIN users u ON m.sender_id = u.id
+          LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
           WHERE m.chat_id = ?
           ORDER BY m.id DESC
           LIMIT ? OFFSET ?
-        `).all(chatId, limit, offset);
+        `).all(req.userId, chatId, limit, offset);
 
     // Переворачиваем чтобы старые были в начале
     messages.reverse();

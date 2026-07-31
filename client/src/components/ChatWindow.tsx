@@ -30,7 +30,10 @@ interface ChatWindowProps {
   loadingMore?: boolean;
   /** Непрочитанные в этом чате — цифра на кнопке «вниз», как в Telegram */
   unreadCount?: number;
-  onEditMessage: (id: number, text: string) => void;
+  /** Начать правку — текст уезжает в поле ввода (см. startEdit). */
+  onStartEdit: (id: number, text: string) => void;
+  /** Сообщение, которое сейчас правят, — подсвечиваем его в ленте. */
+  editingId?: number | null;
   onDeleteMessage: (id: number) => void;
   /** Создатель группы может удалять чужие сообщения — не только свои. */
   canDeleteAnyMessage?: boolean;
@@ -99,7 +102,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
-  onEditMessage, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages
+  onStartEdit, editingId, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -109,8 +112,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editText, setEditText] = useState('');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -183,7 +184,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     prevMessagesLengthRef.current = 0;
     pendingRestoreRef.current = null;
     setMenuFor(null);
-    setEditingId(null);
     setSelectMode(false);
     setSelectedIds(new Set());
   }, [chatId]);
@@ -273,19 +273,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   const startEdit = (msg: Message) => {
-    setEditingId(msg.id);
-    setEditText(msg.text);
+    // Редактирование живёт в поле ввода, а не в самом пузыре: у длинного
+    // сообщения строчка внутри пузыря превращалась в щель на пару слов, где
+    // текст не помещался и его нельзя было толком просмотреть. Как в Telegram:
+    // над полем ввода появляется панель «Редактирование», а сам текст
+    // подставляется в обычное поле, которое умеет расти и переносить строки.
+    onStartEdit(msg.id, msg.text);
     setMenuFor(null);
   };
-
-  const commitEdit = () => {
-    if (editingId === null) return;
-    const trimmed = editText.trim();
-    if (trimmed) onEditMessage(editingId, trimmed);
-    setEditingId(null);
-  };
-
-  const cancelEdit = () => setEditingId(null);
 
   const confirmDelete = (id: number) => {
     setMenuFor(null);
@@ -381,6 +376,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             endsGroup ? 'ends-group' : '',
             selectMode ? 'is-selectable' : '',
             isSelected ? 'is-selected' : '',
+            isEditing ? 'is-editing' : '',
           ].filter(Boolean).join(' ');
 
           return (
@@ -397,22 +393,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 {selectMode && !isDeleted && (
                   <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
                 )}
-                {isEditing ? (
-                  <div className="bubble bubble-editing">
-                    <input
-                      autoFocus
-                      className="bubble-edit-input"
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
-                        if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                      }}
-                      onBlur={commitEdit}
-                    />
-                  </div>
-                ) : (
-                  <div className={'bubble' + (isDeleted ? ' bubble-deleted' : '')}>
+                <div className={'bubble' + (isDeleted ? ' bubble-deleted' : '')}>
                     {/* Имя автора — только в общем чате и только над первым
                         сообщением блока: в переписке один на один оно
                         повторяло бы имя из шапки на каждой реплике. */}
@@ -441,8 +422,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       <span className="bubble-time">{formatMoscowTime(msg.created_at)}</span>
                       {mine && !isDeleted && <TickIcon status={msg.status || 'sent'} />}
                     </span>
-                  </div>
-                )}
+                </div>
               </div>
             </React.Fragment>
           );

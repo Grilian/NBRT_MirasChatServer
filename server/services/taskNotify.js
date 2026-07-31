@@ -11,6 +11,21 @@ function deliver(io, userId, payload) {
   notifyCalendar(userId, { ...payload, eventId: payload.taskId }).catch(() => { /* уже залогировано внутри */ });
 }
 
+/**
+ * Сигнал «список задач изменился» всем причастным.
+ *
+ * Отдельно от уведомления: уведомление — это про «отвлекись, тебе поручили»,
+ * а это про «перечитай список». Без него смена статуса другим человеком не
+ * появлялась на экране, пока не переключишь вкладку и список не перезапросится.
+ */
+function notifyTasksChanged(io, taskId, creatorId) {
+  if (!io) return;
+  const participants = db.prepare('SELECT user_id FROM task_participants WHERE task_id = ?')
+    .all(taskId).map((row) => row.user_id);
+  const involved = new Set([creatorId, ...participants]);
+  for (const userId of involved) io.to('user:' + userId).emit('tasks_changed', { taskId });
+}
+
 function creatorName(task) {
   const owner = db.prepare('SELECT display_name, username FROM users WHERE id = ?').get(task.created_by);
   return owner ? (owner.display_name || owner.username) : 'Коллега';
@@ -56,4 +71,4 @@ function notifyTaskStatusChanged(io, task, changedByUserId) {
   }
 }
 
-module.exports = { notifyTaskCreated, notifyTaskStatusChanged };
+module.exports = { notifyTaskCreated, notifyTaskStatusChanged, notifyTasksChanged };

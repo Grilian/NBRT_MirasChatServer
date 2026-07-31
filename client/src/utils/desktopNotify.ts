@@ -2,16 +2,32 @@
 // отдельно в mobileNotify.ts — там нужен нативный мост, обычный Notification
 // внутри Android WebView до системного трея не добирается.
 
+// В Electron уведомления показывает главный процесс через IPC.
+//
+// Причина: окно грузится через loadFile(), то есть с origin file://, который
+// Chromium считает небезопасным контекстом — Notification API там запрещён
+// наглухо, Notification.permission навсегда 'denied', и запросить разрешение
+// невозможно. Поэтому на десктопе системные уведомления не появлялись вовсе.
+// У главного процесса Electron таких ограничений нет.
+const electronNotify = typeof window !== 'undefined' && window.electronAPI?.showNotification
+  ? window.electronAPI
+  : null;
+
 export function canUseDesktopNotifications(): boolean {
+  if (electronNotify) return true;
   return typeof window !== 'undefined' && 'Notification' in window;
 }
 
 export function desktopNotificationPermission(): NotificationPermission | 'unsupported' {
+  // В Electron разрешение спрашивать не у кого — уведомления рисует сама ОС
+  // через главный процесс, и отказать может только системная настройка Windows.
+  if (electronNotify) return 'granted';
   if (!canUseDesktopNotifications()) return 'unsupported';
   return Notification.permission;
 }
 
 export async function ensureDesktopNotificationPermission(): Promise<boolean> {
+  if (electronNotify) return true;
   if (!canUseDesktopNotifications()) return false;
   if (Notification.permission === 'granted') return true;
   if (Notification.permission === 'denied') return false;
@@ -37,7 +53,25 @@ interface DesktopNotificationOptions {
 // ничего не делает.
 const liveNotifications = new Map<string, Notification>();
 
+// Клики по уведомлениям Electron приходят одним событием на все уведомления —
+// раскладываем их обратно по чатам через tag.
+const electronClickHandlers = new Map<string, () => void>();
+
+if (electronNotify?.onNotificationClick) {
+  electronNotify.onNotificationClick((tag: string) => {
+    const handler = electronClickHandlers.get(tag);
+    electronClickHandlers.delete(tag);
+    handler?.();
+  });
+}
+
 export function showDesktopNotification({ title, body, tag, icon, onClick }: DesktopNotificationOptions): void {
+  if (electronNotify) {
+    if (onClick) electronClickHandlers.set(tag, onClick);
+    electronNotify.showNotification!({ title, body, tag });
+    return;
+  }
+
   if (!canUseDesktopNotifications() || Notification.permission !== 'granted') return;
 
   try {
@@ -76,6 +110,11 @@ export function showDesktopNotification({ title, body, tag, icon, onClick }: Des
 
 /** Снять системное уведомление по чату — например, когда чат открыли и прочитали. */
 export function dismissDesktopNotification(tag: string): void {
+  if (electronNotify) {
+    electronClickHandlers.delete(tag);
+    electronNotify.closeNotification?.(tag);
+    return;
+  }
   const notification = liveNotifications.get(tag);
   if (notification) {
     notification.close();
@@ -84,6 +123,11 @@ export function dismissDesktopNotification(tag: string): void {
 }
 
 export function dismissAllDesktopNotifications(): void {
+  if (electronNotify) {
+    electronClickHandlers.clear();
+    electronNotify.closeAllNotifications?.();
+    return;
+  }
   liveNotifications.forEach((notification) => notification.close());
   liveNotifications.clear();
 }

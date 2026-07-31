@@ -633,12 +633,138 @@ function UpdateSchedulePanel() {
   );
 }
 
-type Tab = 'users' | 'groups' | 'departments' | 'updates';
+interface EmojiPack {
+  id: number;
+  name: string;
+  enabled: boolean;
+  emoji: string[];
+}
+
+// Смайлики хранятся текстом (юникод), а не картинками, поэтому пак правится
+// одним полем: строка со смайликами через пробел. Это и «загрузить новый», и
+// «отредактировать» одновременно — отдельного загрузчика файлов не нужно.
+function EmojiPacksPanel() {
+  const [packs, setPacks] = useState<EmojiPack[]>([]);
+  const [error, setError] = useState('');
+  const [newName, setNewName] = useState('');
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [savingId, setSavingId] = useState<number | null>(null);
+
+  const apply = (data: EmojiPack[]) => {
+    setPacks(data);
+    setDrafts(Object.fromEntries(data.map((p) => [p.id, p.emoji.join(' ')])));
+  };
+
+  const load = async () => {
+    try {
+      const { data } = await superAdminApi.get('/emoji/admin');
+      apply(data);
+      setError('');
+    } catch {
+      setError('Не удалось загрузить паки');
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newName.trim();
+    if (!name) return;
+    try {
+      const { data } = await superAdminApi.post('/emoji/admin', { name, emoji: '' });
+      apply(data);
+      setNewName('');
+      setError('');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось создать пак');
+    }
+  };
+
+  const update = async (id: number, patch: Record<string, unknown>) => {
+    setSavingId(id);
+    try {
+      const { data } = await superAdminApi.put(`/emoji/admin/${id}`, patch);
+      apply(data);
+      setError('');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось сохранить');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const remove = async (pack: EmojiPack) => {
+    if (!window.confirm(`Удалить пак «${pack.name}» со всеми смайликами?`)) return;
+    try {
+      const { data } = await superAdminApi.delete(`/emoji/admin/${pack.id}`);
+      apply(data);
+    } catch {
+      setError('Не удалось удалить пак');
+    }
+  };
+
+  return (
+    <div className="sa-card sa-card--compact">
+      <h2>Смайлики</h2>
+      <p className="sa-hint">
+        Пак — это вкладка в панели смайликов у сотрудников. Смайлики вводятся
+        подряд, через пробел; выключенный пак в приложении не показывается.
+      </p>
+      {error && <p className="form-error">{error}</p>}
+
+      {packs.map((pack) => (
+        <div key={pack.id} className="sa-emoji-pack">
+          <div className="sa-emoji-pack-head">
+            <input
+              className="sa-emoji-pack-name"
+              value={pack.name}
+              onChange={(e) => setPacks((prev) => prev.map((p) => (p.id === pack.id ? { ...p, name: e.target.value } : p)))}
+              onBlur={(e) => { if (e.target.value.trim() && e.target.value !== pack.name) update(pack.id, { name: e.target.value }); }}
+            />
+            <label className="switch" title={pack.enabled ? 'Показывается' : 'Скрыт'}>
+              <input type="checkbox" checked={pack.enabled} onChange={(e) => update(pack.id, { enabled: e.target.checked })} />
+              <span className="switch-track"><span className="switch-thumb" /></span>
+            </label>
+            <button type="button" className="sa-btn-danger" onClick={() => remove(pack)}>Удалить</button>
+          </div>
+
+          <textarea
+            className="sa-emoji-input"
+            rows={3}
+            value={drafts[pack.id] ?? ''}
+            onChange={(e) => setDrafts((prev) => ({ ...prev, [pack.id]: e.target.value }))}
+            placeholder="😀 😃 😄 …"
+          />
+          <div className="sa-emoji-pack-foot">
+            <span className="sa-hint">{pack.emoji.length} шт.</span>
+            <button
+              type="button"
+              className="sa-btn-ghost"
+              disabled={savingId === pack.id || (drafts[pack.id] ?? '') === pack.emoji.join(' ')}
+              onClick={() => update(pack.id, { emoji: drafts[pack.id] ?? '' })}
+            >
+              {savingId === pack.id ? 'Сохраняем…' : 'Сохранить смайлики'}
+            </button>
+          </div>
+        </div>
+      ))}
+
+      <form onSubmit={create} className="sa-inline-form">
+        <input type="text" placeholder="Новый пак…" value={newName} onChange={(e) => setNewName(e.target.value)} />
+        <button type="submit" className="btn-primary">Добавить</button>
+      </form>
+    </div>
+  );
+}
+
+type Tab = 'users' | 'groups' | 'departments' | 'emoji' | 'updates';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'users', label: 'Пользователи' },
   { id: 'groups', label: 'Группы' },
   { id: 'departments', label: 'Отделы' },
+  { id: 'emoji', label: 'Смайлики' },
   { id: 'updates', label: 'Обновления' },
 ];
 
@@ -718,6 +844,7 @@ export default function SuperAdminApp() {
         {tab === 'users' && <UsersPanel users={users} groups={groups} departments={departments} onChanged={load} />}
         {tab === 'groups' && <GroupsPanel groups={groups} onChanged={load} />}
         {tab === 'departments' && <DepartmentsPanel departments={departments} onChanged={load} />}
+        {tab === 'emoji' && <EmojiPacksPanel />}
         {tab === 'updates' && <UpdateSchedulePanel />}
       </main>
     </div>

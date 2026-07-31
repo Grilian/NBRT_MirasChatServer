@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { App as CapApp } from '@capacitor/app';
 import ChatList, { ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
-import MessageInput, { PendingImage } from '../components/MessageInput';
+import MessageInput, { EditingMessage, PendingImage } from '../components/MessageInput';
 import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
@@ -19,6 +19,7 @@ import PeopleSection from '../components/PeopleSection';
 import NotificationStack, { ToastNotification } from '../components/NotificationStack';
 import api from '../api/client';
 import { nameFor } from '../utils/user';
+import { describeStatus } from '../utils/statusMeta';
 import {
   ensureMobileNotificationPermission,
   showMobileNotification,
@@ -54,6 +55,8 @@ interface User {
   birth_date: string | null;
   group_id: number | null;
   group_name: string | null;
+  status_preset?: string | null;
+  status_custom?: string | null;
 }
 interface Message {
   id: number;
@@ -67,6 +70,8 @@ interface Message {
   display_name?: string | null;
   created_at: string;
   status?: 'sent' | 'delivered' | 'read';
+  /** Личная отметка о прочтении — единственный достоверный признак в общих чатах. */
+  read_by_me?: number | boolean;
   edited_at?: string | null;
   deleted?: boolean | number;
 }
@@ -102,6 +107,8 @@ interface AllUser {
   birthDate: string | null;
   source: 'local';
   groupName?: string | null;
+  statusPreset?: string | null;
+  statusCustom?: string | null;
 }
 
 // Справочник сотрудников (не только контактов) — тем же набором полей, что и
@@ -123,6 +130,19 @@ interface DirectoryUser {
 
 const GENERAL_CHAT_ID = 'general';
 
+// Синтетический "чат" для уведомлений о задачах: тосты и системные уведомления
+// группируются по chatId, а у задачи переписки нет. Префикс с двоеточием не
+// может совпасть ни с одним настоящим chat_id.
+const TASKS_TOAST_ID = 'section:tasks';
+
+// Общий чат и группы: у сообщения несколько получателей, поэтому «прочитано»
+// там считается по личным отметкам (message_reads на сервере, read_by_me в
+// ответе истории), а не по общей колонке status. Ровно та же граница, что и в
+// server/services/readReceipts.js.
+function isSharedChat(chatId: string | null): boolean {
+  return !!chatId && (chatId === GENERAL_CHAT_ID || /^group_\d+$/.test(chatId));
+}
+
 // Экран целиком: раздел рельса, открыта ли поверх списка сама переписка (это
 // имеет смысл только на узком экране) и подэкран внутри «Настроек».
 interface ChatView {
@@ -140,6 +160,48 @@ const VIEW_CHAT_LIST: ChatView = { section: 'chats', conversation: false, settin
 // Сколько держать анимацию панелей выключенной после закрытия клавиатуры —
 // чуть дольше самого перехода (.3s), чтобы захватить и перестроение WebView.
 const PANE_ANIM_SKIP_MS = 400;
+
+// Порог узкого экрана. Должен совпадать с @media (max-width: 760px) в theme.css.
+const NARROW_LAYOUT_QUERY = '(max-width: 760px)';
+
+/**
+ * Узкий экран (телефон) — здесь панели не соседствуют, а заменяют друг друга.
+ *
+ * Раскладка нужна именно в JS, а не только в CSS: на телефоне список чатов и
+ * переписка должны существовать по очереди, а не одновременно. Раньше обе
+ * панели были в DOM всегда, а переписка пряталась `transform: translateX(100%)`
+ * — и стоило этому трансформу не примениться (композитор WebView роняет слой
+ * при перестроении под клавиатуру, при возврате из фона, при оборванном
+ * переходе), как переписка оставалась поверх списка. Экран выглядел как
+ * открытый чат, а состояние при этом уже было «список»: кнопка «назад» вела
+ * туда, где мы и так находимся, рельс — в раздел, который уже открыт, и выйти
+ * было нечем. Ровно это и называлось «чат-ловушкой».
+ */
+function useNarrowLayout(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(NARROW_LAYOUT_QUERY).matches
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia(NARROW_LAYOUT_QUERY);
+    const update = () => setNarrow(media.matches);
+    update();
+    // resize вдобавок к change у самого media query: событие change приходит
+    // не во всех WebView (и не при программном изменении размера), а промах
+    // здесь означает, что на телефоне в DOM окажутся сразу обе панели — то
+    // самое состояние, из-за которого экран и запирался.
+    media.addEventListener('change', update);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      media.removeEventListener('change', update);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
+
+  return narrow;
+}
 
 // Больше четырёх карточек на экране — уже не уведомление, а стена, за которой
 // не видно приложения. Самые старые уступают место новым (в них всё равно
@@ -176,12 +238,24 @@ const Chat: React.FC = () => {
   // очищенный бейдж обратно — ровно то, что выглядело как "отметка о
   // непрочитанном возвращается" при переключении между чатами.
   const unreadFetchSeq = useRef(0);
-  const refetchUnread = useCallback(() => {
+  const refetchUnread = useCallback((zeroChatId?: string) => {
     const seq = ++unreadFetchSeq.current;
     api.get('/unread')
-      .then(({ data }) => { if (seq === unreadFetchSeq.current) setUnreadCounts(data); })
+      .then(({ data }) => {
+        if (seq !== unreadFetchSeq.current) return;
+        // Только что открытый чат гасим сразу: сервер в этот момент ещё
+        // считает его непрочитанным (отметка уходит отдельным событием чуть
+        // позже), и без этого бейдж успевал моргнуть обратно.
+        setUnreadCounts(zeroChatId ? { ...data, [zeroChatId]: 0 } : data);
+      })
       .catch(console.error);
   }, []);
+  // Счётчик «задачи изменились»: сервер шлёт tasks_changed, панель задач по
+  // изменению этого числа перечитывает список.
+  const [tasksChangeToken, setTasksChangeToken] = useState(0);
+  // Правка сообщения живёт здесь, а не в ленте: текст уезжает в поле ввода
+  // (как в Telegram), а поле ввода — сосед ленты, общий родитель у них тут.
+  const [editingMessage, setEditingMessage] = useState<EditingMessage | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [comments, setComments] = useState<Record<number, { username: string; display_name: string | null; comment: string }>>({});
   const [hasMore, setHasMore] = useState(true);
@@ -203,6 +277,7 @@ const Chat: React.FC = () => {
   // Ещё один пояс: даже если переписка каким-то образом окажется помеченной
   // открытой вне раздела «Чаты», показывать её мы не станем.
   const conversationOpen = view.section === 'chats' && view.conversation;
+  const narrowLayout = useNarrowLayout();
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
@@ -419,6 +494,11 @@ const Chat: React.FC = () => {
     setView({ section: id, conversation: false, settings: 'settings' });
   }, [closeKeyboard]);
 
+  // Подписка на сокет живёт столько же, сколько сам сокет, а goToSection
+  // пересоздаётся — держим актуальную версию в ref, как и handleSelectChat.
+  const goToSectionRef = useRef(goToSection);
+  goToSectionRef.current = goToSection;
+
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('backButton', () => {
@@ -598,6 +678,43 @@ const Chat: React.FC = () => {
       api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
     });
 
+    // Задачи. tasks_changed — сигнал перечитать список (кто-то из причастных
+    // сменил статус или правил задачу), task_notification — то, ради чего
+    // человека стоит отвлечь. Раньше сервер слал оба события, но слушать их
+    // на клиенте было некому: уведомлений по задачам не приходило вовсе, а
+    // чужие изменения появлялись только после переключения вкладки.
+    newSocket.on('tasks_changed', () => setTasksChangeToken(t => t + 1));
+
+    newSocket.on('task_notification', (data: { type: string; taskId: number; title: string; body: string }) => {
+      setTasksChangeToken(t => t + 1);
+
+      const { windowFocused: focused, prefs } = liveRef.current;
+      if (!prefs.enabled) return;
+
+      if (prefs.sound && (!isNativeMobile || focused)) playIncomingSound();
+
+      // Чат задачи — синтетический: тост и системное уведомление группируются
+      // по нему, а тап ведёт в раздел «Задачи», а не в переписку.
+      pushToast({ chatId: TASKS_TOAST_ID, title: data.title, body: data.body, avatarPath: null });
+
+      if (!focused) {
+        if (isNativeMobile) {
+          showMobileNotification(data.taskId, `MirasChat — ${data.title}`, data.body, TASKS_TOAST_ID);
+        } else if (prefs.system) {
+          showDesktopNotification({
+            title: data.title,
+            body: data.body,
+            tag: TASKS_TOAST_ID,
+            onClick: () => {
+              window.electronAPI?.focusWindow?.();
+              window.focus();
+              goToSectionRef.current('tasks');
+            },
+          });
+        }
+      }
+    });
+
     // Группу создали (нас позвали), переименовали/добавили-убрали участника,
     // или её больше нет — синхронизируем список чатов живьём, без опроса.
     newSocket.on('group_created', (group: ChatGroupSummary) => {
@@ -666,9 +783,15 @@ const Chat: React.FC = () => {
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (!isActive) return;
-
       const { socket: liveSocket, activeChat: liveActiveChat } = resumeRef.current;
+
+      // Сообщаем серверу, способны ли мы сейчас показать уведомление сами.
+      // Пока он считал живой сокет достаточным признаком, свёрнутое
+      // приложение не получало ни пуша (сервер думал «клиент покажет сам»),
+      // ни локального уведомления (JS в свёрнутом WebView заморожен).
+      liveSocket?.emit('app_state', { active: isActive });
+
+      if (!isActive) return;
 
       if (liveSocket && !liveSocket.connected) {
         liveSocket.connect();
@@ -845,15 +968,17 @@ const Chat: React.FC = () => {
           return next;
       });
 
-      api.get("/unread")
-        .then(({ data }) => setUnreadCounts({ ...data, [activeChat]: 0 }))
-        .catch(console.error);
+      refetchUnread(activeChat);
 
       return () => { cancelled = true; };
     } else {
       setMessages([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChat]);
+
+  // Смена чата отменяет начатую правку: текст относился к прошлой переписке.
+  useEffect(() => { setEditingMessage(null); }, [activeChat]);
 
   // Подгрузка старых сообщений. Курсор — id самого старого показанного
   // сообщения, а не offset по длине списка: пока человек читает историю, в чат
@@ -904,12 +1029,26 @@ const Chat: React.FC = () => {
   useEffect(() => {
     if (!socket || !activeChat || !conversationVisible || messages.length === 0) return;
 
+    // В общем чате и группах общий status значит «прочитано хоть кем-то» —
+    // отбирать по нему непрочитанное нельзя: сообщение, которое открыл кто-то
+    // другой, для меня осталось бы непрочитанным навсегда (сервер считает
+    // непрочитанное по личным отметкам message_reads, а клиент такие id ему
+    // просто не присылал). Отсюда и возвращающийся бейдж, который лечился
+    // только кнопкой «Прочитать всё». Личная отметка — read_by_me.
+    const shared = isSharedChat(activeChat);
     const unreadIds = messages
-      .filter(m => m.sender_id !== currentUserId && m.status !== 'read')
+      .filter(m => m.sender_id !== currentUserId)
+      .filter(m => (shared ? !m.read_by_me : m.status !== 'read'))
       .map(m => m.id);
 
     if (unreadIds.length > 0) {
       socket.emit('message_read', { chatId: activeChat, messageIds: unreadIds });
+      // Помечаем локально сразу: иначе эффект, зависящий от messages, при
+      // следующем сообщении снова собрал бы те же id и слал их по кругу.
+      if (shared) {
+        const justRead = new Set(unreadIds);
+        setMessages(prev => prev.map(m => (justRead.has(m.id) ? { ...m, read_by_me: 1 } : m)));
+      }
       dismissMobileNotifications(unreadIds);
       // Пуши приходят только когда сокет был мёртв, а раз мы сейчас читаем —
       // приложение открыто и сокет жив. Значит все висящие пуш-карточки уже
@@ -990,6 +1129,8 @@ const Chat: React.FC = () => {
     birthDate: u.birth_date,
     source: 'local' as const,
     groupName: u.group_name,
+    statusPreset: u.status_preset,
+    statusCustom: u.status_custom,
   }));
 
   // Обновляем снимок для обработчика сокета на каждом рендере — присваивание
@@ -1029,9 +1170,16 @@ const Chat: React.FC = () => {
   const handleSelectChatRef = useRef(handleSelectChat);
   handleSelectChatRef.current = handleSelectChat;
 
+  // Тап по уведомлению: у задачи переписки нет, поэтому её карточка ведёт в
+  // раздел, а не в чат.
+  const openFromNotificationRef = useRef((chatId: string) => {
+    if (chatId === TASKS_TOAST_ID) goToSectionRef.current('tasks');
+    else handleSelectChatRef.current(chatId);
+  });
+
   useEffect(() => {
     return onMobileNotificationTap((chatId) => {
-      handleSelectChatRef.current(chatId);
+      openFromNotificationRef.current(chatId);
     });
   }, []);
 
@@ -1040,7 +1188,7 @@ const Chat: React.FC = () => {
   // карточке из шторки ведёт в тот же чат, что и локальное уведомление.
   useEffect(() => {
     return initMobilePush((chatId) => {
-      handleSelectChatRef.current(chatId);
+      openFromNotificationRef.current(chatId);
     });
   }, []);
 
@@ -1100,6 +1248,18 @@ const Chat: React.FC = () => {
   const handleEditMessage = (id: number, text: string) => {
     if (!socket) return;
     socket.emit('message_edit', { id, text });
+  };
+
+  // Правка последнего своего сообщения по стрелке вверх — берём самое свежее
+  // неудалённое своё сообщение в открытом чате.
+  const requestEditLast = () => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg.sender_id === currentUserId && !msg.deleted && msg.text) {
+        setEditingMessage({ id: msg.id, text: msg.text });
+        return;
+      }
+    }
   };
 
   const handleDeleteMessage = (id: number) => {
@@ -1247,6 +1407,7 @@ const Chat: React.FC = () => {
         online: onlineUsers.includes(u.id),
         userId: u.id,
         avatarPath: u.avatarPath,
+        status: describeStatus(u.statusPreset, u.statusCustom),
       };
     })
   ]
@@ -1267,6 +1428,7 @@ const Chat: React.FC = () => {
   const activeChatMeta: {
     name: string; section: ChatSection; online?: boolean; avatarPath?: string | null; userId?: number;
     chatGroupId?: number; memberCount?: number; isGroupOwner?: boolean;
+    status?: { emoji: string; label: string } | null;
   } | null = (() => {
     if (!activeChat) return null;
     if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
@@ -1277,7 +1439,13 @@ const Chat: React.FC = () => {
         : null;
     }
     const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
-    return user ? { name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id), avatarPath: user.avatarPath, userId: user.id } : null;
+    return user
+      ? {
+          name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id),
+          avatarPath: user.avatarPath, userId: user.id,
+          status: describeStatus(user.statusPreset, user.statusCustom),
+        }
+      : null;
   })();
 
   // Раньше искали только среди контактов (allUsers) — окно профиля молча не
@@ -1317,6 +1485,12 @@ const Chat: React.FC = () => {
     setView({ section: 'settings', conversation: false, settings: 'profile' });
   };
 
+  // На узком экране список и переписка не сосуществуют: рисуется ровно одна
+  // панель. Спрятанная трансформом переписка (как было раньше) при сбое
+  // композитора оставалась поверх списка и запирала экран — см. useNarrowLayout.
+  const showRoster = isChats && (!narrowLayout || !conversationOpen);
+  const showConversation = isChats && (!narrowLayout || conversationOpen);
+
   return (
     <div className={'chat-layout'
       + (isChats ? '' : ' is-single-pane')
@@ -1325,7 +1499,12 @@ const Chat: React.FC = () => {
       <NotificationStack
         toasts={toasts}
         durationMs={notificationPrefs.durationMs}
-        onOpen={(chatId) => { handleSelectChat(chatId); dismissToast(chatId); }}
+        onOpen={(chatId) => {
+          // Уведомление о задаче ведёт в раздел «Задачи»: переписки за ним нет.
+          if (chatId === TASKS_TOAST_ID) goToSection('tasks');
+          else handleSelectChat(chatId);
+          dismissToast(chatId);
+        }}
         onDismiss={dismissToast}
       />
 
@@ -1340,7 +1519,7 @@ const Chat: React.FC = () => {
         accountType={currentAccountType}
       />
 
-      {isChats && (
+      {showRoster && (
       <ChatList
         chats={chats}
         activeChat={activeChat}
@@ -1479,7 +1658,7 @@ const Chat: React.FC = () => {
 
       {section === 'tasks' && (
         <main className="section-host">
-          <TasksPanel currentUserId={currentUserId} />
+          <TasksPanel currentUserId={currentUserId} changeToken={tasksChangeToken} />
         </main>
       )}
 
@@ -1489,7 +1668,7 @@ const Chat: React.FC = () => {
         </main>
       )}
 
-      {isChats && (
+      {showConversation && (
         <main className="conversation">
           <div className="conv-head">
             <button type="button" className="icon-btn back-btn" onClick={leaveConversation} aria-label="Назад к списку">
@@ -1548,7 +1727,8 @@ const Chat: React.FC = () => {
             hasMore={hasMore}
             loadingMore={loadingMore}
             unreadCount={activeChat ? unreadCounts[activeChat] : 0}
-            onEditMessage={handleEditMessage}
+            onStartEdit={(id, text) => setEditingMessage({ id, text })}
+            editingId={editingMessage?.id ?? null}
             onDeleteMessage={handleDeleteMessage}
           />
           {muted && (
@@ -1560,7 +1740,20 @@ const Chat: React.FC = () => {
             onSend={handleSendMessage}
             onTyping={handleTyping}
             disabled={!activeChat || muted}
-            placeholder={muted ? 'Отправка сообщений ограничена' : undefined}
+            placeholder={
+              muted
+                ? 'Отправка сообщений ограничена'
+                // Статус собеседника прямо в поле ввода: видно ровно в тот
+                // момент, когда собираешься писать, — не нужно вспоминать,
+                // что человек в отпуске, уже отправив сообщение.
+                : activeChatMeta?.status
+                  ? `${activeChatMeta.status.emoji} ${activeChatMeta.name} — ${activeChatMeta.status.label.toLowerCase()}`
+                  : undefined
+            }
+            editing={editingMessage}
+            onSubmitEdit={handleEditMessage}
+            onCancelEdit={() => setEditingMessage(null)}
+            onRequestEditLast={requestEditLast}
           />
         </main>
       )}

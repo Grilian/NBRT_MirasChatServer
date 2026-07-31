@@ -23,6 +23,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('window:focus-changed', listener);
   },
 
+  // Уведомления показывает главный процесс: у рендерера origin file://, а там
+  // Chromium запрещает Notification API наглухо (см. комментарий в main.js).
+  showNotification: (options) => ipcRenderer.send('notify:show', options),
+  closeNotification: (tag) => ipcRenderer.send('notify:close', tag),
+  closeAllNotifications: () => ipcRenderer.send('notify:close-all'),
+  onNotificationClick: (callback) => {
+    const listener = (_event, tag) => callback(tag);
+    ipcRenderer.on('notification:clicked', listener);
+    return () => ipcRenderer.removeListener('notification:clicked', listener);
+  },
+
   // Автообновление идёт само: скачивается фоном, ставится при выходе. Наружу
   // отдаём только состояние для показа и «Перезапустить» для нетерпеливых.
   checkForUpdate: () => ipcRenderer.send('update:check'),

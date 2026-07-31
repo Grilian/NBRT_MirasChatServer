@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
-import { instantOf, toDateInput } from '../calendar/dates';
+import { dayKeyOf, formatDayLong, instantOf, toDateInput } from '../calendar/dates';
 import { nameFor } from '../utils/user';
 import { TaskDraft, TaskItem, TaskPerson } from './types';
 
@@ -23,6 +23,12 @@ interface TaskDialogProps {
 const END_OF_DAY_MINUTES = 23 * 60 + 59;
 
 const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, onSave, onDelete }) => {
+  // Править задачу может только тот, кто её поставил. Раньше форма
+  // показывалась всем причастным одинаково, и «Сохранить» у них упиралось в
+  // 404 «Задача не найдена» — сервер такой запрос и не должен принимать,
+  // ошибка была в том, что кнопку вообще показывали. Причастный видит
+  // карточку задачи, а меняет только статус — из списка.
+  const readOnly = !!task && !task.can_edit;
   const [title, setTitle] = useState(task?.title || '');
   const [description, setDescription] = useState(task?.description || '');
   const [dueDate, setDueDate] = useState(task?.due_at ? toDateInput(task.due_at) : '');
@@ -90,6 +96,22 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
           </button>
         </div>
 
+        {readOnly ? (
+          <div className="task-dialog-body">
+            <div className="task-view-title">{task!.title}</div>
+            {task!.description && <p className="task-view-note">{task!.description}</p>}
+            <div className="task-view-row">Поставил: {nameFor(task!.created_by)}</div>
+            {task!.due_at !== null && (
+              <div className="task-view-row">Срок: {formatDayLong(dayKeyOf(task!.due_at))}</div>
+            )}
+            {task!.participants.length > 0 && (
+              <div className="task-view-row">
+                Причастные: {task!.participants.map((p) => nameFor(p)).join(', ')}
+              </div>
+            )}
+            <p className="task-hint">Статус меняется кнопкой в списке задач.</p>
+          </div>
+        ) : (
         <form onSubmit={handleSave} className="task-dialog-body">
           {error && <p className="form-error">{error}</p>}
 
@@ -147,6 +169,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );

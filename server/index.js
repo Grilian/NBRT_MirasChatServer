@@ -23,6 +23,7 @@ const sessionRoutes = require('./routes/session');
 const departmentsRoutes = require('./routes/departments');
 const groupsRoutes = require('./routes/groups');
 const tasksRoutes = require('./routes/tasks');
+const emojiRoutes = require('./routes/emoji');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { isSharedChat, markRead } = require('./services/readReceipts');
@@ -75,6 +76,7 @@ app.use('/api/session', sessionRoutes);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/groups', verifyToken, groupsRoutes);
 app.use('/api/tasks', tasksRoutes);
+app.use('/api/emoji', emojiRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
 // на каждый файл (как публичные CDN-ссылки на фото профиля у большинства
@@ -151,6 +153,28 @@ function markSocketOffline(userId, socketId) {
 
 const onlineUserIds = () => Array.from(onlineSockets.keys());
 const isUserOnline = (userId) => onlineSockets.has(Number(userId));
+
+// Сокеты приложений, ушедших в фон (Android свернули кнопкой «Домой»).
+//
+// Живой сокет сам по себе НЕ значит, что человеку есть чем показать
+// уведомление: свёрнутый на Android WebView замораживает таймеры и JS, и
+// клиент физически не обработает пришедшее сообщение — а сокет при этом
+// висит подключённым ещё десятки секунд (пока не отвалится по pingTimeout),
+// и всё это время сервер считал получателя онлайн и пуш не слал. В итоге
+// уведомление не показывал никто: ни клиент (заморожен), ни сервер (думал,
+// что клиент сам справится). Приложение само сообщает о переходе в фон
+// событием 'app_state', и для решения «слать ли пуш» верить надо ему.
+const backgroundedSockets = new Set();
+
+/** Есть ли у человека сокет, который прямо сейчас способен показать уведомление сам. */
+function canReceiveInApp(userId) {
+  const sockets = onlineSockets.get(Number(userId));
+  if (!sockets) return false;
+  for (const socketId of sockets) {
+    if (!backgroundedSockets.has(socketId)) return true;
+  }
+  return false;
+}
 
 // Пока человека не было в сети, входящие сообщения оставались в статусе 'sent'
 // (доставлять было некому). Раньше в 'delivered' их переводил только клиент —
@@ -302,24 +326,28 @@ io.on('connection', (socket) => {
         if (changedB) io.to('user:' + b).emit('contact_added', { withUserId: a });
       }
 
-      // Проверяем, есть ли получатель онлайн, и заодно собираем тех, кого
-      // онлайн нет — им сообщение сейчас доставить некуда, значит нужен пуш.
+      // Кому нужен пуш. Признак тут НЕ «есть живой сокет», а «есть сокет,
+      // способный показать уведомление сам» (canReceiveInApp): свёрнутое на
+      // Android приложение сокет какое-то время держит, но JS в нём заморожен
+      // и уведомление не нарисует — раньше в этой дырке пуш не уходил вовсе.
+      // recipientOnline остаётся по isUserOnline: это про статус доставки
+      // сообщения, а не про то, кто его сейчас увидит.
       let recipientOnline = false;
       const offlineRecipients = [];
       if (data.chatId === 'general') {
         const everyoneElse = db.prepare('SELECT id FROM users WHERE id != ?').all(senderId).map((r) => r.id);
         recipientOnline = everyoneElse.some((id) => isUserOnline(id));
-        offlineRecipients.push(...everyoneElse.filter((id) => !isUserOnline(id)));
+        offlineRecipients.push(...everyoneElse.filter((id) => !canReceiveInApp(id)));
       } else if (/^group_\d+$/.test(data.chatId)) {
         const others = (participants || []).filter((id) => id !== senderId);
         recipientOnline = others.some((id) => isUserOnline(id));
-        offlineRecipients.push(...others.filter((id) => !isUserOnline(id)));
+        offlineRecipients.push(...others.filter((id) => !canReceiveInApp(id)));
       } else {
         const match = data.chatId.match(/^chat_(\d+)_(\d+)$/);
         if (match) {
           const otherId = Number(match[1]) === senderId ? Number(match[2]) : Number(match[1]);
           recipientOnline = isUserOnline(otherId);
-          if (!recipientOnline) offlineRecipients.push(otherId);
+          if (!canReceiveInApp(otherId)) offlineRecipients.push(otherId);
         }
       }
 
@@ -356,6 +384,15 @@ io.on('connection', (socket) => {
     } catch (e) {
       console.error('Ошибка:', e);
     }
+  });
+
+  // Приложение свернули/развернули. Шлёт только нативный мобильный клиент —
+  // у него это событие жизненного цикла Capacitor, единственный надёжный
+  // признак того, что показать уведомление своими силами он уже не сможет.
+  socket.on('app_state', (data) => {
+    const active = typeof data === 'boolean' ? data : !!(data && data.active);
+    if (active) backgroundedSockets.delete(socket.id);
+    else backgroundedSockets.add(socket.id);
   });
 
   socket.on('typing', (data) => {
@@ -500,6 +537,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    backgroundedSockets.delete(socket.id);
     // Оффлайн объявляем, только когда отвалилась последняя сессия человека —
     // иначе закрытая вкладка гасила индикатор "в сети" у ещё живого клиента.
     if (socket.userId && markSocketOffline(socket.userId, socket.id)) {

@@ -312,6 +312,27 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_task_participants_user ON task_participants(user_id);
   CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by);
+
+  -- Паки смайликов. Сами смайлики — обычный текст (юникод), а не картинки:
+  -- они уже отправляются в сообщениях как есть, и хранить набор строк дешевле
+  -- и надёжнее, чем раздавать спрайты. Пак = вкладка в панели выбора.
+  CREATE TABLE IF NOT EXISTS emoji_packs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS emoji_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id INTEGER NOT NULL,
+    emoji TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (pack_id) REFERENCES emoji_packs(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_emoji_items_pack ON emoji_items(pack_id);
 `);
 
 // Миграция: добавляем колонку status, если БД старая
@@ -488,6 +509,25 @@ try {
   for (const row of written) link.run(ensureDepartment(row.name), row.name);
 } catch (e) {
   console.error('Ошибка бэкфилла отделов:', e);
+}
+
+// Стартовый пак смайликов. Заводится один раз: дальше состав правят из панели
+// управления, и повторный сид затирал бы эти правки при каждом перезапуске.
+const emojiPackCount = db.prepare('SELECT COUNT(*) AS c FROM emoji_packs').get().c;
+if (emojiPackCount === 0) {
+  const BASE_EMOJI = [
+    '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🙂', '😉', '😊',
+    '😍', '😘', '😋', '😎', '🤓', '🧐', '🤔', '🤗', '🙃', '😐',
+    '😴', '😪', '😥', '😰', '😭', '😡', '🤯', '😱', '🥳', '🤝',
+    '👍', '👎', '👌', '✌️', '🙏', '👏', '💪', '🖐️', '☝️', '✍️',
+    '❤️', '🔥', '⭐', '✅', '❌', '❗', '❓', '💡', '📌', '📎',
+    '🎉', '🎂', '☕', '🍰', '🌸', '☀️', '🌧️', '❄️', '🚀', '💼',
+  ];
+  const packId = db.prepare(
+    'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, 0, 1, ?)'
+  ).run('Основные', Date.now()).lastInsertRowid;
+  const insertEmoji = db.prepare('INSERT INTO emoji_items (pack_id, emoji, position) VALUES (?, ?, ?)');
+  BASE_EMOJI.forEach((emoji, index) => insertEmoji.run(packId, emoji, index));
 }
 
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;

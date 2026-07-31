@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -494,4 +494,60 @@ ipcMain.on('window:focus', () => {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+});
+
+// Системные уведомления рисует главный процесс, а не рендерер.
+//
+// Рендерер грузится через loadFile(), то есть с origin file://, а Chromium
+// считает его небезопасным контекстом и Notification API там запрещён:
+// Notification.permission равен 'denied' навсегда, запросить разрешение
+// нельзя, и new Notification() в рендерере молча ничего не показывал —
+// именно поэтому на десктопе уведомления не появлялись вовсе. У главного
+// процесса таких ограничений нет.
+const liveNotifications = new Map();
+
+ipcMain.on('notify:show', (event, { title, body, tag }) => {
+  if (!Notification.isSupported()) return;
+  try {
+    // Предыдущее уведомление того же чата закрываем сами: иначе на одно
+    // сообщение в шторке копится по карточке на каждое сообщение.
+    liveNotifications.get(tag)?.close();
+
+    const notification = new Notification({
+      title: String(title || 'MirasChat'),
+      body: String(body || ''),
+      icon: path.join(ASSETS_DIR, 'icon.png'),
+      silent: true, // звук играет сам клиент, чтобы он был одинаковым везде
+    });
+
+    notification.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+        mainWindow.webContents.send('notification:clicked', tag);
+      }
+      liveNotifications.delete(tag);
+    });
+    notification.on('close', () => {
+      if (liveNotifications.get(tag) === notification) liveNotifications.delete(tag);
+    });
+
+    liveNotifications.set(tag, notification);
+    notification.show();
+  } catch (e) {
+    // Уведомления — необязательный канал: внутриприложенческий тост
+    // показывается в любом случае, ронять из-за них ничего нельзя.
+    console.error('Ошибка показа уведомления:', e.message);
+  }
+});
+
+ipcMain.on('notify:close', (event, tag) => {
+  liveNotifications.get(tag)?.close();
+  liveNotifications.delete(tag);
+});
+
+ipcMain.on('notify:close-all', () => {
+  liveNotifications.forEach((notification) => notification.close());
+  liveNotifications.clear();
 });

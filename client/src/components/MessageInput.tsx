@@ -1,10 +1,16 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import EmojiPicker from './EmojiPicker';
 
 export interface PendingImage {
   file_path: string;
   file_width: number;
   file_height: number;
+}
+
+export interface EditingMessage {
+  id: number;
+  text: string;
 }
 
 interface MessageInputProps {
@@ -13,6 +19,12 @@ interface MessageInputProps {
   disabled?: boolean;
   /** Подпись-подсказка в поле ввода, когда отправка запрещена */
   placeholder?: string;
+  /** Правим сообщение — над полем ввода появляется панель, как в Telegram. */
+  editing?: EditingMessage | null;
+  onSubmitEdit?: (id: number, text: string) => void;
+  onCancelEdit?: () => void;
+  /** Стрелка вверх в пустом поле — правка последнего своего сообщения. */
+  onRequestEditLast?: () => void;
 }
 
 // Ограничение совпадает с серверным (MAX_MESSAGE_LENGTH в server/index.js):
@@ -28,10 +40,14 @@ interface StagedImage {
   error: string | null;
 }
 
-const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled, placeholder }) => {
+const MessageInput: React.FC<MessageInputProps> = ({
+  onSend, onTyping, disabled, placeholder,
+  editing, onSubmitEdit, onCancelEdit, onRequestEditLast,
+}) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -49,6 +65,50 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled,
   // Локальный URL превью живёт, пока картинка не отправлена или не убрана —
   // без явного revoke он утёк бы памятью браузера при частой вставке фото.
   useEffect(() => () => { if (staged) URL.revokeObjectURL(staged.previewUrl); }, [staged]);
+
+  // Вход в режим правки — подставляем текст и ставим курсор в конец.
+  // Ключ по id, а не по самому объекту: иначе перерисовка родителя затирала бы
+  // уже поправленный текст исходным.
+  const editingId = editing?.id ?? null;
+  useEffect(() => {
+    if (editingId === null) return;
+    setText(editing?.text || '');
+    const el = textareaRef.current;
+    if (el) {
+      el.focus();
+      const end = (editing?.text || '').length;
+      requestAnimationFrame(() => el.setSelectionRange(end, end));
+    }
+    // editing?.text намеренно не в зависимостях — см. комментарий выше.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
+
+  const cancelEdit = () => {
+    setText('');
+    onCancelEdit?.();
+  };
+
+  // Вставка смайлика — в позицию курсора, а не в конец: иначе смайлик,
+  // выбранный посреди набранной фразы, уезжал бы в её хвост.
+  const insertEmoji = (emoji: string) => {
+    const el = textareaRef.current;
+    setText((prev) => {
+      const start = el?.selectionStart ?? prev.length;
+      const end = el?.selectionEnd ?? prev.length;
+      const next = (prev.slice(0, start) + emoji + prev.slice(end)).slice(0, MAX_LENGTH);
+      // Курсор ставим после вставленного, уже после того, как React
+      // перерисует значение поля.
+      requestAnimationFrame(() => {
+        const caret = Math.min(start + emoji.length, next.length);
+        el?.focus();
+        el?.setSelectionRange(caret, caret);
+      });
+      return next;
+    });
+    onTyping?.();
+  };
+
+  const closeEmoji = useCallback(() => setEmojiOpen(false), []);
 
   const uploadImage = async (file: File) => {
     const previewUrl = URL.createObjectURL(file);
@@ -82,6 +142,15 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled,
   const submit = () => {
     const trimmed = text.trim();
     if (disabled) return;
+
+    // В режиме правки поле сохраняет сообщение, а не отправляет новое.
+    if (editing) {
+      if (trimmed) onSubmitEdit?.(editing.id, trimmed);
+      setText('');
+      onCancelEdit?.();
+      return;
+    }
+
     if (staged?.uploading) return; // ждём, пока картинка догрузится
     if (!trimmed && !staged?.uploaded) return;
 
@@ -102,6 +171,21 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled,
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
+      return;
+    }
+
+    if (e.key === 'Escape' && editing) {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
+
+    // Стрелка вверх в пустом поле — правка последнего своего сообщения, как в
+    // Telegram. Только когда поле действительно пустое: иначе она должна
+    // двигать курсор по набранному тексту.
+    if (e.key === 'ArrowUp' && !editing && !text && onRequestEditLast) {
+      e.preventDefault();
+      onRequestEditLast();
     }
   };
 
@@ -154,7 +238,39 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled,
         onChange={(e) => { stageFile(e.target.files?.[0]); e.target.value = ''; }}
       />
 
+      {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={closeEmoji} />}
+
+      <button
+        type="button"
+        className={'emoji-btn' + (emojiOpen ? ' is-active' : '')}
+        // onMouseDown вместо onClick и с preventDefault: панель закрывается по
+        // mousedown снаружи себя, и на обычном клике она успела бы закрыться
+        // раньше, чем сюда дойдёт onClick, — кнопка не работала бы вовсе.
+        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!disabled) setEmojiOpen((v) => !v); }}
+        disabled={disabled}
+        aria-label="Смайлики"
+        title="Смайлики"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+          <circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
+          <path d="M9 9.5h.01M15 9.5h.01" strokeWidth="2.6" strokeLinecap="round" />
+        </svg>
+      </button>
+
       <div className="composer-main">
+        {editing && (
+          <div className="composer-editing">
+            <svg className="composer-editing-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            <div className="composer-editing-body">
+              <div className="composer-editing-title">Редактирование</div>
+              <div className="composer-editing-text">{editing.text}</div>
+            </div>
+            <button type="button" className="composer-editing-cancel" onClick={cancelEdit} aria-label="Отменить редактирование">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
+        )}
+
         {staged && (
           <div className="composer-attachment">
             <div className="composer-attachment-preview">
@@ -181,18 +297,30 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSend, onTyping, disabled,
         </div>
       </div>
 
+      {/* В режиме правки картинку не прикрепить: сервер меняет только текст. */}
+      {!editing && (
+        <button
+          type="button"
+          className="attach-btn"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled}
+          aria-label="Прикрепить изображение"
+          title="Прикрепить изображение"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+        </button>
+      )}
       <button
-        type="button"
-        className="attach-btn"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={disabled}
-        aria-label="Прикрепить изображение"
-        title="Прикрепить изображение"
+        type="submit"
+        className="send-btn"
+        disabled={disabled || (editing ? !text.trim() : (!text.trim() && !staged?.uploaded) || staged?.uploading)}
+        aria-label={editing ? 'Сохранить' : 'Отправить'}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
-      </button>
-      <button type="submit" className="send-btn" disabled={disabled || (!text.trim() && !staged?.uploaded) || staged?.uploading} aria-label="Отправить">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.6 22 12 3.4 3.4 3 10l13 2-13 2z" /></svg>
+        {editing ? (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6 9 17l-5-5" /></svg>
+        ) : (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.6 22 12 3.4 3.4 3 10l13 2-13 2z" /></svg>
+        )}
       </button>
     </form>
   );
