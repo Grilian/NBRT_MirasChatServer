@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { App as CapApp } from '@capacitor/app';
 import ChatList, { ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
-import MessageInput from '../components/MessageInput';
+import MessageInput, { PendingImage } from '../components/MessageInput';
 import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
@@ -59,6 +59,9 @@ interface Message {
   id: number;
   chat_id?: string;
   text: string;
+  file_path?: string | null;
+  file_width?: number | null;
+  file_height?: number | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -70,7 +73,13 @@ interface Message {
 interface LastMessage {
   chat_id: string;
   text: string;
+  file_path?: string | null;
   created_at: string;
+}
+
+/** Превью текста сообщения там, где картинка без подписи не даёт ничего показать. */
+function previewText(text: string, filePath?: string | null): string {
+  return text || (filePath ? '📷 Фото' : '');
 }
 interface ChatGroupSummary {
   id: number;
@@ -713,7 +722,7 @@ const Chat: React.FC = () => {
       if (chatId) {
         setLastMessages(prev => ({
           ...prev,
-          [chatId]: { chat_id: chatId, text: message.text, created_at: message.created_at }
+          [chatId]: { chat_id: chatId, text: message.text, file_path: message.file_path, created_at: message.created_at }
         }));
       }
 
@@ -742,7 +751,8 @@ const Chat: React.FC = () => {
 
       // В общем чате и в группах важно, кто именно написал — иначе все
       // уведомления выглядят одинаково и по ним не понять, стоит ли отвлекаться.
-      const body = (isGeneral || group) ? `${nameFor(message)}: ${message.text}` : message.text;
+      const preview = previewText(message.text, message.file_path);
+      const body = (isGeneral || group) ? `${nameFor(message)}: ${preview}` : preview;
 
       // На мобильном в фоне звук играет сама ОС по каналу уведомления —
       // свой в этот момент не воспроизвести (приложение усыплено), да и
@@ -1019,11 +1029,14 @@ const Chat: React.FC = () => {
     });
   }, []);
 
-  const handleSendMessage = (text: string) => {
+  const handleSendMessage = (text: string, image?: PendingImage) => {
     if (socket && activeChat) {
       socket.emit('chat_message', {
         chatId: activeChat,
         text,
+        filePath: image?.file_path,
+        fileWidth: image?.file_width,
+        fileHeight: image?.file_height,
       });
       socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
     }

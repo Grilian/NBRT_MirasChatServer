@@ -1,8 +1,75 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const multer = require('multer');
+const sharp = require('sharp');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { isParticipant } = require('../services/chatParticipants');
 const router = express.Router();
+
+const CHAT_IMAGES_DIR = path.join(__dirname, '..', 'uploads', 'chat-images');
+fs.mkdirSync(CHAT_IMAGES_DIR, { recursive: true });
+
+const CHAT_IMAGE_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+// Длинная сторона — контентная картинка, не аватар: должно остаться читаемо
+// на весь экран телефона, но без смысла тащить оригинал в 12 мегапикселей
+// с камеры ради превью в чате.
+const CHAT_IMAGE_MAX_DIMENSION = 1600;
+const CHAT_IMAGE_QUALITY = 82;
+
+const chatImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, CHAT_IMAGE_ALLOWED_MIME.includes(file.mimetype)),
+});
+
+// Отправка сообщения и загрузка файла — два разных запроса: сначала грузим
+// картинку и получаем путь, потом отправляем chat_message по сокету с этим
+// путём (см. server/index.js). Поэтому сокет обязан сам проверить, что путь
+// похож на то, что мог выдать именно этот эндпоинт, а не что попало от
+// клиента, — регэксп ниже и есть эта проверка.
+const CHAT_IMAGE_PATH_PATTERN = /^\/uploads\/chat-images\/[a-z0-9_-]+\.webp$/;
+
+function isValidChatImagePath(filePath) {
+  if (typeof filePath !== 'string' || !CHAT_IMAGE_PATH_PATTERN.test(filePath)) return false;
+  const abs = path.join(__dirname, '..', filePath.replace(/^\//, ''));
+  return fs.existsSync(abs);
+}
+
+// Грузим и сразу пережимаем в webp — единый формат на выходе проще отдавать
+// и меньше весит, чем исходные jpeg/png с телефонных камер.
+router.post('/upload-image', verifyToken, (req, res) => {
+  chatImageUpload.single('image')(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Не удалось загрузить файл' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не распознан как изображение (jpeg/png/webp/gif)' });
+    }
+
+    try {
+      const filename = `msg_${req.userId}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.webp`;
+      const outputPath = path.join(CHAT_IMAGES_DIR, filename);
+
+      const image = sharp(req.file.buffer).rotate();
+      const resized = image.resize(CHAT_IMAGE_MAX_DIMENSION, CHAT_IMAGE_MAX_DIMENSION, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+      const info = await resized.webp({ quality: CHAT_IMAGE_QUALITY }).toFile(outputPath);
+
+      res.json({
+        file_path: `/uploads/chat-images/${filename}`,
+        file_width: info.width,
+        file_height: info.height,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
 
 // Последнее сообщение по каждому chat_id — для превью в списке диалогов.
 // Раньше выборка не была сужена до "чатов текущего пользователя" — chat_id
@@ -12,7 +79,7 @@ const router = express.Router();
 router.get('/meta/last', verifyToken, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT m.chat_id, m.text, m.created_at
+      SELECT m.chat_id, m.text, m.file_path, m.created_at
       FROM messages m
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
@@ -24,7 +91,7 @@ router.get('/meta/last', verifyToken, (req, res) => {
     const result = {};
     rows.forEach(row => {
       if (!isParticipant(row.chat_id, req.userId)) return;
-      result[row.chat_id] = { chat_id: row.chat_id, text: row.text, created_at: row.created_at };
+      result[row.chat_id] = { chat_id: row.chat_id, text: row.text, file_path: row.file_path, created_at: row.created_at };
     });
 
     res.json(result);
@@ -64,7 +131,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
     // соседние реплики могли меняться местами.
     const messages = useCursor
       ? db.prepare(`
-          SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
           FROM messages m
           JOIN users u ON m.sender_id = u.id
           WHERE m.chat_id = ? AND m.id < ?
@@ -72,7 +139,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LIMIT ?
         `).all(chatId, before, limit)
       : db.prepare(`
-          SELECT m.id, m.text, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name
           FROM messages m
           JOIN users u ON m.sender_id = u.id
           WHERE m.chat_id = ?
@@ -96,3 +163,4 @@ router.get('/:chatId', verifyToken, (req, res) => {
 });
 
 module.exports = router;
+module.exports.isValidChatImagePath = isValidChatImagePath;

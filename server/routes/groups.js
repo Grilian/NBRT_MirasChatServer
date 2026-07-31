@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
+const { deleteUploadedFile } = require('../utils/files');
 
 const router = express.Router();
 
@@ -235,12 +236,14 @@ router.post('/:id/messages/delete', verifyToken, requireMember, requireOwner, (r
 
     // Сужаем до сообщений именно этого чата — иначе id из чужой переписки,
     // подставленный в запрос, тоже бы стёрся.
-    const affected = db.prepare(`SELECT id FROM messages WHERE id IN (${placeholders}) AND chat_id = ?`)
-      .all(...ids, chatId).map((row) => row.id);
-    if (!affected.length) return res.json({ deleted: [] });
+    const affectedRows = db.prepare(`SELECT id, file_path FROM messages WHERE id IN (${placeholders}) AND chat_id = ?`)
+      .all(...ids, chatId);
+    if (!affectedRows.length) return res.json({ deleted: [] });
+    const affected = affectedRows.map((row) => row.id);
 
     const affectedPlaceholders = affected.map(() => '?').join(',');
-    db.prepare(`UPDATE messages SET deleted = 1, text = '' WHERE id IN (${affectedPlaceholders})`).run(...affected);
+    db.prepare(`UPDATE messages SET deleted = 1, text = '', file_path = NULL, file_width = NULL, file_height = NULL WHERE id IN (${affectedPlaceholders})`).run(...affected);
+    for (const row of affectedRows) if (row.file_path) deleteUploadedFile(row.file_path);
 
     const io = req.app.get('io');
     const memberIds = groupMembers(req.groupId).map((m) => m.id);

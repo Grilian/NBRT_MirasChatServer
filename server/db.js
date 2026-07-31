@@ -333,6 +333,21 @@ try {
   // Колонка уже есть
 }
 
+// Миграция: размеры картинки в сообщении. file_path существовал с самого
+// начала, но им никто не пользовался; ширина/высота — чтобы клиент мог
+// отрисовать плейсхолдер под нужный размер до того, как файл загрузится, и
+// не дёргать вёрстку, когда изображение наконец появится.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN file_width INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN file_height INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 // Миграция: группы, роли, режим тишины — управляются из панели супер-админа
 try {
   db.exec(`ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES groups(id)`);

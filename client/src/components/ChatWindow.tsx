@@ -2,10 +2,14 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { nameFor } from '../utils/user';
 import { formatDaySeparator, formatMoscowTime, moscowDayKey } from '../utils/time';
 import { onKeyboardShow } from '../utils/mobileKeyboard';
+import { resolveUploadUrl } from '../utils/uploads';
 
 interface Message {
   id: number;
   text: string;
+  file_path?: string | null;
+  file_width?: number | null;
+  file_height?: number | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -104,6 +108,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const prevMessagesLengthRef = useRef(0);
 
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -289,6 +294,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxUrl(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxUrl]);
+
   const copyMessageText = (msg: Message) => {
     setMenuFor(null);
     navigator.clipboard?.writeText(msg.text).catch((e) => console.error('Не удалось скопировать:', e));
@@ -407,9 +419,21 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     {!mine && showAuthors && startsGroup && (
                       <div className="bubble-author">{nameFor(msg)}</div>
                     )}
-                    <span className="bubble-text">
-                      {isDeleted ? 'Сообщение удалено' : msg.text}
-                    </span>
+                    {!isDeleted && msg.file_path && (
+                      <button
+                        type="button"
+                        className="bubble-image"
+                        style={msg.file_width && msg.file_height ? { aspectRatio: `${msg.file_width} / ${msg.file_height}` } : undefined}
+                        onClick={() => setLightboxUrl(resolveUploadUrl(msg.file_path))}
+                      >
+                        <img src={resolveUploadUrl(msg.file_path) || ''} alt="" />
+                      </button>
+                    )}
+                    {(isDeleted || msg.text) && (
+                      <span className="bubble-text">
+                        {isDeleted ? 'Сообщение удалено' : msg.text}
+                      </span>
+                    )}
                     {/* Время и галочки — внутри пузыря, как в Telegram:
                         обтекаются текстом и не занимают отдельную строку. */}
                     <span className="bubble-meta">
@@ -447,11 +471,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             style={{ left: menuFor.x, top: menuFor.y }}
           >
             {/* Копировать — на любом сообщении, не только своём: раньше меню
-                вообще не открывалось на чужих репликах. */}
-            <button type="button" onClick={() => copyMessageText(menuMsg)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-              Копировать
-            </button>
+                вообще не открывалось на чужих репликах. У картинки без
+                подписи копировать нечего — текста в сообщении просто нет. */}
+            {menuMsg.text && (
+              <button type="button" onClick={() => copyMessageText(menuMsg)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                Копировать
+              </button>
+            )}
             {menuMine && (
               <>
                 <button type="button" onClick={() => startEdit(menuMsg)}>
@@ -467,6 +494,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         );
       })()}
+
+      {lightboxUrl && (
+        <div className="lightbox-overlay" onClick={() => setLightboxUrl(null)}>
+          <button type="button" className="lightbox-close" onClick={() => setLightboxUrl(null)} aria-label="Закрыть">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+          <img src={lightboxUrl} alt="" className="lightbox-img" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 };

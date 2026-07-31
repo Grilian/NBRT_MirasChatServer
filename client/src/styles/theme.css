@@ -601,6 +601,30 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .bubble-author { font-size: 13.5px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
 .bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Картинка бьёт краями пузыря (отрицательные márgin компенсируют его padding),
+   а не сидит внутри с рамкой вокруг, как отдельная плашка. Соотношение сторон
+   задаётся инлайн-стилем из file_width/file_height — резервирует место под
+   картинку ещё до её загрузки, вёрстка не прыгает. */
+.bubble-image {
+  display: block; width: calc(100% + 22px); max-width: 320px; margin: -6px -11px 4px;
+  border: none; padding: 0; cursor: zoom-in; background: var(--paper-sunken);
+  border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
+}
+.bubble-image:only-child { margin-bottom: -7px; border-radius: var(--radius-md); }
+.bubble-image img { width: 100%; height: 100%; object-fit: cover; display: block; max-height: 320px; }
+
+.lightbox-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 60;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.lightbox-img { max-width: 100%; max-height: 100%; border-radius: var(--radius-md); }
+.lightbox-close {
+  position: absolute; top: 16px; right: 16px; border: none; background: rgba(255, 255, 255, .12);
+  color: #fff; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer;
+}
+.lightbox-close:hover { background: rgba(255, 255, 255, .22); }
+
 /* Время и галочки обтекаются текстом внутри пузыря — характерная деталь
    Telegram: короткое сообщение и время помещаются в одну строку. */
 .bubble-meta {
@@ -680,13 +704,41 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .composer {
   flex: none; display: flex; align-items: flex-end; gap: 10px; padding: 10px 18px 14px;
   background: var(--sidebar); border-top: 1px solid var(--line);
+  border-radius: 0; transition: background var(--ease);
 }
+/* Перетаскивание картинки прямо на composer — та же метафора, что вставка
+   через Ctrl+V, только мышью. Подсветка всей полосы ввода, чтобы было видно,
+   куда можно бросить файл, ещё до того, как он окажется над textarea. */
+.composer.is-drag-over { background: color-mix(in srgb, var(--accent) 10%, var(--sidebar)); }
+.composer-file-input { display: none; }
+.composer-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .composer-field {
   flex: 1; min-width: 0; position: relative; display: flex; align-items: center;
   background: var(--paper-sunken); border-radius: var(--radius-lg);
   border: 1px solid transparent; transition: border-color var(--ease), background var(--ease);
 }
 .composer-field:focus-within { border-color: var(--accent); background: var(--paper-raised); }
+
+/* Плашка приложенной картинки над полем ввода — превью до отправки, с
+   индикатором загрузки, пока файл ещё грузится на сервер. */
+.composer-attachment { display: flex; align-items: center; gap: 8px; }
+.composer-attachment-preview {
+  position: relative; width: 52px; height: 52px; border-radius: var(--radius-md); overflow: hidden;
+  background: var(--paper-sunken); flex: none;
+}
+.composer-attachment-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.composer-attachment-spinner {
+  position: absolute; inset: 0; background: color-mix(in srgb, black 40%, transparent);
+  border: 2px solid transparent; border-top-color: #fff; border-radius: 50%;
+  width: 18px; height: 18px; margin: auto; animation: composer-spin .7s linear infinite;
+}
+@keyframes composer-spin { to { transform: rotate(360deg); } }
+.composer-attachment-error { font-size: 12.5px; color: var(--unread); }
+.composer-attachment-remove {
+  border: none; background: var(--paper-sunken); color: var(--ink-muted); cursor: pointer;
+  width: 22px; height: 22px; border-radius: 50%; font-size: 15px; line-height: 1; flex: none;
+}
+.composer-attachment-remove:hover { background: var(--row-hover); color: var(--unread); }
 .composer textarea {
   width: 100%; border: none; background: transparent; color: var(--ink); resize: none;
   padding: 11px 16px; font-size: 14.5px; line-height: 1.35; max-height: 180px; overflow-y: auto;
@@ -707,14 +759,14 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .send-btn:disabled { opacity: .45; cursor: default; }
 .send-btn:active:not(:disabled) { transform: scale(.94); }
 
-.paste-btn {
+.attach-btn {
   flex: none; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
   background: var(--paper-sunken); color: var(--ink-muted);
   display: flex; align-items: center; justify-content: center; align-self: flex-end; margin-bottom: 2px;
 }
-.paste-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
-.paste-btn:disabled { opacity: .45; cursor: default; }
-.paste-btn:active:not(:disabled) { transform: scale(.94); }
+.attach-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
+.attach-btn:disabled { opacity: .45; cursor: default; }
+.attach-btn:active:not(:disabled) { transform: scale(.94); }
 
 /* ===== Всплывающие уведомления ===== */
 /* Правый верхний угол, а не нижний: снизу поле ввода и кнопка «отправить», и

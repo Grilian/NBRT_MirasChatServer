@@ -19,6 +19,7 @@ interface Chat {
 
 interface LastMessage {
   text: string;
+  file_path?: string | null;
   created_at: string;
 }
 
@@ -167,7 +168,7 @@ const ChatList: React.FC<ChatListProps> = ({
                     )}
                   </div>
                   <div className="row-bottom">
-                    <div className="row-preview">{last ? last.text : ''}</div>
+                    <div className="row-preview">{last ? (last.text || (last.file_path ? '📷 Фото' : '')) : ''}</div>
                     <div className="row-actions">
                       {unreadCount > 0 && <span className="row-unread">{unreadCount}</span>}
                       <button

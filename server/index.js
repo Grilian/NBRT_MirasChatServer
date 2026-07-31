@@ -27,6 +27,8 @@ const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { isSharedChat, markRead } = require('./services/readReceipts');
 const { notifyNewMessage } = require('./services/push');
+const { isValidChatImagePath } = require('./routes/messages');
+const { deleteUploadedFile } = require('./utils/files');
 const calendarScheduler = require('./services/calendarScheduler');
 
 const db = require('./db');
@@ -218,8 +220,20 @@ io.on('connection', (socket) => {
     // сообщения замусоривали превью в списке чатов, а длинные — разъезжались
     // по вёрстке у всех участников.
     const text = typeof data.text === 'string' ? data.text.trim() : '';
-    if (!text) return;
     const finalText = text.length > MAX_MESSAGE_LENGTH ? text.slice(0, MAX_MESSAGE_LENGTH) : text;
+
+    // Картинка приходит уже загруженной отдельным REST-запросом (см.
+    // POST /api/messages/upload-image) — сюда попадает только путь к ней.
+    // Доверять пути от клиента нельзя: без проверки можно было бы подсунуть
+    // произвольный /uploads/... файл чужого назначения. isValidChatImagePath
+    // сверяет и формат пути, и то, что файл реально существует на диске.
+    const hasImage = typeof data.filePath === 'string' && isValidChatImagePath(data.filePath);
+    const filePath = hasImage ? data.filePath : null;
+    const fileWidth = hasImage && Number.isFinite(Number(data.fileWidth)) ? Number(data.fileWidth) : null;
+    const fileHeight = hasImage && Number.isFinite(Number(data.fileHeight)) ? Number(data.fileHeight) : null;
+
+    // Сообщение без текста и без картинки — отправлять нечего.
+    if (!finalText && !filePath) return;
 
     if (isFlooding(socket)) {
       socket.emit('message_blocked', { reason: 'rate_limit', chatId: data.chatId });
@@ -254,15 +268,18 @@ io.on('connection', (socket) => {
     try {
       // Сохраняем в локальную БД
       const stmt = db.prepare(
-        'INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, ?)'
+        'INSERT INTO messages (chat_id, sender_id, text, file_path, file_width, file_height, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
       );
-      const result = stmt.run(data.chatId, senderId, finalText, 'sent');
+      const result = stmt.run(data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent');
 
       const message = {
         id: result.lastInsertRowid,
         chat_id: data.chatId,
         sender_id: senderId,
         text: finalText,
+        file_path: filePath,
+        file_width: fileWidth,
+        file_height: fileHeight,
         status: 'sent',
         created_at: new Date().toISOString(),
         username: senderRow ? senderRow.username : undefined,
@@ -470,10 +487,11 @@ io.on('connection', (socket) => {
 
   socket.on('message_delete', ({ id }) => {
     try {
-      const row = db.prepare('SELECT chat_id, sender_id FROM messages WHERE id = ?').get(id);
+      const row = db.prepare('SELECT chat_id, sender_id, file_path FROM messages WHERE id = ?').get(id);
       if (!row || Number(row.sender_id) !== Number(socket.userId)) return;
 
-      db.prepare("UPDATE messages SET deleted = 1, text = '' WHERE id = ?").run(id);
+      db.prepare("UPDATE messages SET deleted = 1, text = '', file_path = NULL, file_width = NULL, file_height = NULL WHERE id = ?").run(id);
+      if (row.file_path) deleteUploadedFile(row.file_path);
 
       emitToChat(row.chat_id, 'message_deleted', { id, chat_id: row.chat_id }, row.sender_id);
     } catch (e) {
