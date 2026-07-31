@@ -665,6 +665,7 @@ function EmojiPacksPanel() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, []);
 
   const create = async (e: React.FormEvent) => {

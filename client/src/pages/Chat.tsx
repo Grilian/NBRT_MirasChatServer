@@ -763,7 +763,7 @@ const Chat: React.FC = () => {
       clearInterval(rosterRefreshInterval);
       newSocket.disconnect();
     };
-  }, [currentUserId, refetchUnread]);
+  }, [currentUserId, refetchUnread, pushToast]);
 
   // Возврат приложения из фона на Android — пока оно свёрнуто, ОС может
   // оборвать сеть (Doze/App Standby), и сокет повиснет отключённым: его
