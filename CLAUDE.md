@@ -5,11 +5,15 @@
 **Архитектурные решения**
 - Групповые чаты: таблицы `chat_groups` + `chat_group_members` (роль `owner`/`member`, минимум прав). `chat_id` вида `group_<id>`. Переиспользуют существующий пайплайн сообщений/сокетов (`chatParticipants.js` научили распознавать `group_\d+`) — отдельной системы рассылки нет.
 - Чтение в общих/групповых чатах: `messages.status` — общая колонка на всё сообщение, не годится для «прочитано мной» при нескольких получателях. Добавлена таблица `message_reads` (per-user) + `services/readReceipts.js` с `isSharedChat()`/`markRead()`. Личные чаты (1:1) по-прежнему считаются по `status`.
-- Мобильный фокус/жизненный цикл: на Android нельзя полагаться на DOM `focus`/`blur`/`visibilitychange` — используется `CapApp.appStateChange` как источник истины.
-- Навигация мобильного экрана: настоящая причина «чат-ловушки» — `hideMobileKeyboard()` без `.catch()` намертво ломал выход из чата при отказе нативного моста. Это не то же самое, что более ранний фикс (`setSection('chats')` → `goToSection`) — оба фикса легитимны и оба нужны.
+- Мобильный фокус/жизненный цикл: на Android нельзя полагаться на DOM `focus`/`blur`/`visibilitychange` — используется `CapApp.appStateChange` как источник истины. Приложение шлёт его на сервер сокет-событием `app_state`; сервер решает, слать ли пуш, по `canReceiveInApp` (живой сокет ещё не значит, что JS не заморожен в фоне), а не просто по `isUserOnline`.
+- Навигация мобильного экрана: `hideMobileKeyboard()`/`goToSection` — более ранние легитимные фиксы, но настоящая причина «чат-ловушки» была глубже: переписка на узком экране была в DOM всегда и пряталась CSS-трансформом (`translateX`), и при потере трансформа композитором WebView оставалась поверх списка, хотя state уже был «список». Исправлено переходом на условный рендер — на узком экране (`useNarrowLayout` в `Chat.tsx`, синхронизировано с `@media (max-width: 760px)` в theme.css) существует только одна панель зараз, прятать нечего.
+- Непрочитанное в общих/групповых чатах — читать нужно `read_by_me` (personal per-user отметка из `message_reads`, отдаётся в истории), а не `messages.status`: тот значит «прочитано хоть кем-то», и отбор по нему навсегда «застревал» на сообщениях, прочитанных другим участником. Тот же принцип и в `server/services/readReceipts.js`.
+- Уведомления Electron нельзя показывать из рендерера: `loadFile()` даёт origin `file://`, Chromium считает его небезопасным и намертво блокирует `Notification` API (`permission` вечно `denied`). Показ уведомлений перенесён в главный процесс (`main.js`, IPC `notify:show`/`notify:close`/`notify:close-all`, `preload.js`).
 - Задачи (`server/routes/tasks.js`) — поручения, отдельная сущность от календарных «задач» (`is_task` на событии). Видимость строго по составу `task_participants`: создатель + причастные, никто больше. Статус меняет любой причастный, не только автор.
 - Аккаунты `account_type = 'internet'` видят урезанный NavRail (`INTERNET_VISIBLE_SECTIONS` в `NavRail.tsx`) и не получают общий календарь — фильтрация на сервере (`canSeeGlobalCalendar` в `routes/calendar.js`), а не только в интерфейсе.
 - Картинки в чате: `messages.file_path` существовал в схеме с самого начала, но был не подключён — теперь используется (+ `file_width`/`file_height`). Путь от клиента для `chat_message` не доверенный: `isValidChatImagePath` (`routes/messages.js`) сверяет формат и то, что файл реально существует на диске. Удаление сообщения чистит и колонку, и сам файл (`deleteUploadedFile` в `utils/files.js` — общая для аватаров и картинок чата).
+- Редактирование сообщения — панель над полем ввода (как в Telegram), а не строка в самом пузыре: правка живёт в `Chat.tsx` (`editingMessage` state), `ChatWindow` только сообщает id+текст наверх через `onStartEdit`.
+- Смайлики — паки в таблицах `emoji_packs`/`emoji_items`, сами смайлики хранятся текстом (юникод), не картинками. Обычный пользователь видит только `enabled` паки (`GET /api/emoji`), правка паков — только супер-админ (`/api/emoji/admin/*`, вкладка «Смайлики» в панели). Задачи по смене статуса задачи и созданию/правке шлют `tasks_changed` всем причастным — раньше клиент это событие никто не слушал, статус не обновлялся без смены вкладки.
 
 **Контракты данных**
 - `CalendarOccurrence`, `EventDraft`, слои календаря (`global`/`personal`/`birthdays`/`space:<id>`).
@@ -18,10 +22,10 @@
 - Статус профиля: `users.status_preset` (пресет из фиксированного набора) + `users.status_custom` (свой текст) — взаимоисключающие, см. `utils/statusMeta.ts`.
 
 **Состояние миграций БД** (порядок применения)
-- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height`. Все идемпотентны, накатаны на проде.
+- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске). Все идемпотентны, накатаны на проде.
 
 **Текущая версия и деплой**
-- Прод сейчас: 1.5.7 на всех платформах (сервер/веб/Windows/Android) — versionCode 24 для Android.
+- Прод сейчас: 1.5.8 на всех платформах (сервер/веб/Windows/Android) — versionCode 25 для Android.
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
