@@ -167,6 +167,21 @@ const Chat: React.FC = () => {
   const [lastMessages, setLastMessages] = useState<Record<string, LastMessage>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  // Счётчики непрочитанного перезапрашиваются в нескольких местах разом
+  // (подключение сокета, эхо своего же прочтения на других вкладках,
+  // возврат приложения из фона) — несколько таких запросов могут улететь
+  // почти одновременно, а вернуться в другом порядке из-за сетевой
+  // задержки. Без защиты от переупорядочивания более старый (уже
+  // неактуальный) ответ мог прилететь последним и откатить уже
+  // очищенный бейдж обратно — ровно то, что выглядело как "отметка о
+  // непрочитанном возвращается" при переключении между чатами.
+  const unreadFetchSeq = useRef(0);
+  const refetchUnread = useCallback(() => {
+    const seq = ++unreadFetchSeq.current;
+    api.get('/unread')
+      .then(({ data }) => { if (seq === unreadFetchSeq.current) setUnreadCounts(data); })
+      .catch(console.error);
+  }, []);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [comments, setComments] = useState<Record<number, { username: string; display_name: string | null; comment: string }>>({});
   const [hasMore, setHasMore] = useState(true);
@@ -486,7 +501,7 @@ const Chat: React.FC = () => {
       }).catch(console.error);
 
       api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
-      api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
+      refetchUnread();
       api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
       api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
@@ -552,7 +567,7 @@ const Chat: React.FC = () => {
       ));
 
       if (data.status === 'read') {
-        api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
+        refetchUnread();
       }
     });
 
@@ -659,7 +674,7 @@ const Chat: React.FC = () => {
         liveSocket.connect();
       }
 
-      api.get('/unread').then(({ data }) => setUnreadCounts(data)).catch(console.error);
+      refetchUnread();
 
       if (liveActiveChat) {
         api.get(`/messages/${liveActiveChat}?limit=50&offset=0`)
