@@ -80,9 +80,8 @@ export const SECTIONS: SectionMeta[] = [
   {
     id: 'tasks',
     label: 'Задачи',
-    ready: false,
-    summary:
-      'Поручения со сроками и ответственными: задачу можно будет поставить из сообщения и следить за статусом.',
+    ready: true,
+    summary: 'Поручения со сроками и причастными людьми — видит их только тот, кого позвали.',
     icon: (
       <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></svg>
     ),
@@ -124,6 +123,12 @@ function nextTheme(current: ThemePreference): 'light' | 'dark' {
   return effectiveDark ? 'light' : 'dark';
 }
 
+// Тип "Интернет" — самостоятельная регистрация с улицы, не сотрудник. Ему
+// незачем видеть пространства, задачи (поручения — это про рабочие
+// обязанности) и документы; календарь остаётся, но общий слой в нём и так
+// не показывает сервер (см. canSeeGlobalCalendar на бэкенде).
+const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['chats', 'people', 'calendar', 'settings'];
+
 interface NavRailProps {
   active: SectionId;
   onSelect: (id: SectionId) => void;
@@ -132,11 +137,16 @@ interface NavRailProps {
   avatarPath: string | null;
   online: boolean;
   onOpenProfile: () => void;
+  accountType?: string;
 }
 
 const NavRail: React.FC<NavRailProps> = ({
-  active, onSelect, unreadTotal, username, avatarPath, online, onOpenProfile
+  active, onSelect, unreadTotal, username, avatarPath, online, onOpenProfile, accountType
 }) => {
+  const sections = accountType === 'internet'
+    ? SECTIONS.filter((s) => INTERNET_VISIBLE_SECTIONS.includes(s.id))
+    : SECTIONS;
+
   // Текущую тему читаем в момент клика, а не держим в состоянии: её же меняет
   // выпадающий список в настройках, и своя копия успела бы разойтись с тем,
   // что реально записано в localStorage.
@@ -151,7 +161,7 @@ const NavRail: React.FC<NavRailProps> = ({
       </div>
 
       <div className="rail-items">
-        {SECTIONS.map((section) => {
+        {sections.map((section) => {
           const isActive = active === section.id;
           const badge = section.id === 'chats' ? unreadTotal : 0;
           return (

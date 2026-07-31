@@ -282,6 +282,36 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id);
+
+  -- Задачи-поручения. Отдельно от календарных «задач» (is_task на событии,
+  -- привязаны к дате): здесь может быть несколько причастных, а не только
+  -- владелец события, и видимость строго по составу task_participants —
+  -- задача не должна попадаться в списке тому, кого в неё не звали.
+  CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    created_by INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'not_started',
+    due_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+
+  -- Причастные к задаче. Создатель не дублируется сюда автоматически —
+  -- видимость и права проверяются как created_by=? OR EXISTS(...participants).
+  CREATE TABLE IF NOT EXISTS task_participants (
+    task_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (task_id, user_id),
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_task_participants_user ON task_participants(user_id);
+  CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by);
 `);
 
 // Миграция: добавляем колонку status, если БД старая
@@ -403,6 +433,21 @@ ensureGroup('Кафедры');
 // переименование отдела в панели осиротило бы всех, кто в нём числится.
 try {
   db.exec(`ALTER TABLE users ADD COLUMN department_id INTEGER REFERENCES departments(id)`);
+} catch (e) {
+  // Колонка уже есть
+}
+
+// Миграция: статус профиля (в отпуске / на обеде / болею / выходной / свой
+// текст). Пресет и свой текст взаимоисключающие — хранятся в двух колонках,
+// а не одной, чтобы не городить в одной строке признак "это пресет или
+// текст" сравнением со списком ключей.
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN status_preset TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN status_custom TEXT`);
 } catch (e) {
   // Колонка уже есть
 }

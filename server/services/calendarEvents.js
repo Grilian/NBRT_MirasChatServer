@@ -230,17 +230,17 @@ const RANGE_CONDITION = `
  * тем, что уже загружено. Календари пространств добавятся сюда же условием по
  * членству, когда пространства появятся.
  */
-function listVisibleEvents({ userId, from, to, canEditGlobal = false }) {
+function listVisibleEvents({ userId, from, to, canEditGlobal = false, includeGlobal = true }) {
   const rows = db.prepare(`
     SELECT DISTINCT e.*
     FROM calendar_events e
     LEFT JOIN calendar_event_guests g ON g.event_id = e.id
     WHERE (
-      e.scope_kind = 'global'
+      (? = 1 AND e.scope_kind = 'global')
       OR (e.scope_kind = 'personal' AND (e.owner_id = ? OR g.user_id = ?))
     )
     AND ${RANGE_CONDITION}
-  `).all(userId, userId, to, from - LOOKBACK_MS);
+  `).all(includeGlobal ? 1 : 0, userId, userId, to, from - LOOKBACK_MS);
 
   return buildOccurrences(rows, { userId, from, to, canEditGlobal });
 }

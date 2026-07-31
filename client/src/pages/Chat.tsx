@@ -13,6 +13,7 @@ import GroupInfoModal from '../components/GroupInfoModal';
 import Avatar from '../components/Avatar';
 import NavRail, { SectionId, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
+import TasksPanel from '../tasks/TasksPanel';
 import CalendarSection from '../components/CalendarSection';
 import PeopleSection from '../components/PeopleSection';
 import NotificationStack, { ToastNotification } from '../components/NotificationStack';
@@ -259,6 +260,12 @@ const Chat: React.FC = () => {
   // Роль "Администратор" открывает встроенное админ-управление в профиле
   // собеседника (см. UserInfoModal) — тоже может смениться живьём по сокету.
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(localStorage.getItem('role') || null);
+  // Тип "Интернет" — самостоятельная регистрация с улицы, не сотрудник: видит
+  // урезанный рельс разделов (см. NavRail) и общий календарь ему не показывает
+  // уже сам сервер.
+  const [currentAccountType, setCurrentAccountType] = useState(localStorage.getItem('accountType') || 'staff');
+  const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
+  const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
 
   // Режим тишины — суперадмин может включить/выключить прямо во время сессии,
@@ -451,6 +458,9 @@ const Chat: React.FC = () => {
         setCurrentBirthDate(data.birth_date);
         setCurrentUserRole(data.role);
         setMuted(data.muted);
+        setCurrentAccountType(data.account_type || 'staff');
+        setCurrentStatusPreset(data.status_preset || null);
+        setCurrentStatusCustom(data.status_custom || null);
         localStorage.setItem('username', data.username);
         localStorage.setItem('displayName', data.display_name);
         localStorage.setItem('avatarPath', data.avatar_path || '');
@@ -461,6 +471,9 @@ const Chat: React.FC = () => {
         localStorage.setItem('birthDate', data.birth_date || '');
         localStorage.setItem('role', data.role || '');
         localStorage.setItem('muted', String(data.muted));
+        localStorage.setItem('accountType', data.account_type || 'staff');
+        localStorage.setItem('statusPreset', data.status_preset || '');
+        localStorage.setItem('statusCustom', data.status_custom || '');
       }).catch(console.error);
 
       api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
@@ -1296,6 +1309,7 @@ const Chat: React.FC = () => {
         avatarPath={currentAvatarPath}
         online={socketConnected}
         onOpenProfile={openOwnProfile}
+        accountType={currentAccountType}
       />
 
       {isChats && (
@@ -1399,6 +1413,14 @@ const Chat: React.FC = () => {
             <SettingsPanel
               username={currentDisplayName}
               avatarPath={currentAvatarPath}
+              statusPreset={currentStatusPreset}
+              statusCustom={currentStatusCustom}
+              onStatusChanged={(preset, custom) => {
+                setCurrentStatusPreset(preset);
+                setCurrentStatusCustom(custom);
+                localStorage.setItem('statusPreset', preset || '');
+                localStorage.setItem('statusCustom', custom || '');
+              }}
               onClose={() => goToSection('chats')}
               onOpenProfile={() => setView(v => ({ ...v, settings: 'profile' }))}
               onDeleteAccount={handleDeleteSelf}
@@ -1427,7 +1449,13 @@ const Chat: React.FC = () => {
         </main>
       )}
 
-      {!isChats && section !== 'settings' && section !== 'people' && section !== 'calendar' && (
+      {section === 'tasks' && (
+        <main className="section-host">
+          <TasksPanel currentUserId={currentUserId} />
+        </main>
+      )}
+
+      {!isChats && section !== 'settings' && section !== 'people' && section !== 'calendar' && section !== 'tasks' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>

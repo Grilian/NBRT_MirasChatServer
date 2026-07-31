@@ -22,6 +22,7 @@ const calendarRoutes = require('./routes/calendar');
 const sessionRoutes = require('./routes/session');
 const departmentsRoutes = require('./routes/departments');
 const groupsRoutes = require('./routes/groups');
+const tasksRoutes = require('./routes/tasks');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { isSharedChat, markRead } = require('./services/readReceipts');
@@ -71,6 +72,7 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/session', sessionRoutes);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/groups', verifyToken, groupsRoutes);
+app.use('/api/tasks', tasksRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
 // на каждый файл (как публичные CDN-ссылки на фото профиля у большинства

@@ -23,6 +23,7 @@ function loginSuccessPayload(user) {
     position: user.position || '',
     birth_date: user.birth_date || '',
     role: user.role || null,
+    account_type: user.account_type || 'staff',
   };
 }
 

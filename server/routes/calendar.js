@@ -46,6 +46,14 @@ function canPublishGlobal(userId) {
   return !!user && (user.role === 'admin' || user.role === 'moderator');
 }
 
+// Тип "Интернет" (незнакомые с улицы) не должен видеть общий календарь целиком
+// организации — только свои личные события. Тот же принцип ограничения
+// видимости, что уже применяется к справочнику людей в routes/users.js.
+function canSeeGlobalCalendar(userId) {
+  const user = db.prepare('SELECT account_type FROM users WHERE id = ?').get(userId);
+  return !user || user.account_type !== 'internet';
+}
+
 // Приводим тело запроса к строкам таблицы. Клиенту доверять нельзя ни в
 // длине текста, ни в согласованности границ: событие, у которого конец раньше
 // начала, сломало бы раскладку сетки, а не только само себя.
@@ -185,11 +193,15 @@ router.get('/events', verifyToken, (req, res) => {
     if (!range) return res.status(400).json({ error: 'Некорректный диапазон' });
 
     const canEditGlobal = canPublishGlobal(req.userId);
+    const includeGlobal = canSeeGlobalCalendar(req.userId);
     const filtered = SCOPE_KINDS.has(req.query.scope_kind);
+    const requestedGlobal = filtered && parseScope(req.query).scopeKind === 'global';
 
-    const events = filtered
-      ? listEvents({ userId: req.userId, ...range, ...parseScope(req.query), canEditGlobal })
-      : listVisibleEvents({ userId: req.userId, ...range, canEditGlobal });
+    const events = requestedGlobal && !includeGlobal
+      ? []
+      : filtered
+        ? listEvents({ userId: req.userId, ...range, ...parseScope(req.query), canEditGlobal })
+        : listVisibleEvents({ userId: req.userId, ...range, canEditGlobal, includeGlobal });
 
     // Дни рождения — понятие личное: в срезе пространства им не место.
     const wantsBirthdays = !filtered || req.query.scope_kind === 'personal';

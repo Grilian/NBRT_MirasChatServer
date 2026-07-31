@@ -52,7 +52,8 @@ router.get('/', verifyToken, (req, res) => {
     // открытым из уже добавленного контакта (там эти поля берутся из /contacts).
     const users = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar_path, u.bio, u.phone, u.position, u.birth_date,
-             u.group_id, g.name AS group_name, u.department_id, d.name AS department
+             u.group_id, g.name AS group_name, u.department_id, d.name AS department,
+             u.status_preset, u.status_custom
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
       LEFT JOIN departments d ON d.id = u.department_id
@@ -93,6 +94,9 @@ router.get('/me', verifyToken, (req, res) => {
       birth_date: user.birth_date || '',
       role: user.role || null,
       muted: !!user.muted,
+      account_type: user.account_type || 'staff',
+      status_preset: user.status_preset || null,
+      status_custom: user.status_custom || null,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -213,6 +217,37 @@ router.put('/me', verifyToken, (req, res) => {
       WHERE u.id = ?
     `).get(user.id);
     res.json(updated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Пресетами фиксированным набором, а не свободным текстом с клиента: иначе
+// эмодзи/подпись для каждого пресета пришлось бы хранить в базе и держать в
+// синхроне на всех платформах — так они живут только в клиенте (STATUS_PRESETS).
+const STATUS_PRESETS = new Set(['vacation', 'lunch', 'sick', 'dayoff']);
+
+// Смена статуса — часто нажимаемое действие (в отпуск/с обеда туда-обратно),
+// поэтому отдельная лёгкая ручка без currentPassword, в отличие от /me.
+router.put('/me/status', verifyToken, (req, res) => {
+  try {
+    const custom = String(req.body.status_custom || '').trim();
+
+    if (custom) {
+      if (custom.length > 60) {
+        return res.status(400).json({ error: 'Статус: не длиннее 60 символов' });
+      }
+      db.prepare('UPDATE users SET status_preset = NULL, status_custom = ? WHERE id = ?').run(custom, req.userId);
+      return res.json({ status_preset: null, status_custom: custom });
+    }
+
+    const preset = req.body.status_preset ? String(req.body.status_preset) : null;
+    if (preset !== null && !STATUS_PRESETS.has(preset)) {
+      return res.status(400).json({ error: 'Неизвестный статус' });
+    }
+
+    db.prepare('UPDATE users SET status_preset = ?, status_custom = NULL WHERE id = ?').run(preset, req.userId);
+    res.json({ status_preset: preset, status_custom: null });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

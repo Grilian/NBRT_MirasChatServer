@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
+import { describeStatus } from '../utils/statusMeta';
 
 export interface DirectoryUser {
   id: number;
@@ -10,6 +11,8 @@ export interface DirectoryUser {
   avatar_path: string | null;
   group_id: number | null;
   group_name: string | null;
+  status_preset?: string | null;
+  status_custom?: string | null;
 }
 
 interface PeopleSectionProps {
@@ -138,6 +141,12 @@ const PeopleSection: React.FC<PeopleSectionProps> = ({
                   <div className="row-body">
                     <div className="row-top">
                       <div className="row-name"><span>{nameFor(user)}</span></div>
+                      {(() => {
+                        const status = describeStatus(user.status_preset, user.status_custom);
+                        return status && (
+                          <span className="people-tag is-status" title={status.label}>{status.emoji} {status.label}</span>
+                        );
+                      })()}
                     </div>
                     <div className="row-bottom">
                       <div className="row-preview">
