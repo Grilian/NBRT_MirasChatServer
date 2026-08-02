@@ -17,13 +17,14 @@ interface TaskDialogProps {
   onSave: (draft: TaskDraft) => Promise<void>;
   onDelete?: () => Promise<void>;
   onStatusChange?: (status: TaskStatus) => Promise<void>;
+  onArchiveChange?: (archived: boolean) => Promise<void>;
 }
 
 // Срок — конец дня по Москве: задача «на сегодня» просрочена только после
 // полуночи, а не в любой момент после полудня.
 const END_OF_DAY_MINUTES = 23 * 60 + 59;
 
-const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, onSave, onDelete, onStatusChange }) => {
+const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, onSave, onDelete, onStatusChange, onArchiveChange }) => {
   // Править задачу может только тот, кто её поставил. Раньше форма
   // показывалась всем причастным одинаково, и «Сохранить» у них упиралось в
   // 404 «Задача не найдена» — сервер такой запрос и не должен принимать,
@@ -40,6 +41,8 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
   const [error, setError] = useState('');
   const [status, setStatus] = useState<TaskStatus | null>(task?.status || null);
   const [changingStatus, setChangingStatus] = useState(false);
+  const [archived, setArchived] = useState(task?.archived || false);
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => {
     api.get('/users').then(({ data }) => setPeople(data)).catch(() => {});
@@ -75,6 +78,31 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
           </button>
         ))}
       </div>
+    </div>
+  );
+
+  const toggleArchive = async () => {
+    if (!onArchiveChange || archiving) return;
+    const next = !archived;
+    setArchiving(true);
+    try {
+      await onArchiveChange(next);
+      setArchived(next);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось изменить архив');
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  // Архивировать можно только завершённую — и не раньше, чем сохранится
+  // текущий статус, иначе можно было бы отправить в архив ещё не сделанную
+  // задачу мимо серверной проверки, просто раньше кликнув сюда.
+  const archiveButton = task && onArchiveChange && (status === 'done' || archived) && (
+    <div className="field task-archive-field">
+      <button type="button" className="sa-btn-ghost task-archive-toggle" onClick={toggleArchive} disabled={archiving}>
+        {archived ? 'Вернуть из архива' : 'Перенести в архив'}
+      </button>
     </div>
   );
 
@@ -146,12 +174,14 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
               </div>
             )}
             {statusPicker}
+            {archiveButton}
           </div>
         ) : (
         <form onSubmit={handleSave} className="task-dialog-body">
           {error && <p className="form-error">{error}</p>}
 
           {statusPicker}
+          {archiveButton}
 
           <div className="field">
             <label>Название</label>

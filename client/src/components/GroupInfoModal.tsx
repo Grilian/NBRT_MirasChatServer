@@ -12,6 +12,7 @@ export interface GroupDetail {
   created_at: number;
   member_count: number;
   members: { id: number; display_name: string | null; username: string; avatar_path: string | null; role: string }[];
+  announcements_only: boolean;
 }
 
 interface GroupInfoModalProps {
@@ -56,6 +57,17 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId,
       console.error(e);
     } finally {
       setEditingName(false);
+    }
+  };
+
+  const toggleAnnouncementsOnly = async () => {
+    if (!group) return;
+    try {
+      const { data } = await api.put(`/groups/${group.id}`, { name: group.name, announcements_only: !group.announcements_only });
+      setGroup(data);
+      onUpdated(data);
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -174,6 +186,18 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId,
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
                 Добавить участников
               </button>
+            )}
+
+            {isOwner ? (
+              <div className="create-group-announce group-info-announce">
+                <span className="label">Канал-объявление — писать смогут только администраторы и модераторы</span>
+                <label className="switch">
+                  <input type="checkbox" checked={group.announcements_only} onChange={toggleAnnouncementsOnly} />
+                  <span className="switch-track"><span className="switch-thumb" /></span>
+                </label>
+              </div>
+            ) : group.announcements_only && (
+              <div className="group-info-announce-note">Писать могут только администраторы и модераторы</div>
             )}
 
             <div className="directory-list group-info-members">

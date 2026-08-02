@@ -29,6 +29,7 @@ const { participantsForChatId, isParticipant } = require('./services/chatPartici
 const { isSharedChat, markRead } = require('./services/readReceipts');
 const { notifyNewMessage } = require('./services/push');
 const { isValidChatImagePath } = require('./routes/messages');
+const { canPostAnnouncement } = require('./routes/groups');
 const { deleteUploadedFile } = require('./utils/files');
 const calendarScheduler = require('./services/calendarScheduler');
 
@@ -238,6 +239,17 @@ io.on('connection', (socket) => {
     // не проверялось, и любой мог отправить сообщение в chat_<a>_<b> чужих
     // пользователей, просто зная их id.
     if (!isParticipant(data.chatId, senderId)) return;
+
+    // Канал-объявление: писать может только администрация/модерация
+    // организации (users.role), остальные участники только читают.
+    const groupMatch = String(data.chatId).match(/^group_(\d+)$/);
+    if (groupMatch) {
+      const group = db.prepare('SELECT announcements_only FROM chat_groups WHERE id = ?').get(Number(groupMatch[1]));
+      if (group && group.announcements_only && !canPostAnnouncement(senderId)) {
+        socket.emit('message_blocked', { reason: 'announcement_only', chatId: data.chatId });
+        return;
+      }
+    }
 
     // Текст раньше уходил в БД как есть, что бы клиент ни прислал: пустая
     // строка, null или мегабайтная простыня одинаково создавали запись. Пустые

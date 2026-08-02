@@ -530,6 +530,27 @@ if (emojiPackCount === 0) {
   BASE_EMOJI.forEach((emoji, index) => insertEmoji.run(packId, emoji, index));
 }
 
+// Миграция: архивирование задач. Исполнитель может убрать выполненную задачу
+// из основных списков, не удаляя её, — история поручений остаётся доступной
+// отдельной вкладкой. Ставится только на завершённых (проверяется на сервере,
+// не колонкой), поэтому отдельного времени архивации не хранится.
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`);
+} catch (e) {
+  // Колонка уже есть
+}
+
+// Миграция: канал-объявление. Группа, где писать могут только люди с ролью
+// admin/moderator в организации (users.role), а не по составу самой группы —
+// это про орг-роль, а не про то, кто её создал. Обычные участники состоят в
+// группе и читают, но при попытке отправить получают message_blocked, как в
+// режиме тишины.
+try {
+  db.exec(`ALTER TABLE chat_groups ADD COLUMN announcements_only INTEGER NOT NULL DEFAULT 0`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {
   const initialUsername = process.env.SUPERADMIN_USERNAME || 'superadmin';

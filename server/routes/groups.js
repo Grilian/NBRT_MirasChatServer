@@ -7,6 +7,16 @@ const router = express.Router();
 
 const chatIdOf = (groupId) => `group_${groupId}`;
 
+// Роли, которым можно писать в канал-объявление (announcements_only) —
+// орг-роль из users.role, а не роль внутри самой группы: owner/member тут ни
+// при чём, речь про "администрация организации", а не про того, кто завёл чат.
+const ANNOUNCE_POST_ROLES = new Set(['admin', 'moderator']);
+
+function canPostAnnouncement(userId) {
+  const row = db.prepare('SELECT role FROM users WHERE id = ?').get(userId);
+  return !!row && ANNOUNCE_POST_ROLES.has(row.role);
+}
+
 function memberRow(groupId, userId) {
   return db.prepare('SELECT role FROM chat_group_members WHERE chat_group_id = ? AND user_id = ?').get(groupId, userId);
 }
@@ -36,8 +46,12 @@ function groupMembers(groupId) {
   `).all(groupId);
 }
 
+// can_post зависит от орг-роли конкретного зрителя, а group_updated шлётся
+// одним и тем же объектом сразу всем участникам — поэтому его тут нет,
+// клиент сам решает "могу ли я" по собственной роли (см. canPostAnnouncement
+// на клиенте), а не ждёт этого поля с сервера.
 function groupSummary(groupId) {
-  const group = db.prepare('SELECT id, name, created_by, created_at FROM chat_groups WHERE id = ?').get(groupId);
+  const group = db.prepare('SELECT id, name, created_by, created_at, announcements_only FROM chat_groups WHERE id = ?').get(groupId);
   if (!group) return null;
   const members = groupMembers(groupId);
   return {
@@ -48,6 +62,7 @@ function groupSummary(groupId) {
     created_at: group.created_at,
     member_count: members.length,
     members,
+    announcements_only: !!group.announcements_only,
   };
 }
 
@@ -56,7 +71,7 @@ function groupSummary(groupId) {
 router.get('/', verifyToken, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT g.id, g.name, g.created_by, g.created_at, m.role,
+      SELECT g.id, g.name, g.created_by, g.created_at, g.announcements_only, m.role,
         (SELECT COUNT(*) FROM chat_group_members WHERE chat_group_id = g.id) AS member_count
       FROM chat_group_members m
       JOIN chat_groups g ON g.id = m.chat_group_id
@@ -72,6 +87,7 @@ router.get('/', verifyToken, (req, res) => {
       created_at: row.created_at,
       member_count: row.member_count,
       role: row.role,
+      announcements_only: !!row.announcements_only,
     })));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -79,11 +95,15 @@ router.get('/', verifyToken, (req, res) => {
 });
 
 // Создатель становится единственным 'owner'; себя в список участников
-// добавлять не нужно — POST добавляет его автоматически.
+// добавлять не нужно — POST добавляет его автоматически. Канал-объявление
+// может завести кто угодно (не только сам админ/модератор) — это его
+// собственный чат, право писать в него определяется ролью на момент отправки,
+// а не тем, кто его создал.
 router.post('/', verifyToken, (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Название группы обязательно' });
+    const announcementsOnly = !!req.body.announcements_only;
 
     const memberIds = Array.isArray(req.body.member_ids)
       ? Array.from(new Set(req.body.member_ids.map(Number).filter((id) => Number.isInteger(id) && id !== req.userId)))
@@ -95,8 +115,8 @@ router.post('/', verifyToken, (req, res) => {
 
     const now = Date.now();
     const createGroup = db.transaction(() => {
-      const groupId = db.prepare('INSERT INTO chat_groups (name, created_by, created_at) VALUES (?, ?, ?)')
-        .run(name, req.userId, now).lastInsertRowid;
+      const groupId = db.prepare('INSERT INTO chat_groups (name, created_by, created_at, announcements_only) VALUES (?, ?, ?, ?)')
+        .run(name, req.userId, now, announcementsOnly ? 1 : 0).lastInsertRowid;
 
       const addMember = db.prepare('INSERT INTO chat_group_members (chat_group_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)');
       addMember.run(groupId, req.userId, 'owner', now);
@@ -125,12 +145,20 @@ router.get('/:id', verifyToken, requireMember, (req, res) => {
   }
 });
 
+// announcements_only — необязательное поле: если тело не содержит его вовсе
+// (например, старый клиент шлёт только name), настройка не трогается —
+// сохраняем текущее значение.
 router.put('/:id', verifyToken, requireMember, requireOwner, (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Название группы обязательно' });
 
-    db.prepare('UPDATE chat_groups SET name = ? WHERE id = ?').run(name, req.groupId);
+    if (req.body.announcements_only !== undefined) {
+      db.prepare('UPDATE chat_groups SET name = ?, announcements_only = ? WHERE id = ?')
+        .run(name, req.body.announcements_only ? 1 : 0, req.groupId);
+    } else {
+      db.prepare('UPDATE chat_groups SET name = ? WHERE id = ?').run(name, req.groupId);
+    }
 
     const summary = groupSummary(req.groupId);
     const io = req.app.get('io');
@@ -256,3 +284,4 @@ router.post('/:id/messages/delete', verifyToken, requireMember, requireOwner, (r
 });
 
 module.exports = router;
+module.exports.canPostAnnouncement = canPostAnnouncement;

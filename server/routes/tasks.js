@@ -36,6 +36,7 @@ function serializeTask(row, userId) {
     created_by: userBrief(row.created_by),
     participants: participantsOf(row.id),
     can_edit: row.created_by === userId,
+    archived: !!row.archived,
   };
 }
 
@@ -89,18 +90,21 @@ function parseTaskBody(body) {
 // Свои задачи: те, что поставил сам, и те, куда причастен. Разделение на
 // «Мне»/«От меня» делает клиент по created_by — тащить два отдельных запроса
 // на сервер незачем, набор один и тот же.
+// Архивные по умолчанию скрыты — это отдельный ?archived=1, чтобы основной
+// список не зарастал завершёнными поручениями, которые уже убрали с глаз.
 router.get('/', verifyToken, (req, res) => {
   try {
+    const archived = req.query.archived === '1' ? 1 : 0;
     const rows = db.prepare(`
       SELECT DISTINCT t.*
       FROM tasks t
       LEFT JOIN task_participants p ON p.task_id = t.id
-      WHERE t.created_by = ? OR p.user_id = ?
+      WHERE (t.created_by = ? OR p.user_id = ?) AND t.archived = ?
       ORDER BY
         (t.status = 'done'),
         (t.due_at IS NULL), t.due_at,
         t.created_at DESC
-    `).all(req.userId, req.userId);
+    `).all(req.userId, req.userId, archived);
 
     res.json(rows.map((row) => serializeTask(row, req.userId)));
   } catch (e) {
@@ -183,11 +187,39 @@ router.put('/:id/status', verifyToken, (req, res) => {
     if (!STATUSES.has(status)) return res.status(400).json({ error: 'Некорректный статус' });
 
     const now = Date.now();
-    db.prepare('UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?')
-      .run(status, status === 'done' ? now : null, now, id);
+    // Уводя статус обратно с "готово", снимаем и архив — архивная задача,
+    // которая внезапно снова не done, была бы видна только тому, кто помнит,
+    // что заглянуть надо именно во вкладку "Архив".
+    db.prepare('UPDATE tasks SET status = ?, completed_at = ?, updated_at = ?, archived = CASE WHEN ? THEN archived ELSE 0 END WHERE id = ?')
+      .run(status, status === 'done' ? now : null, now, status === 'done' ? 1 : 0, id);
 
     const saved = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     notifyTaskStatusChanged(req.app.get('io'), saved, req.userId);
+    notifyTasksChanged(req.app.get('io'), id, saved.created_by);
+
+    res.json(serializeTask(saved, req.userId));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// В архив — только завершённую задачу, и только причастный (создатель тоже
+// причастен по смыслу visibleTask). Убрать из архива можно тем же путём в
+// обратную сторону, без ограничения по статусу.
+router.put('/:id/archive', verifyToken, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const task = visibleTask(id, req.userId);
+    if (!task) return res.status(404).json({ error: 'Задача не найдена' });
+
+    const archived = !!req.body.archived;
+    if (archived && task.status !== 'done') {
+      return res.status(400).json({ error: 'В архив можно переносить только завершённые задачи' });
+    }
+
+    db.prepare('UPDATE tasks SET archived = ?, updated_at = ? WHERE id = ?').run(archived ? 1 : 0, Date.now(), id);
+
+    const saved = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     notifyTasksChanged(req.app.get('io'), id, saved.created_by);
 
     res.json(serializeTask(saved, req.userId));

@@ -94,6 +94,7 @@ interface ChatGroupSummary {
   created_at: number;
   member_count: number;
   role: 'owner' | 'member';
+  announcements_only: boolean;
 }
 interface AllUser {
   id: number;
@@ -756,6 +757,9 @@ const Chat: React.FC = () => {
         setMuted(true);
         localStorage.setItem('muted', 'true');
       }
+      // 'announcement_only' отдельного действия не требует: композер и так
+      // задизейблен по activeChatMeta.canPostHere — это подстраховка на случай
+      // рассинхрона (роль сменили в другой вкладке), сама композиция уже скрыта.
     });
 
     return () => {
@@ -1428,6 +1432,7 @@ const Chat: React.FC = () => {
   const activeChatMeta: {
     name: string; section: ChatSection; online?: boolean; avatarPath?: string | null; userId?: number;
     chatGroupId?: number; memberCount?: number; isGroupOwner?: boolean;
+    announcementsOnly?: boolean; canPostHere?: boolean;
     status?: { emoji: string; label: string } | null;
   } | null = (() => {
     if (!activeChat) return null;
@@ -1435,7 +1440,14 @@ const Chat: React.FC = () => {
     if (/^group_\d+$/.test(activeChat)) {
       const group = chatGroups.find(g => g.chat_id === activeChat);
       return group
-        ? { name: group.name, section: 'group', chatGroupId: group.id, memberCount: group.member_count, isGroupOwner: group.role === 'owner' }
+        ? {
+            name: group.name, section: 'group', chatGroupId: group.id, memberCount: group.member_count,
+            isGroupOwner: group.role === 'owner', announcementsOnly: group.announcements_only,
+            // Право писать — по орг-роли (users.role), не по роли в самой группе:
+            // владелец канала не обязательно администратор/модератор, и сервер
+            // ровно так же проверяет отправку (см. canPostAnnouncement в groups.js).
+            canPostHere: !group.announcements_only || currentUserRole === 'admin' || currentUserRole === 'moderator',
+          }
         : null;
     }
     const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
@@ -1736,13 +1748,20 @@ const Chat: React.FC = () => {
               Ваш аккаунт временно ограничен — отправка сообщений недоступна.
             </div>
           )}
+          {!muted && activeChatMeta?.announcementsOnly && !activeChatMeta.canPostHere && (
+            <div className="muted-banner">
+              Это канал-объявление — писать могут только администраторы и модераторы.
+            </div>
+          )}
           <MessageInput
             onSend={handleSendMessage}
             onTyping={handleTyping}
-            disabled={!activeChat || muted}
+            disabled={!activeChat || muted || (!!activeChatMeta?.announcementsOnly && !activeChatMeta.canPostHere)}
             placeholder={
               muted
                 ? 'Отправка сообщений ограничена'
+                : activeChatMeta?.announcementsOnly && !activeChatMeta.canPostHere
+                  ? 'Писать могут только администраторы и модераторы'
                 // Статус собеседника прямо в поле ввода: видно ровно в тот
                 // момент, когда собираешься писать, — не нужно вспоминать,
                 // что человек в отпуске, уже отправив сообщение.

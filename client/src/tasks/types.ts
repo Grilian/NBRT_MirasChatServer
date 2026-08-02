@@ -28,6 +28,7 @@ export interface TaskItem {
   participants: TaskPerson[];
   /** Может редактировать/удалить/переставить причастных — только создатель. */
   can_edit: boolean;
+  archived: boolean;
 }
 
 export interface TaskDraft {

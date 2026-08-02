@@ -10,6 +10,7 @@ export interface CreatedGroup {
   created_at: number;
   member_count: number;
   members: { id: number; display_name: string | null; username: string; avatar_path: string | null; role: string }[];
+  announcements_only: boolean;
 }
 
 interface CreateGroupModalProps {
@@ -20,6 +21,7 @@ interface CreateGroupModalProps {
 const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onCreated }) => {
   const [name, setName] = useState('');
   const [memberIds, setMemberIds] = useState<number[]>([]);
+  const [announcementsOnly, setAnnouncementsOnly] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -30,7 +32,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onCreated 
     setSaving(true);
     setError('');
     try {
-      const { data } = await api.post('/groups', { name: trimmed, member_ids: memberIds });
+      const { data } = await api.post('/groups', { name: trimmed, member_ids: memberIds, announcements_only: announcementsOnly });
       onCreated(data);
     } catch (e) {
       setError('Не удалось создать группу');
@@ -61,6 +63,14 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onCreated 
         </div>
 
         <MemberPicker excludeUserIds={[]} selectedIds={memberIds} onChange={setMemberIds} />
+
+        <div className="create-group-announce">
+          <span className="label">Канал-объявление — писать смогут только администраторы и модераторы</span>
+          <label className="switch">
+            <input type="checkbox" checked={announcementsOnly} onChange={(e) => setAnnouncementsOnly(e.target.checked)} />
+            <span className="switch-track"><span className="switch-thumb" /></span>
+          </label>
+        </div>
 
         {error && <div className="create-group-error">{error}</div>}
 

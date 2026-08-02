@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { dayKeyOf, formatDayLong, todayKey } from '../calendar/dates';
 import { nameFor } from '../utils/user';
-import { createTask, deleteTask, fetchTasks, setTaskStatus, updateTask } from './api';
+import { createTask, deleteTask, fetchTasks, setTaskArchived, setTaskStatus, updateTask } from './api';
 import TaskDialog from './TaskDialog';
 import { TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskItem, TaskStatus } from './types';
 
@@ -19,7 +19,7 @@ interface TasksPanelProps {
 const STATUS_LABELS = TASK_STATUS_LABELS;
 const STATUS_ORDER = TASK_STATUS_ORDER;
 
-type Tab = 'mine' | 'authored';
+type Tab = 'mine' | 'authored' | 'archive';
 
 function dueLabel(task: TaskItem): { text: string; overdue: boolean } | null {
   if (task.due_at === null) return null;
@@ -29,6 +29,7 @@ function dueLabel(task: TaskItem): { text: string; overdue: boolean } | null {
 
 const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 }) => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [archivedTasks, setArchivedTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [tab, setTab] = useState<Tab>('mine');
@@ -36,8 +37,8 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
 
   const load = () => {
     setLoading(true);
-    fetchTasks()
-      .then((data) => { setTasks(data); setError(false); })
+    Promise.all([fetchTasks(false), fetchTasks(true)])
+      .then(([active, archived]) => { setTasks(active); setArchivedTasks(archived); setError(false); })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   };
@@ -47,7 +48,7 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
 
   const mine = tasks.filter((t) => t.created_by.id !== currentUserId);
   const authored = tasks.filter((t) => t.created_by.id === currentUserId);
-  const list = tab === 'mine' ? mine : authored;
+  const list = tab === 'mine' ? mine : tab === 'authored' ? authored : archivedTasks;
 
   const changeStatus = async (taskId: number, next: TaskStatus) => {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: next } : t)));
@@ -62,6 +63,11 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
   const cycleStatus = (task: TaskItem) => {
     const nextIndex = (STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length;
     changeStatus(task.id, STATUS_ORDER[nextIndex]).catch(() => {});
+  };
+
+  const archiveTask = async (task: TaskItem, archived: boolean) => {
+    await setTaskArchived(task.id, archived);
+    load();
   };
 
   const handleSave = async (draft: Parameters<typeof createTask>[0]) => {
@@ -98,6 +104,9 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
         <button type="button" className={'task-tab' + (tab === 'authored' ? ' is-active' : '')} onClick={() => setTab('authored')}>
           От меня {authored.length > 0 && <span className="task-tab-count">{authored.length}</span>}
         </button>
+        <button type="button" className={'task-tab' + (tab === 'archive' ? ' is-active' : '')} onClick={() => setTab('archive')}>
+          Архив {archivedTasks.length > 0 && <span className="task-tab-count">{archivedTasks.length}</span>}
+        </button>
       </div>
 
       <div className="section-scroll">
@@ -105,13 +114,15 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
           {error && <div className="roster-empty">Не удалось загрузить задачи</div>}
           {!loading && !error && list.length === 0 && (
             <div className="roster-empty">
-              {tab === 'mine' ? 'Пока никто не поручил вам задачу' : 'Вы ещё не ставили задач'}
+              {tab === 'mine' && 'Пока никто не поручил вам задачу'}
+              {tab === 'authored' && 'Вы ещё не ставили задач'}
+              {tab === 'archive' && 'Архив пуст'}
             </div>
           )}
 
           {list.map((task) => {
             const due = dueLabel(task);
-            const otherPerson = tab === 'mine' ? task.created_by : null;
+            const otherPerson = task.created_by.id !== currentUserId ? task.created_by : null;
             return (
               <div key={task.id} className={'task-row' + (task.status === 'done' ? ' is-done' : '')}>
                 <button
@@ -119,6 +130,7 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
                   className={`task-status-pill is-${task.status}`}
                   onClick={() => cycleStatus(task)}
                   title="Сменить статус"
+                  disabled={tab === 'archive'}
                 >
                   {STATUS_LABELS[task.status]}
                 </button>
@@ -127,13 +139,23 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
                   <div className="task-row-title">{task.title}</div>
                   <div className="task-row-meta">
                     {otherPerson && <span>от {nameFor(otherPerson)}</span>}
-                    {tab === 'authored' && task.participants.length > 0 && (
+                    {!otherPerson && task.participants.length > 0 && (
                       <span>{task.participants.map((p) => nameFor(p)).join(', ')}</span>
                     )}
-                    {tab === 'authored' && task.participants.length === 0 && <span className="task-hint">только для вас</span>}
+                    {!otherPerson && task.participants.length === 0 && <span className="task-hint">только для вас</span>}
                     {due && <span className={due.overdue ? 'task-due is-overdue' : 'task-due'}>до {due.text}</span>}
                   </div>
                 </div>
+
+                {tab === 'archive' ? (
+                  <button type="button" className="icon-btn-ghost task-archive-btn" title="Вернуть из архива" onClick={() => archiveTask(task, false).catch(console.error)}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h18M11 6l-6 6 6 6" /></svg>
+                  </button>
+                ) : task.status === 'done' && (
+                  <button type="button" className="icon-btn-ghost task-archive-btn" title="В архив" onClick={() => archiveTask(task, true).catch(console.error)}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" /></svg>
+                  </button>
+                )}
               </div>
             );
           })}
@@ -147,7 +169,8 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
           onClose={() => setEditing(null)}
           onSave={handleSave}
           onDelete={editing !== 'new' && editing?.can_edit ? handleDelete : undefined}
-          onStatusChange={editing !== 'new' && editing ? (status) => changeStatus(editing.id, status) : undefined}
+          onStatusChange={editing !== 'new' && editing && !editing.archived ? (status) => changeStatus(editing.id, status) : undefined}
+          onArchiveChange={editing !== 'new' && editing ? (archived) => archiveTask(editing, archived) : undefined}
         />
       )}
     </div>
