@@ -1,5 +1,13 @@
 export type TaskStatus = 'not_started' | 'in_progress' | 'done';
 
+export const TASK_STATUS_ORDER: TaskStatus[] = ['not_started', 'in_progress', 'done'];
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  not_started: 'Не начата',
+  in_progress: 'В работе',
+  done: 'Готово',
+};
+
 export interface TaskPerson {
   id: number;
   username: string;

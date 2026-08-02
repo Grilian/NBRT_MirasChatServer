@@ -1290,6 +1290,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .task-status-pill.is-in_progress { border-color: var(--accent); color: var(--accent); }
 .task-status-pill.is-done { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+.task-status-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-status-picker .task-status-pill { opacity: .55; }
+.task-status-picker .task-status-pill.is-active { opacity: 1; font-weight: 700; }
+.task-status-picker .task-status-pill:disabled { cursor: default; }
+.task-status-picker .task-status-pill:not(:disabled):hover { opacity: 1; }
 .task-row-body { flex: 1; min-width: 0; cursor: pointer; }
 .task-row-title { font-size: 14.5px; font-weight: 500; }
 .task-row-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; font-size: 12.5px; color: var(--ink-faint); }

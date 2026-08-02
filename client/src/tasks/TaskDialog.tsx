@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import { dayKeyOf, formatDayLong, instantOf, toDateInput } from '../calendar/dates';
 import { nameFor } from '../utils/user';
-import { TaskDraft, TaskItem, TaskPerson } from './types';
+import { TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskDraft, TaskItem, TaskPerson, TaskStatus } from './types';
 
 interface DirectoryEntry {
   id: number;
@@ -16,13 +16,14 @@ interface TaskDialogProps {
   onClose: () => void;
   onSave: (draft: TaskDraft) => Promise<void>;
   onDelete?: () => Promise<void>;
+  onStatusChange?: (status: TaskStatus) => Promise<void>;
 }
 
 // Срок — конец дня по Москве: задача «на сегодня» просрочена только после
 // полуночи, а не в любой момент после полудня.
 const END_OF_DAY_MINUTES = 23 * 60 + 59;
 
-const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, onSave, onDelete }) => {
+const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, onSave, onDelete, onStatusChange }) => {
   // Править задачу может только тот, кто её поставил. Раньше форма
   // показывалась всем причастным одинаково, и «Сохранить» у них упиралось в
   // 404 «Задача не найдена» — сервер такой запрос и не должен принимать,
@@ -37,10 +38,45 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [status, setStatus] = useState<TaskStatus | null>(task?.status || null);
+  const [changingStatus, setChangingStatus] = useState(false);
 
   useEffect(() => {
     api.get('/users').then(({ data }) => setPeople(data)).catch(() => {});
   }, []);
+
+  const changeStatus = async (next: TaskStatus) => {
+    if (!onStatusChange || next === status || changingStatus) return;
+    const prev = status;
+    setStatus(next);
+    setChangingStatus(true);
+    try {
+      await onStatusChange(next);
+    } catch {
+      setStatus(prev);
+    } finally {
+      setChangingStatus(false);
+    }
+  };
+
+  const statusPicker = task && onStatusChange && (
+    <div className="field">
+      <label>Статус</label>
+      <div className="task-status-picker">
+        {TASK_STATUS_ORDER.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={'task-status-pill' + (s === status ? ' is-active is-' + s : '')}
+            disabled={changingStatus}
+            onClick={() => changeStatus(s)}
+          >
+            {TASK_STATUS_LABELS[s]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   const suggestions = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -109,11 +145,13 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
                 Причастные: {task!.participants.map((p) => nameFor(p)).join(', ')}
               </div>
             )}
-            <p className="task-hint">Статус меняется кнопкой в списке задач.</p>
+            {statusPicker}
           </div>
         ) : (
         <form onSubmit={handleSave} className="task-dialog-body">
           {error && <p className="form-error">{error}</p>}
+
+          {statusPicker}
 
           <div className="field">
             <label>Название</label>

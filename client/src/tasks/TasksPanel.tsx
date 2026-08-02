@@ -3,7 +3,7 @@ import { dayKeyOf, formatDayLong, todayKey } from '../calendar/dates';
 import { nameFor } from '../utils/user';
 import { createTask, deleteTask, fetchTasks, setTaskStatus, updateTask } from './api';
 import TaskDialog from './TaskDialog';
-import { TaskItem, TaskStatus } from './types';
+import { TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskItem, TaskStatus } from './types';
 
 interface TasksPanelProps {
   currentUserId: number;
@@ -16,13 +16,8 @@ interface TasksPanelProps {
   changeToken?: number;
 }
 
-const STATUS_LABELS: Record<TaskStatus, string> = {
-  not_started: 'Не начата',
-  in_progress: 'В работе',
-  done: 'Готово',
-};
-
-const STATUS_ORDER: TaskStatus[] = ['not_started', 'in_progress', 'done'];
+const STATUS_LABELS = TASK_STATUS_LABELS;
+const STATUS_ORDER = TASK_STATUS_ORDER;
 
 type Tab = 'mine' | 'authored';
 
@@ -54,15 +49,19 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
   const authored = tasks.filter((t) => t.created_by.id === currentUserId);
   const list = tab === 'mine' ? mine : authored;
 
-  const cycleStatus = async (task: TaskItem) => {
-    const nextIndex = (STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length;
-    const next = STATUS_ORDER[nextIndex];
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: next } : t)));
+  const changeStatus = async (taskId: number, next: TaskStatus) => {
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: next } : t)));
     try {
-      await setTaskStatus(task.id, next);
-    } catch {
+      await setTaskStatus(taskId, next);
+    } catch (e) {
       load(); // откатываем оптимистичное изменение, перечитав с сервера
+      throw e;
     }
+  };
+
+  const cycleStatus = (task: TaskItem) => {
+    const nextIndex = (STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length;
+    changeStatus(task.id, STATUS_ORDER[nextIndex]).catch(() => {});
   };
 
   const handleSave = async (draft: Parameters<typeof createTask>[0]) => {
@@ -148,6 +147,7 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
           onClose={() => setEditing(null)}
           onSave={handleSave}
           onDelete={editing !== 'new' && editing?.can_edit ? handleDelete : undefined}
+          onStatusChange={editing !== 'new' && editing ? (status) => changeStatus(editing.id, status) : undefined}
         />
       )}
     </div>
