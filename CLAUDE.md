@@ -15,18 +15,20 @@
 - Редактирование сообщения — панель над полем ввода (как в Telegram), а не строка в самом пузыре: правка живёт в `Chat.tsx` (`editingMessage` state), `ChatWindow` только сообщает id+текст наверх через `onStartEdit`.
 - Смайлики — паки в таблицах `emoji_packs`/`emoji_items`, сами смайлики хранятся текстом (юникод), не картинками. Обычный пользователь видит только `enabled` паки (`GET /api/emoji`), правка паков — только супер-админ (`/api/emoji/admin/*`, вкладка «Смайлики» в панели). Задачи по смене статуса задачи и созданию/правке шлют `tasks_changed` всем причастным — раньше клиент это событие никто не слушал, статус не обновлялся без смены вкладки.
 - Смена статуса задачи в диалоге (`TaskDialog.tsx`) — явный picker со всеми тремя статусами (`TASK_STATUS_ORDER`/`TASK_STATUS_LABELS` в `tasks/types.ts`), можно поставить любой напрямую, включая назад. Сервер (`PUT /api/tasks/:id/status`) и так принимал любой статус без ограничения направления — ограничения не было нигде, кроме UI: список умел только листать по кругу вперёд кнопкой-пилюлей, и не было заметно, что смена вообще возможна.
+- Архив задач: `tasks.archived`, `PUT /api/tasks/:id/archive` — переносить может любой причастный, но только когда `status = 'done'` (проверка на сервере). Возврат статуса с "готово" на любой другой автоматически снимает архив — иначе задача молча зависала бы видимой только во вкладке "Архив", хотя снова не done. Список `GET /api/tasks` по умолчанию отдаёт неархивные, `?archived=1` — архивные.
+- Канал-объявление в группах: `chat_groups.announcements_only`. Право писать — по орг-роли `users.role` (`admin`/`moderator`), а не по роли в самой группе (`owner`/`member`) — владелец канала не обязан быть администратором организации. Проверка обязательна на сервере (`canPostAnnouncement` в `routes/groups.js`, вызывается из обработчика `chat_message` в `index.js`) — клиентский дизейбл композера (`Chat.tsx`, `activeChatMeta.canPostHere`) только для UX, не защита. `can_post` для конкретного зрителя сервер не шлёт в `group_updated`/`group_created` (эти события летят одним объектом сразу всем участникам) — клиент сам считает по своей `currentUserRole`.
 
 **Контракты данных**
 - `CalendarOccurrence`, `EventDraft`, слои календаря (`global`/`personal`/`birthdays`/`space:<id>`).
-- Группа: `{id, chat_id, name, created_by, created_at, member_count, role, members[]}` — см. `server/routes/groups.js`.
-- Задача: `{id, title, description, status, due_at, created_by, participants[], can_edit}` — см. `server/routes/tasks.js`. `status` — `not_started`/`in_progress`/`done`.
+- Группа: `{id, chat_id, name, created_by, created_at, member_count, role, members[], announcements_only}` — см. `server/routes/groups.js`.
+- Задача: `{id, title, description, status, due_at, created_by, participants[], can_edit, archived}` — см. `server/routes/tasks.js`. `status` — `not_started`/`in_progress`/`done`.
 - Статус профиля: `users.status_preset` (пресет из фиксированного набора) + `users.status_custom` (свой текст) — взаимоисключающие, см. `utils/statusMeta.ts`.
 
 **Состояние миграций БД** (порядок применения)
-- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске). Все идемпотентны, накатаны на проде.
+- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only`. Все идемпотентны, накатаны на проде.
 
 **Текущая версия и деплой**
-- Прод сейчас: 1.5.9 на всех платформах (сервер/веб/Windows/Android) — versionCode 26 для Android.
+- Прод сейчас: 1.5.10 на всех платформах (сервер/веб/Windows/Android) — versionCode 27 для Android.
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
