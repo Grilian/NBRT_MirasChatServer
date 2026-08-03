@@ -1271,13 +1271,18 @@ const Chat: React.FC = () => {
     socket.emit('message_delete', { id });
   };
 
-  // Массовое удаление доступно только создателю группы и не только своих
-  // сообщений — обычный message_delete (сокет) такое не позволяет, поэтому
-  // отдельная REST-ручка. Локальный список messages обновится по ответному
-  // сокет-событию 'messages_deleted', которое сервер разошлёт всем участникам.
+  // Владелец группы может стирать чужие сообщения — обычный message_delete
+  // (сокет) такое не позволяет, поэтому для него отдельная REST-ручка на
+  // весь список разом. Для своих сообщений (в любом чате, не только группе)
+  // ограничения по владению сокет и так проверяет сам — просто шлём
+  // message_delete на каждый id.
   const handleDeleteMessages = (ids: number[]) => {
-    if (!activeChatMeta?.chatGroupId) return;
-    api.post(`/groups/${activeChatMeta.chatGroupId}/messages/delete`, { ids }).catch(console.error);
+    if (activeChatMeta?.chatGroupId && activeChatMeta.isGroupOwner) {
+      api.post(`/groups/${activeChatMeta.chatGroupId}/messages/delete`, { ids }).catch(console.error);
+      return;
+    }
+    if (!socket) return;
+    for (const id of ids) socket.emit('message_delete', { id });
   };
 
   const handleTyping = () => {

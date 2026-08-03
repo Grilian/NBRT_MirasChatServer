@@ -648,7 +648,6 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .bubble-meta .ticks { display: inline-flex; }
 .bubble-meta .ticks.read { color: var(--tick-read); }
 
-.bubble-deleted { font-style: italic; opacity: .75; }
 .bubble-editing { padding: 3px; background: none !important; box-shadow: none; }
 .bubble-edit-input {
   width: 100%; min-width: 200px; border: 1px solid var(--accent); background: var(--paper-raised); color: var(--ink);

@@ -101,9 +101,14 @@ function buildRows(messages: Message[]): RenderedRow[] {
 }
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
-  chatId, messages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
+  chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages
 }) => {
+  // Удалённое сообщение хранится на сервере (обязательство по закону — до
+  // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
+  // вообще, включая плейсхолдер "Сообщение удалено" — поэтому просто не
+  // рендерим такие строки, а не показываем их пустым пузырём.
+  const messages = rawMessages.filter((m) => !m.deleted);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
@@ -115,9 +120,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Массовое удаление — только у создателя группы, поэтому режим выбора
-  // существует лишь когда canDeleteAnyMessage true; при уходе из чата и на
-  // смену прав гасим его, а не оставляем висеть с чужими id.
+  // Режим выбора доступен всем — свои сообщения может отметить кто угодно,
+  // чужие может отметить только владелец группы (canDeleteAnyMessage). При
+  // уходе из чата и на смену прав гасим его, а не оставляем висеть с чужими id.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
@@ -248,7 +253,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // или ещё и «Редактировать»/«Удалить»), решает уже сам рендер меню по
   // мере сравнения sender_id с currentUserId.
   const openMenuAt = (msg: Message, x: number, y: number) => {
-    if (selectMode || msg.deleted) return;
+    if (selectMode) return;
     setMenuFor({ id: msg.id, x, y });
   };
 
@@ -334,7 +339,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   return (
     <div className="conv-wrap">
-      {canDeleteAnyMessage && !selectMode && (
+      {!selectMode && messages.length > 0 && (
         <button type="button" className="select-messages-btn" onClick={() => setSelectMode(true)} title="Выбрать сообщения">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
         </button>
@@ -365,8 +370,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
         {rows.map(({ message: msg, startsGroup, endsGroup, daySeparator }) => {
           const mine = msg.sender_id === currentUserId;
-          const isDeleted = !!msg.deleted;
           const isEditing = editingId === msg.id;
+          // В режиме выбора отмечать можно своё сообщение всегда, а чужое —
+          // только владельцу группы (см. canDeleteAnyMessage в Chat.tsx).
+          const selectable = mine || !!canDeleteAnyMessage;
 
           const isSelected = selectedIds.has(msg.id);
           const className = [
@@ -374,7 +381,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             mine ? 'mine' : 'theirs',
             startsGroup ? 'starts-group' : '',
             endsGroup ? 'ends-group' : '',
-            selectMode ? 'is-selectable' : '',
+            selectMode && selectable ? 'is-selectable' : '',
             isSelected ? 'is-selected' : '',
             isEditing ? 'is-editing' : '',
           ].filter(Boolean).join(' ');
@@ -384,23 +391,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               {daySeparator && <div className="date-sep">{daySeparator}</div>}
               <div
                 className={className}
-                onClick={selectMode && !isDeleted ? () => toggleSelected(msg.id) : undefined}
-                onContextMenu={!selectMode && !isDeleted ? (e) => handleContextMenu(e, msg) : undefined}
-                onTouchStart={!selectMode && !isDeleted ? (e) => handleTouchStart(e, msg) : undefined}
-                onTouchEnd={!selectMode && !isDeleted ? clearLongPress : undefined}
-                onTouchMove={!selectMode && !isDeleted ? clearLongPress : undefined}
+                onClick={selectMode && selectable ? () => toggleSelected(msg.id) : undefined}
+                onContextMenu={!selectMode ? (e) => handleContextMenu(e, msg) : undefined}
+                onTouchStart={!selectMode ? (e) => handleTouchStart(e, msg) : undefined}
+                onTouchEnd={!selectMode ? clearLongPress : undefined}
+                onTouchMove={!selectMode ? clearLongPress : undefined}
               >
-                {selectMode && !isDeleted && (
+                {selectMode && selectable && (
                   <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
                 )}
-                <div className={'bubble' + (isDeleted ? ' bubble-deleted' : '')}>
+                <div className="bubble">
                     {/* Имя автора — только в общем чате и только над первым
                         сообщением блока: в переписке один на один оно
                         повторяло бы имя из шапки на каждой реплике. */}
                     {!mine && showAuthors && startsGroup && (
                       <div className="bubble-author">{nameFor(msg)}</div>
                     )}
-                    {!isDeleted && msg.file_path && (
+                    {msg.file_path && (
                       <button
                         type="button"
                         className="bubble-image"
@@ -410,17 +417,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         <img src={resolveUploadUrl(msg.file_path) || ''} alt="" />
                       </button>
                     )}
-                    {(isDeleted || msg.text) && (
-                      <span className="bubble-text">
-                        {isDeleted ? 'Сообщение удалено' : msg.text}
-                      </span>
-                    )}
+                    {msg.text && <span className="bubble-text">{msg.text}</span>}
                     {/* Время и галочки — внутри пузыря, как в Telegram:
                         обтекаются текстом и не занимают отдельную строку. */}
                     <span className="bubble-meta">
-                      {msg.edited_at && !isDeleted && <span className="edited-label">изм.</span>}
+                      {msg.edited_at && <span className="edited-label">изм.</span>}
                       <span className="bubble-time">{formatMoscowTime(msg.created_at)}</span>
-                      {mine && !isDeleted && <TickIcon status={msg.status || 'sent'} />}
+                      {mine && <TickIcon status={msg.status || 'sent'} />}
                     </span>
                 </div>
               </div>

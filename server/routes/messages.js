@@ -79,7 +79,7 @@ router.post('/upload-image', verifyToken, (req, res) => {
 router.get('/meta/last', verifyToken, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT m.chat_id, m.text, m.file_path, m.created_at
+      SELECT m.chat_id, m.text, m.file_path, m.created_at, m.deleted
       FROM messages m
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
@@ -91,7 +91,15 @@ router.get('/meta/last', verifyToken, (req, res) => {
     const result = {};
     rows.forEach(row => {
       if (!isParticipant(row.chat_id, req.userId)) return;
-      result[row.chat_id] = { chat_id: row.chat_id, text: row.text, file_path: row.file_path, created_at: row.created_at };
+      // Удалённое сообщение по-прежнему хранится целиком (обязательство по
+      // закону), но наружу — даже в превью последнего сообщения — из него
+      // ничего не должно попасть.
+      result[row.chat_id] = {
+        chat_id: row.chat_id,
+        text: row.deleted ? '' : row.text,
+        file_path: row.deleted ? null : row.file_path,
+        created_at: row.created_at,
+      };
     });
 
     res.json(result);
@@ -158,6 +166,20 @@ router.get('/:chatId', verifyToken, (req, res) => {
 
     // Переворачиваем чтобы старые были в начале
     messages.reverse();
+
+    // Удалённое сообщение хранится в БД целиком (обязательство по закону —
+    // быть готовыми предоставить переписку по требованию), но клиенту из
+    // него уходит только сам факт (id/deleted), без text/file_path — так
+    // содержимое не оказывается в ответе API вообще, даже если интерфейс
+    // потом сам решает не показывать такие строки.
+    for (const m of messages) {
+      if (m.deleted) {
+        m.text = '';
+        m.file_path = null;
+        m.file_width = null;
+        m.file_height = null;
+      }
+    }
 
     // Есть ли что-то ещё выше самого старого из отданных
     const oldestId = messages.length ? messages[0].id : null;

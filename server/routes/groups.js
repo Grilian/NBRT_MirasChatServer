@@ -1,7 +1,6 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const { deleteUploadedFile } = require('../utils/files');
 
 const router = express.Router();
 
@@ -263,15 +262,17 @@ router.post('/:id/messages/delete', verifyToken, requireMember, requireOwner, (r
     const placeholders = ids.map(() => '?').join(',');
 
     // Сужаем до сообщений именно этого чата — иначе id из чужой переписки,
-    // подставленный в запрос, тоже бы стёрся.
-    const affectedRows = db.prepare(`SELECT id, file_path FROM messages WHERE id IN (${placeholders}) AND chat_id = ?`)
+    // подставленный в запрос, тоже бы отметился удалённым.
+    const affectedRows = db.prepare(`SELECT id FROM messages WHERE id IN (${placeholders}) AND chat_id = ?`)
       .all(...ids, chatId);
     if (!affectedRows.length) return res.json({ deleted: [] });
     const affected = affectedRows.map((row) => row.id);
 
+    // Только флаг — text/file_path и сам файл на диске не трогаем: по закону
+    // нужно быть готовыми предоставить переписку целиком, удаление лишь
+    // прячет сообщение из интерфейса (см. message_delete в index.js).
     const affectedPlaceholders = affected.map(() => '?').join(',');
-    db.prepare(`UPDATE messages SET deleted = 1, text = '', file_path = NULL, file_width = NULL, file_height = NULL WHERE id IN (${affectedPlaceholders})`).run(...affected);
-    for (const row of affectedRows) if (row.file_path) deleteUploadedFile(row.file_path);
+    db.prepare(`UPDATE messages SET deleted = 1 WHERE id IN (${affectedPlaceholders})`).run(...affected);
 
     const io = req.app.get('io');
     const memberIds = groupMembers(req.groupId).map((m) => m.id);

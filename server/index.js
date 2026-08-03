@@ -30,7 +30,6 @@ const { isSharedChat, markRead } = require('./services/readReceipts');
 const { notifyNewMessage } = require('./services/push');
 const { isValidChatImagePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
-const { deleteUploadedFile } = require('./utils/files');
 const calendarScheduler = require('./services/calendarScheduler');
 
 const db = require('./db');
@@ -41,6 +40,19 @@ const MUTE_EXEMPT_GROUPS = ['Администрация', 'Админы'];
 
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_READ_BATCH = 500;
+
+// engine.io не разбирает X-Forwarded-For сам (socket.handshake.address —
+// это адрес nginx на локалхосте, а не клиента) — достаём реальный IP из
+// заголовка, который nginx уже прокидывает (см. proxy_set_header
+// X-Forwarded-For в конфиге). Он нужен только как метаданные о факте
+// передачи сообщения, в интерфейс не попадает.
+function clientIpOf(socket) {
+  const forwarded = socket.handshake.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  return socket.handshake.address || null;
+}
 
 // Простейшая защита от флуда: не больше FLOOD_MAX_MESSAGES сообщений за
 // FLOOD_WINDOW_MS с одного сокета. Без неё зациклившийся клиент (или кто-то
@@ -304,9 +316,9 @@ io.on('connection', (socket) => {
     try {
       // Сохраняем в локальную БД
       const stmt = db.prepare(
-        'INSERT INTO messages (chat_id, sender_id, text, file_path, file_width, file_height, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO messages (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
       );
-      const result = stmt.run(data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent');
+      const result = stmt.run(data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket));
 
       const message = {
         id: result.lastInsertRowid,
@@ -534,13 +546,18 @@ io.on('connection', (socket) => {
     }
   });
 
+  // "Удаление" — только флаг deleted: по закону нужно быть готовыми
+  // предоставить всю переписку целиком (не только метаданные о факте
+  // передачи), так что text/file_path/файл на диске остаются нетронутыми в
+  // базе — удаление лишь прячет сообщение из интерфейса (routes/messages.js
+  // отдаёт клиенту пустые text/file_path, когда deleted=1). Физически строка
+  // и файл не трогаются вообще ни при каких обстоятельствах.
   socket.on('message_delete', ({ id }) => {
     try {
-      const row = db.prepare('SELECT chat_id, sender_id, file_path FROM messages WHERE id = ?').get(id);
+      const row = db.prepare('SELECT chat_id, sender_id FROM messages WHERE id = ?').get(id);
       if (!row || Number(row.sender_id) !== Number(socket.userId)) return;
 
-      db.prepare("UPDATE messages SET deleted = 1, text = '', file_path = NULL, file_width = NULL, file_height = NULL WHERE id = ?").run(id);
-      if (row.file_path) deleteUploadedFile(row.file_path);
+      db.prepare('UPDATE messages SET deleted = 1 WHERE id = ?').run(id);
 
       emitToChat(row.chat_id, 'message_deleted', { id, chat_id: row.chat_id }, row.sender_id);
     } catch (e) {
