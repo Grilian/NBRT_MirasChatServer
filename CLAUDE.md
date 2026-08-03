@@ -29,7 +29,7 @@
 - `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only`. Все идемпотентны, накатаны на проде.
 
 **Текущая версия и деплой**
-- Прод сейчас: 1.5.10 на всех платформах (сервер/веб/Windows/Android) — versionCode 27 для Android.
+- Прод сейчас: 1.5.11 на всех платформах (сервер/веб/Windows/Android) — versionCode 28 для Android.
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
