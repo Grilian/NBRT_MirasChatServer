@@ -1,6 +1,6 @@
 {
   "name": "miraschat-desktop",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "private": true,
   "description": "MirasChat — десктопный клиент для Windows",
   "main": "src/main.js",
