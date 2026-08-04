@@ -129,6 +129,13 @@ function nextTheme(current: ThemePreference): 'light' | 'dark' {
 // не показывает сервер (см. canSeeGlobalCalendar на бэкенде).
 const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['chats', 'people', 'calendar', 'settings'];
 
+// Тот же отбор нужен и снаружи рельса: тип аккаунта могут сменить прямо во
+// время сессии, и человек, стоящий в разделе, который ему больше не положен,
+// должен быть с него уведён — сам пункт из рельса к этому моменту уже исчез.
+export function isSectionAllowedFor(accountType: string | undefined, id: SectionId): boolean {
+  return accountType !== 'internet' || INTERNET_VISIBLE_SECTIONS.includes(id);
+}
+
 interface NavRailProps {
   active: SectionId;
   onSelect: (id: SectionId) => void;
@@ -143,9 +150,7 @@ interface NavRailProps {
 const NavRail: React.FC<NavRailProps> = ({
   active, onSelect, unreadTotal, username, avatarPath, online, onOpenProfile, accountType
 }) => {
-  const sections = accountType === 'internet'
-    ? SECTIONS.filter((s) => INTERNET_VISIBLE_SECTIONS.includes(s.id))
-    : SECTIONS;
+  const sections = SECTIONS.filter((s) => isSectionAllowedFor(accountType, s.id));
 
   // Текущую тему читаем в момент клика, а не держим в состоянии: её же меняет
   // выпадающий список в настройках, и своя копия успела бы разойтись с тем,

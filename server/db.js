@@ -499,6 +499,17 @@ try {
   // Колонка уже есть
 }
 
+// Миграция: срок действия статуса. NULL — бессрочно, как было раньше.
+// Снимается лениво, при чтении статусов (см. clearExpiredStatuses в
+// services/statusExpiry.js), а не по таймеру: планировщик пришлось бы держать
+// живым между перезапусками pm2, а выгода нулевая — статус всё равно никто не
+// видит, пока не запросит список людей.
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN status_expires_at INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 function ensureDepartment(name) {
   const existing = db.prepare('SELECT id FROM departments WHERE name = ?').get(name);
   if (existing) return existing.id;

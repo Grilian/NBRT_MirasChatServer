@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
-import { STATUS_PRESET_ORDER, STATUS_PRESETS, StatusPreset } from '../utils/statusMeta';
 import {
   DURATION_OPTIONS,
   NotificationPrefs,
   getNotificationPrefs,
   saveNotificationPrefs,
 } from '../utils/notificationPrefs';
+import { UiPrefs, getUiPrefs, saveUiPrefs } from '../utils/uiPrefs';
 import { desktopNotificationPermission, ensureDesktopNotificationPermission } from '../utils/desktopNotify';
 import { isNativeMobile } from '../utils/mobileNotify';
 import { playIncomingSound } from '../utils/sound';
@@ -22,9 +22,6 @@ const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 interface SettingsPanelProps {
   username: string;
   avatarPath: string | null;
-  statusPreset: string | null;
-  statusCustom: string | null;
-  onStatusChanged: (preset: string | null, custom: string | null) => void;
   onClose: () => void;
   onOpenProfile: () => void;
   onDeleteAccount: () => void;
@@ -38,41 +35,15 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 ];
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
-  username, avatarPath, statusPreset, statusCustom, onStatusChanged, onClose, onOpenProfile, onDeleteAccount, onLogout
+  username, avatarPath, onClose, onOpenProfile, onDeleteAccount, onLogout
 }) => {
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
-  const [customStatus, setCustomStatus] = useState(statusCustom || '');
-  const [statusSaving, setStatusSaving] = useState(false);
-
-  const saveStatus = async (preset: StatusPreset | null, custom: string | null) => {
-    setStatusSaving(true);
-    try {
-      const { data } = await api.put('/users/me/status', { status_preset: preset, status_custom: custom });
-      onStatusChanged(data.status_preset, data.status_custom);
-      if (data.status_custom) setCustomStatus(data.status_custom);
-    } catch {
-      // Молчим: статус — необязательная мелочь, ронять UI ради неё незачем.
-    } finally {
-      setStatusSaving(false);
-    }
-  };
-
-  const togglePreset = (preset: StatusPreset) => {
-    setCustomStatus('');
-    saveStatus(statusPreset === preset ? null : preset, null);
-  };
-
-  const submitCustomStatus = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = customStatus.trim();
-    if (!trimmed) return;
-    saveStatus(null, trimmed);
-  };
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [mobileUpdate, setMobileUpdate] = useState<MobileUpdateInfo | null>(null);
   const [notify, setNotify] = useState<NotificationPrefs>(getNotificationPrefs);
+  const [ui, setUi] = useState<UiPrefs>(getUiPrefs);
   const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
   const [qrOpen, setQrOpen] = useState(false);
 
@@ -87,6 +58,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const next = { ...notify, ...patch };
     setNotify(next);
     saveNotificationPrefs(next);
+  };
+
+  const updateUi = (patch: Partial<UiPrefs>) => {
+    const next = { ...ui, ...patch };
+    setUi(next);
+    saveUiPrefs(next);
   };
 
   const handleSystemToggle = async (checked: boolean) => {
@@ -145,36 +122,27 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div className="name">{username}</div>
         </div>
 
-        <div className="settings-section-title">Статус</div>
+        {/* Статус переехал в профиль: это часть того, что человек о себе
+            сообщает, а не настройка приложения — и менять его логично там же,
+            где имя, должность и аватар. */}
+
+        <div className="settings-section-title">Список чатов</div>
         <div className="settings-group">
-          <div className="status-presets">
-            {STATUS_PRESET_ORDER.map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                className={'status-preset-btn' + (statusPreset === preset ? ' is-active' : '')}
-                disabled={statusSaving}
-                onClick={() => togglePreset(preset)}
-              >
-                <span>{STATUS_PRESETS[preset].emoji}</span> {STATUS_PRESETS[preset].label}
-              </button>
-            ))}
+          <div className="settings-row static">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
+            <span className="label">Группировать по отделам</span>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={ui.groupContacts}
+                onChange={(e) => updateUi({ groupContacts: e.target.checked })}
+              />
+              <span className="switch-track"><span className="switch-thumb" /></span>
+            </label>
           </div>
-          <form className="status-custom-form" onSubmit={submitCustomStatus}>
-            <input
-              type="text"
-              placeholder="Свой статус…"
-              value={customStatus}
-              onChange={(e) => setCustomStatus(e.target.value)}
-              maxLength={60}
-            />
-            <button type="submit" className="sa-btn-ghost" disabled={statusSaving || !customStatus.trim()}>Ок</button>
-            {(statusPreset || statusCustom) && (
-              <button type="button" className="sa-btn-ghost" disabled={statusSaving} onClick={() => saveStatus(null, null)}>
-                Убрать
-              </button>
-            )}
-          </form>
+          <div className="settings-hint">
+            Выключено — чаты идут по свежести переписки. Включено — разбиты на разделы по отделам.
+          </div>
         </div>
 
         <div className="settings-section-title">Уведомления</div>

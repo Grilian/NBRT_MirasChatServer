@@ -9,6 +9,7 @@ const sharp = require('sharp');
 const { isValidLogin, isReservedLogin, isValidPassword, isValidDisplayName, isValidPhone, isValidBio, isValidShortText, isValidBirthDate } = require('../utils/validators');
 const { deleteAvatarFile } = require('../utils/files');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
+const { clearExpiredStatuses } = require('../services/statusExpiry');
 const router = express.Router();
 
 const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
@@ -41,6 +42,7 @@ const INTERNET_VISIBLE_GROUPS = ['Админы'];
 // как "Сотрудник", видимость открывается на всех.
 router.get('/', verifyToken, (req, res) => {
   try {
+    clearExpiredStatuses();
     const requester = db.prepare('SELECT account_type FROM users WHERE id = ?').get(req.userId);
     const restrictToInternet = requester && requester.account_type === 'internet';
     const visibleGroupPlaceholders = INTERNET_VISIBLE_GROUPS.map(() => '?').join(',');
@@ -53,7 +55,7 @@ router.get('/', verifyToken, (req, res) => {
     const users = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar_path, u.bio, u.phone, u.position, u.birth_date,
              u.group_id, g.name AS group_name, u.department_id, d.name AS department,
-             u.status_preset, u.status_custom
+             u.status_preset, u.status_custom, u.created_at
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
       LEFT JOIN departments d ON d.id = u.department_id
@@ -73,6 +75,7 @@ router.get('/', verifyToken, (req, res) => {
 // (например, role), не заставляя человека перелогиниваться вручную.
 router.get('/me', verifyToken, (req, res) => {
   try {
+    clearExpiredStatuses();
     const user = db.prepare(`
       SELECT u.*, d.name AS department_name
       FROM users u
@@ -97,6 +100,8 @@ router.get('/me', verifyToken, (req, res) => {
       account_type: user.account_type || 'staff',
       status_preset: user.status_preset || null,
       status_custom: user.status_custom || null,
+      status_expires_at: user.status_expires_at || null,
+      created_at: user.created_at || null,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -229,16 +234,33 @@ const STATUS_PRESETS = new Set(['vacation', 'lunch', 'sick', 'dayoff']);
 
 // Смена статуса — часто нажимаемое действие (в отпуск/с обеда туда-обратно),
 // поэтому отдельная лёгкая ручка без currentPassword, в отличие от /me.
+// Срок действия статуса ограничен сверху: «до» дальше пары недель — это уже
+// не статус, а профильная строчка, и человек про неё забудет, а коллеги будут
+// видеть неправду. Снимаем истёкшие лениво (clearExpiredStatuses).
+const STATUS_MAX_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+
+function parseStatusExpiry(raw) {
+  if (raw === null || raw === undefined || raw === '') return { value: null };
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return { error: 'Некорректный срок статуса' };
+  if (parsed <= Date.now()) return { error: 'Срок статуса уже прошёл' };
+  if (parsed > Date.now() + STATUS_MAX_DURATION_MS) return { error: 'Срок статуса — не больше двух недель' };
+  return { value: Math.round(parsed) };
+}
+
 router.put('/me/status', verifyToken, (req, res) => {
   try {
     const custom = String(req.body.status_custom || '').trim();
+    const expiry = parseStatusExpiry(req.body.status_expires_at);
+    if (expiry.error) return res.status(400).json({ error: expiry.error });
 
     if (custom) {
       if (custom.length > 60) {
         return res.status(400).json({ error: 'Статус: не длиннее 60 символов' });
       }
-      db.prepare('UPDATE users SET status_preset = NULL, status_custom = ? WHERE id = ?').run(custom, req.userId);
-      return res.json({ status_preset: null, status_custom: custom });
+      db.prepare('UPDATE users SET status_preset = NULL, status_custom = ?, status_expires_at = ? WHERE id = ?')
+        .run(custom, expiry.value, req.userId);
+      return res.json({ status_preset: null, status_custom: custom, status_expires_at: expiry.value });
     }
 
     const preset = req.body.status_preset ? String(req.body.status_preset) : null;
@@ -246,8 +268,12 @@ router.put('/me/status', verifyToken, (req, res) => {
       return res.status(400).json({ error: 'Неизвестный статус' });
     }
 
-    db.prepare('UPDATE users SET status_preset = ?, status_custom = NULL WHERE id = ?').run(preset, req.userId);
-    res.json({ status_preset: preset, status_custom: null });
+    // Статус сняли — срок вместе с ним, иначе он пережил бы следующий
+    // бессрочный статус и снял бы его в неожиданный момент.
+    const expiresAt = preset === null ? null : expiry.value;
+    db.prepare('UPDATE users SET status_preset = ?, status_custom = NULL, status_expires_at = ? WHERE id = ?')
+      .run(preset, expiresAt, req.userId);
+    res.json({ status_preset: preset, status_custom: null, status_expires_at: expiresAt });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

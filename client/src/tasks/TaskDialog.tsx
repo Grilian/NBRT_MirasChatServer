@@ -18,13 +18,17 @@ interface TaskDialogProps {
   onDelete?: () => Promise<void>;
   onStatusChange?: (status: TaskStatus) => Promise<void>;
   onArchiveChange?: (archived: boolean) => Promise<void>;
+  /** Текст сообщения, из которого заводят задачу (пункт меню в переписке). */
+  initialDescription?: string;
 }
 
 // Срок — конец дня по Москве: задача «на сегодня» просрочена только после
 // полуночи, а не в любой момент после полудня.
 const END_OF_DAY_MINUTES = 23 * 60 + 59;
 
-const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, onSave, onDelete, onStatusChange, onArchiveChange }) => {
+const TaskDialog: React.FC<TaskDialogProps> = ({
+  task, currentUserId, onClose, onSave, onDelete, onStatusChange, onArchiveChange, initialDescription
+}) => {
   // Править задачу может только тот, кто её поставил. Раньше форма
   // показывалась всем причастным одинаково, и «Сохранить» у них упиралось в
   // 404 «Задача не найдена» — сервер такой запрос и не должен принимать,
@@ -32,7 +36,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({ task, currentUserId, onClose, o
   // карточку задачи, а меняет только статус — из списка.
   const readOnly = !!task && !task.can_edit;
   const [title, setTitle] = useState(task?.title || '');
-  const [description, setDescription] = useState(task?.description || '');
+  const [description, setDescription] = useState(task?.description || initialDescription || '');
   const [dueDate, setDueDate] = useState(task?.due_at ? toDateInput(task.due_at) : '');
   const [participants, setParticipants] = useState<TaskPerson[]>(task?.participants || []);
   const [people, setPeople] = useState<DirectoryEntry[]>([]);

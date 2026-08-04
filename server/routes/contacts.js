@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
+const { clearExpiredStatuses } = require('../services/statusExpiry');
 const router = express.Router();
 
 // Список контактов текущего пользователя (то, что показывается в чат-листе) —
@@ -8,10 +9,11 @@ const router = express.Router();
 // сменить источник данных без изменения формы.
 router.get('/', verifyToken, (req, res) => {
   try {
+    clearExpiredStatuses();
     const contacts = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar_path, u.bio, u.phone,
              u.department, u.position, u.birth_date, u.group_id, g.name AS group_name,
-             u.status_preset, u.status_custom
+             u.status_preset, u.status_custom, u.created_at
       FROM contacts c
       JOIN users u ON u.id = c.contact_user_id
       LEFT JOIN groups g ON g.id = u.group_id

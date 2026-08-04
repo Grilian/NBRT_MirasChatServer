@@ -312,7 +312,13 @@ if (!gotLock) {
 // Единственное, чего избегаем, — закрыть приложение прямо посреди переписки.
 // Поэтому момент установки выбирается по состоянию окна (см. update-downloaded).
 autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
+
+// Установку при выходе включаем только когда обновление реально можно ставить.
+// Раньше здесь стояло true намертво, и это перебивало расписание: назначили
+// установку на пятницу, человек вышел из приложения в среду — electron-updater
+// ставил обновление сам, мимо всей нашей логики. Флаг теперь двигает
+// applySchedule: false, пока ждём назначенного часа, true — когда он наступил.
+autoUpdater.autoInstallOnAppQuit = false;
 
 function sendUpdateState(state) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -352,12 +358,19 @@ const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 function checkForUpdates() {
   if (!canUpdate) return;
-  // Обновление уже скачано и ждёт назначенного часа: новых версий искать не
-  // нужно, а вот расписание админ мог передвинуть — перечитываем его.
+
+  // Расписание админ мог передвинуть, пока скачанное обновление ждёт своего
+  // часа — перечитываем его на каждой проверке.
   if (pendingUpdate) {
     applySchedule().catch((e) => console.error('Расписание обновления не применилось:', e.message));
-    return;
   }
+
+  // И всё равно спрашиваем сервер. Раньше при скачанном обновлении проверка
+  // пропускалась совсем, и если за время ожидания выходила версия новее,
+  // клиент так и ставил залежавшуюся: с сервера она к тому моменту уже
+  // удалена, а установить старое поверх нового Windows потом не даст.
+  // Найдётся версия новее — electron-updater скачает её и снова пришлёт
+  // update-downloaded, а тот перезапишет pendingUpdate и расписание.
   autoUpdater.checkForUpdates().catch((e) => console.error('Проверка обновлений не удалась:', e.message));
 }
 
@@ -436,13 +449,24 @@ async function applySchedule() {
   const wait = due - Date.now();
 
   if (wait > 0) {
+    // Назначенный час ещё не наступил — снимаем установку при выходе, иначе
+    // electron-updater поставит обновление сам, стоит человеку закрыть
+    // приложение, и расписание не будет значить ничего.
+    autoUpdater.autoInstallOnAppQuit = false;
     sendUpdateState({ status: 'scheduled', version: pendingUpdate.version, at: due });
     // Таймер ставим только на близкие сроки: далёкую дату подхватит очередная
     // проверка обновлений, а заодно и увидит, если админ её передвинул.
-    if (wait <= UPDATE_CHECK_INTERVAL_MS) installTimer = setTimeout(applySchedule, wait);
+    if (wait <= UPDATE_CHECK_INTERVAL_MS) {
+      installTimer = setTimeout(() => {
+        applySchedule().catch((e) => console.error('Расписание обновления не применилось:', e.message));
+      }, wait);
+    }
     return;
   }
 
+  // Ставить уже можно — возвращаем установку при выходе как запасной путь на
+  // случай, если ни одно из условий ниже сейчас не выполнится.
+  autoUpdater.autoInstallOnAppQuit = true;
   sendUpdateState({ status: 'downloaded', version: pendingUpdate.version });
 
   // Обновление ждало нас выключенными — ставим сразу, не дожидаясь, пока

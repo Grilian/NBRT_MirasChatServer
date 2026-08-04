@@ -26,7 +26,7 @@ const tasksRoutes = require('./routes/tasks');
 const emojiRoutes = require('./routes/emoji');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
-const { isSharedChat, markRead } = require('./services/readReceipts');
+const { isSharedChat, markRead, readCountsFor } = require('./services/readReceipts');
 const { notifyNewMessage } = require('./services/push');
 const { isValidChatImagePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
@@ -46,6 +46,22 @@ const MAX_READ_BATCH = 500;
 // заголовка, который nginx уже прокидывает (см. proxy_set_header
 // X-Forwarded-For в конфиге). Он нужен только как метаданные о факте
 // передачи сообщения, в интерфейс не попадает.
+// Канал-объявление: в нём у каждого сообщения показывается «просмотрено» с
+// числом прочитавших, и это число должно расти живьём, а не только после
+// перезагрузки истории (её отдаёт routes/messages.js).
+function isAnnouncementChat(chatId) {
+  const match = String(chatId).match(/^group_(\d+)$/);
+  if (!match) return false;
+  const group = db.prepare('SELECT announcements_only FROM chat_groups WHERE id = ?').get(Number(match[1]));
+  return !!(group && group.announcements_only);
+}
+
+// Довесок к message_status_bulk — только для каналов-объявлений, в обычной
+// переписке счётчик не показывается и считать его незачем.
+function readCountsPayload(chatId, ids) {
+  return isAnnouncementChat(chatId) ? { readCounts: readCountsFor(ids) } : {};
+}
+
 function clientIpOf(socket) {
   const forwarded = socket.handshake.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.trim()) {
@@ -332,6 +348,10 @@ io.on('connection', (socket) => {
         created_at: new Date().toISOString(),
         username: senderRow ? senderRow.username : undefined,
         display_name: senderRow ? senderRow.display_name : undefined,
+        // Отметка «просмотрено» — только в каналах-объявлениях. Ставим ноль
+        // сразу при отправке, иначе счётчик появлялся бы у автора лишь после
+        // перезагрузки истории (в живом событии поля просто не было).
+        ...(isAnnouncementChat(data.chatId) ? { read_count: 0 } : {}),
       };
 
       emitToChat(data.chatId, 'chat_message', message, senderId);
@@ -453,7 +473,9 @@ io.on('connection', (socket) => {
       const affected = markRead(userId, chatId, ids);
       if (!affected.length) return;
 
-      emitToChat(chatId, 'message_status_bulk', { chatId, messageIds: affected, status: 'read' }, userId);
+      emitToChat(chatId, 'message_status_bulk', {
+        chatId, messageIds: affected, status: 'read', ...readCountsPayload(chatId, affected),
+      }, userId);
     } catch (e) {
       console.error('Ошибка отметки прочитанного:', e);
     }
@@ -514,7 +536,11 @@ io.on('connection', (socket) => {
 
       for (const [chatId, ids] of Object.entries(byChat)) {
         const affected = markRead(userId, chatId, ids);
-        if (affected.length) emitToChat(chatId, 'message_status_bulk', { chatId, messageIds: affected, status: 'read' });
+        if (affected.length) {
+          emitToChat(chatId, 'message_status_bulk', {
+            chatId, messageIds: affected, status: 'read', ...readCountsPayload(chatId, affected),
+          });
+        }
       }
     } catch (e) {
       console.error('Ошибка при массовой отметке прочитанного:', e);

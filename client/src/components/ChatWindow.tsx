@@ -17,6 +17,8 @@ interface Message {
   status?: 'sent' | 'delivered' | 'read';
   edited_at?: string | null;
   deleted?: boolean | number;
+  /** Сколько человек прочитало — приходит только в каналах-объявлениях. */
+  read_count?: number;
 }
 
 interface ChatWindowProps {
@@ -38,6 +40,8 @@ interface ChatWindowProps {
   /** Создатель группы может удалять чужие сообщения — не только свои. */
   canDeleteAnyMessage?: boolean;
   onDeleteMessages?: (ids: number[]) => void;
+  /** Завести поручение по тексту сообщения — открывает раздел «Задачи». */
+  onCreateTask?: (text: string) => void;
 }
 
 const LONG_PRESS_MS = 450;
@@ -102,7 +106,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
-  onStartEdit, editingId, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages
+  onStartEdit, editingId, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages, onCreateTask
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
   // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
@@ -422,6 +426,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         обтекаются текстом и не занимают отдельную строку. */}
                     <span className="bubble-meta">
                       {msg.edited_at && <span className="edited-label">изм.</span>}
+                      {/* «Просмотрено» — только в каналах-объявлениях, где
+                          сервер присылает read_count (см. routes/messages.js).
+                          Показываем и на нуле: важно видеть, что объявление
+                          пока не прочитал никто. */}
+                      {msg.read_count !== undefined && (
+                        <span className="bubble-seen" title={`Просмотрели: ${msg.read_count}`}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+                          {msg.read_count}
+                        </span>
+                      )}
                       <span className="bubble-time">{formatMoscowTime(msg.created_at)}</span>
                       {mine && <TickIcon status={msg.status || 'sent'} />}
                     </span>
@@ -460,6 +474,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               <button type="button" onClick={() => copyMessageText(menuMsg)}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
                 Копировать
+              </button>
+            )}
+            {/* Поручение по чужой реплике нужно не реже, чем по своей —
+                пункт доступен на любом сообщении с текстом. */}
+            {menuMsg.text && onCreateTask && (
+              <button type="button" onClick={() => { setMenuFor(null); onCreateTask(menuMsg.text); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></svg>
+                Создать задачу
               </button>
             )}
             {menuMine && (

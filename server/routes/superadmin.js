@@ -155,8 +155,12 @@ router.get('/users', verifySuperAdmin, (req, res) => {
 
     // Версии одним запросом, а не по строке на пользователя: строк тут
     // столько же, сколько людей, а запросов в цикле было бы вдвое больше.
+    // Веб отсюда исключён намеренно: раскатка касается только устанавливаемых
+    // клиентов (Windows и Android), а веб у всех обновляется сам в момент
+    // выкладки — его строка в этой колонке только сбивала с толку. Писать
+    // версию веба продолжаем (см. routes/session.js), просто не показываем.
     const versionRows = db.prepare(
-      'SELECT user_id, platform, version, updated_at FROM user_app_versions'
+      "SELECT user_id, platform, version, updated_at FROM user_app_versions WHERE platform != 'web'"
     ).all();
 
     const versionsByUser = new Map();

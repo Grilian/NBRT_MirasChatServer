@@ -17,6 +17,8 @@ interface Chat {
   chatGroupId?: number;
   /** Статус собеседника («в отпуске» и т.п.) — показывается справа от имени. */
   status?: { emoji: string; label: string } | null;
+  /** Комментарий к имени — отдельной строкой между именем и превью. */
+  comment?: string | null;
 }
 
 interface LastMessage {
@@ -44,6 +46,8 @@ interface ChatListProps {
   /** Только для узкого экрана — на нём в нижней панели «Настройкам» не хватило
       места (см. .rail-item-settings в theme.css), поэтому вход туда здесь. */
   onOpenSettings: () => void;
+  /** Ручка растягивания панели — только на широком экране, рисует Chat.tsx. */
+  resizeHandle?: React.ReactNode;
 }
 
 function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOpenGroupInfo: (chatGroupId: number) => void) {
@@ -76,16 +80,24 @@ function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOp
 const ChatList: React.FC<ChatListProps> = ({
   chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite,
-  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings
+  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings,
+  resizeHandle
 }) => {
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
-  const filtered = chats.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  // Ищем и по комментарию к имени — он больше не часть name (см. row-comment).
+  const needle = searchQuery.toLowerCase();
+  const filtered = chats.filter(c => (
+    !needle
+    || c.name.toLowerCase().includes(needle)
+    || (c.comment || '').toLowerCase().includes(needle)
+  ));
 
   let lastGroupLabel: string | null = null;
 
 
   return (
     <aside className="roster">
+      {resizeHandle}
       <div className="roster-head">
         {/* Аватар и настройки живут на рельсе слева — здесь остаётся только
             заголовок колонки, счётчик и «прочитать всё», иначе на экране было
@@ -174,6 +186,7 @@ const ChatList: React.FC<ChatListProps> = ({
                       </div>
                     )}
                   </div>
+                  {chat.comment && <div className="row-comment">{chat.comment}</div>}
                   <div className="row-bottom">
                     <div className="row-preview">{last ? (last.text || (last.file_path ? '📷 Фото' : '')) : ''}</div>
                     <div className="row-actions">

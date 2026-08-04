@@ -48,4 +48,25 @@ function markRead(userId, chatId, ids) {
   return affected;
 }
 
-module.exports = { isSharedChat, markRead };
+/**
+ * Сколько человек прочитало каждое из сообщений — для отметки «просмотрено» в
+ * каналах-объявлениях. Возвращает { [messageId]: count }; PRIMARY KEY таблицы
+ * начинается с message_id, так что COUNT идёт по индексу.
+ */
+function readCountsFor(ids) {
+  if (!ids.length) return {};
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT message_id, COUNT(*) AS c FROM message_reads
+    WHERE message_id IN (${placeholders})
+    GROUP BY message_id
+  `).all(...ids);
+
+  // Сообщения, которых нет в message_reads, в выборку не попадут вовсе —
+  // проставляем им ноль сами, иначе счётчик у них просто не обновится.
+  const counts = Object.fromEntries(ids.map((id) => [id, 0]));
+  for (const row of rows) counts[row.message_id] = row.c;
+  return counts;
+}
+
+module.exports = { isSharedChat, markRead, readCountsFor };

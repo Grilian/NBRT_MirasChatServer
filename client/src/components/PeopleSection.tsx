@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
+import { formatDate } from '../utils/time';
 import { describeStatus } from '../utils/statusMeta';
 
 export interface DirectoryUser {
@@ -13,6 +14,8 @@ export interface DirectoryUser {
   group_name: string | null;
   status_preset?: string | null;
   status_custom?: string | null;
+  /** Когда человек завёл учётную запись — 'YYYY-MM-DD HH:MM:SS' от SQLite. */
+  created_at?: string | null;
 }
 
 interface PeopleSectionProps {
@@ -22,6 +25,15 @@ interface PeopleSectionProps {
   onOpenChat: (user: DirectoryUser) => void;
   onOpenUserInfo: (userId: number) => void;
   onAddContact: (user: DirectoryUser) => void;
+  /** Закрыть окно — раздел открывается модалкой поверх текущего экрана. */
+  onClose: () => void;
+}
+
+/** «с 12.03.2025» — дата регистрации в справочнике. */
+function registeredLabel(createdAt: string | null | undefined): string | null {
+  if (!createdAt) return null;
+  const day = String(createdAt).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `с ${formatDate(day)}` : null;
 }
 
 const NO_GROUP = 'Без подразделения';
@@ -38,7 +50,7 @@ function pluralPeople(n: number): string {
 // экран и с группировкой по подразделениям: из рельса им пользуются не чтобы
 // быстро начать чат, а чтобы посмотреть, кто вообще есть в организации.
 const PeopleSection: React.FC<PeopleSectionProps> = ({
-  currentUserId, existingContactIds, onlineUserIds, onOpenChat, onOpenUserInfo, onAddContact
+  currentUserId, existingContactIds, onlineUserIds, onOpenChat, onOpenUserInfo, onAddContact, onClose
 }) => {
   const [users, setUsers] = useState<DirectoryUser[]>([]);
   const [query, setQuery] = useState('');
@@ -97,6 +109,9 @@ const PeopleSection: React.FC<PeopleSectionProps> = ({
             {loading ? 'Загрузка…' : pluralPeople(total)}
           </div>
         </div>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+        </button>
       </div>
 
       <div className="section-scroll">
@@ -151,6 +166,9 @@ const PeopleSection: React.FC<PeopleSectionProps> = ({
                     <div className="row-bottom">
                       <div className="row-preview">
                         {onlineUserIds.includes(user.id) ? 'в сети' : `@${user.username}`}
+                        {registeredLabel(user.created_at) && (
+                          <span className="people-registered"> · {registeredLabel(user.created_at)}</span>
+                        )}
                       </div>
                       <div className="row-actions">
                         {existingContactIds.includes(user.id) ? (

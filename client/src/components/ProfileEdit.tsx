@@ -2,6 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
+import { resolveUploadUrl } from '../utils/uploads';
+import {
+  STATUS_DURATION_OPTIONS, STATUS_PRESETS, STATUS_PRESET_ORDER, StatusPreset, statusExpiryFrom,
+} from '../utils/statusMeta';
 import {
   isValidLogin, isValidPassword, isValidDisplayName, isValidPhone,
   LOGIN_HINT, PASSWORD_HINT,
@@ -16,6 +20,10 @@ interface ProfileEditProps {
   currentDepartment: string;
   currentPosition: string;
   currentBirthDate: string;
+  /** Статус живёт здесь, а не в настройках: это то, что человек о себе сообщает. */
+  statusPreset: string | null;
+  statusCustom: string | null;
+  onStatusChanged: (preset: string | null, custom: string | null) => void;
   onBack: () => void;
   onSaved: (profile: {
     username: string; display_name: string; avatar_path: string | null; bio: string; phone: string;
@@ -26,7 +34,9 @@ interface ProfileEditProps {
 
 const ProfileEdit: React.FC<ProfileEditProps> = ({
   currentUsername, currentDisplayName, currentAvatarPath, currentBio, currentPhone,
-  currentDepartment, currentPosition, currentBirthDate, onBack, onSaved, onAvatarChanged
+  currentDepartment, currentPosition, currentBirthDate,
+  statusPreset, statusCustom, onStatusChanged,
+  onBack, onSaved, onAvatarChanged
 }) => {
   const [username, setUsername] = useState(currentUsername);
   const [displayName, setDisplayName] = useState(currentDisplayName);
@@ -56,6 +66,50 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
   const [saving, setSaving] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Статус переехал сюда из настроек — вместе со сроком, на который он ставится.
+  const [customStatus, setCustomStatus] = useState(statusCustom || '');
+  const [statusDuration, setStatusDuration] = useState<number | null>(null);
+  const [statusSaving, setStatusSaving] = useState(false);
+
+  const saveStatus = async (preset: StatusPreset | null, custom: string | null) => {
+    setStatusSaving(true);
+    try {
+      const { data } = await api.put('/users/me/status', {
+        status_preset: preset,
+        status_custom: custom,
+        // Снятие статуса срока не несёт — сервер обнулит его сам.
+        status_expires_at: preset || custom ? statusExpiryFrom(statusDuration) : null,
+      });
+      onStatusChanged(data.status_preset, data.status_custom);
+      if (data.status_custom) setCustomStatus(data.status_custom);
+    } catch {
+      // Молчим: статус — необязательная мелочь, ронять UI ради неё незачем.
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
+  const togglePreset = (preset: StatusPreset) => {
+    saveStatus(statusPreset === preset ? null : preset, null);
+  };
+
+  const submitCustomStatus = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = customStatus.trim();
+    if (trimmed) saveStatus(null, trimmed);
+  };
+
+  // Просмотр аватара во весь экран — раньше по клику он только открывал выбор
+  // файла, и посмотреть собственное фото целиком было нельзя вовсе.
+  const [avatarPreview, setAvatarPreview] = useState(false);
+
+  useEffect(() => {
+    if (!avatarPreview) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setAvatarPreview(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [avatarPreview]);
 
   const handleAvatarPick = () => fileInputRef.current?.click();
 
@@ -154,15 +208,23 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
   return (
     <div className="settings-panel">
       <div className="conv-head">
-        <button type="button" className="icon-btn back-btn" onClick={onBack} aria-label="Назад" style={{ display: 'inline-flex' }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
+        <div className="conv-title"><div className="settings-title">Профиль</div></div>
+        <button type="button" className="icon-btn" onClick={onBack} aria-label="Закрыть">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
-        <div className="conv-title"><div className="settings-title">Редактировать профиль</div></div>
       </div>
 
       <div className="settings-body">
         <div className="profile-avatar-section">
-          <button type="button" className="profile-avatar-btn" onClick={handleAvatarPick} disabled={avatarBusy} aria-label="Сменить фото">
+          {/* Клик по самому аватару открывает фото, а не выбор файла: сменить
+              его есть чем ниже, а посмотреть своё фото целиком было нечем. */}
+          <button
+            type="button"
+            className="profile-avatar-btn"
+            onClick={() => (avatarPath ? setAvatarPreview(true) : handleAvatarPick())}
+            disabled={avatarBusy}
+            aria-label={avatarPath ? 'Открыть фото' : 'Добавить фото'}
+          >
             <Avatar name={nameFor({ username, display_name: displayName })} avatarPath={avatarPath} />
           </button>
           <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarChange} style={{ display: 'none' }} />
@@ -172,6 +234,54 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
             <button type="button" onClick={handleAvatarPick} disabled={avatarBusy}>Сменить фото</button>
             {avatarPath && <button type="button" onClick={handleAvatarRemove} disabled={avatarBusy}>Убрать</button>}
           </div>
+        </div>
+
+        <div className="settings-section-title">Статус</div>
+        <div className="settings-group">
+          <div className="status-presets">
+            {STATUS_PRESET_ORDER.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                className={'status-preset-btn' + (statusPreset === preset ? ' is-active' : '')}
+                disabled={statusSaving}
+                onClick={() => togglePreset(preset)}
+              >
+                <span>{STATUS_PRESETS[preset].emoji}</span> {STATUS_PRESETS[preset].label}
+              </button>
+            ))}
+          </div>
+          <form className="status-custom-form" onSubmit={submitCustomStatus}>
+            <input
+              type="text"
+              placeholder="Свой статус…"
+              value={customStatus}
+              onChange={(e) => setCustomStatus(e.target.value)}
+              maxLength={60}
+            />
+            <button type="submit" className="sa-btn-ghost" disabled={statusSaving || !customStatus.trim()}>Ок</button>
+            {(statusPreset || statusCustom) && (
+              <button type="button" className="sa-btn-ghost" disabled={statusSaving} onClick={() => saveStatus(null, null)}>
+                Убрать
+              </button>
+            )}
+          </form>
+          <div className="status-duration">
+            <label htmlFor="status-duration">Снять через</label>
+            <select
+              id="status-duration"
+              value={statusDuration === null ? '' : String(statusDuration)}
+              onChange={(e) => setStatusDuration(e.target.value ? Number(e.target.value) : null)}
+              disabled={statusSaving}
+            >
+              {STATUS_DURATION_OPTIONS.map((option) => (
+                <option key={option.label} value={option.value === null ? '' : String(option.value)}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-hint">Срок применяется к статусу, который поставите следующим.</div>
         </div>
 
         <form className="profile-form profile-form-card" onSubmit={handleSubmit} style={{ maxWidth: 360 }}>
@@ -222,6 +332,15 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
           </button>
         </form>
       </div>
+
+      {avatarPreview && avatarPath && (
+        <div className="lightbox-overlay" onClick={() => setAvatarPreview(false)}>
+          <button type="button" className="lightbox-close" onClick={() => setAvatarPreview(false)} aria-label="Закрыть">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+          <img src={resolveUploadUrl(avatarPath) || ''} alt="" className="lightbox-img" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 };

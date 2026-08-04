@@ -11,7 +11,7 @@ import UserInfoModal from '../components/UserInfoModal';
 import CreateGroupModal, { CreatedGroup } from '../components/CreateGroupModal';
 import GroupInfoModal from '../components/GroupInfoModal';
 import Avatar from '../components/Avatar';
-import NavRail, { SectionId, sectionById } from '../components/NavRail';
+import NavRail, { SectionId, isSectionAllowedFor, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
 import TasksPanel from '../tasks/TasksPanel';
 import CalendarSection from '../components/CalendarSection';
@@ -42,6 +42,15 @@ import {
   getNotificationPrefs,
   onNotificationPrefsChanged
 } from '../utils/notificationPrefs';
+import {
+  DEFAULT_UI_PREFS,
+  ROSTER_MAX_WIDTH,
+  ROSTER_MIN_WIDTH,
+  UiPrefs,
+  getUiPrefs,
+  onUiPrefsChanged,
+  saveUiPrefs
+} from '../utils/uiPrefs';
 
 interface User {
   id: number;
@@ -74,6 +83,8 @@ interface Message {
   read_by_me?: number | boolean;
   edited_at?: string | null;
   deleted?: boolean | number;
+  /** Сколько человек прочитало — только в каналах-объявлениях. */
+  read_count?: number;
 }
 interface LastMessage {
   chat_id: string;
@@ -254,6 +265,9 @@ const Chat: React.FC = () => {
   // Счётчик «задачи изменились»: сервер шлёт tasks_changed, панель задач по
   // изменению этого числа перечитывает список.
   const [tasksChangeToken, setTasksChangeToken] = useState(0);
+  // Текст сообщения, из которого заводят задачу («Создать задачу» в меню
+  // сообщения) — уезжает в TasksPanel вместе с переходом в раздел.
+  const [taskDraftText, setTaskDraftText] = useState<string | null>(null);
   // Правка сообщения живёт здесь, а не в ленте: текст уезжает в поле ввода
   // (как в Telegram), а поле ввода — сосед ленты, общий родитель у них тут.
   const [editingMessage, setEditingMessage] = useState<EditingMessage | null>(null);
@@ -274,7 +288,7 @@ const Chat: React.FC = () => {
   // Теперь состояние экрана меняется только целиком, поэтому «переписка
   // открыта» физически не может пережить смену раздела.
   const [view, setView] = useState<ChatView>({ section: 'chats', conversation: false, settings: 'settings' });
-  const { section, settings: settingsView } = view;
+  const { section } = view;
   // Ещё один пояс: даже если переписка каким-то образом окажется помеченной
   // открытой вне раздела «Чаты», показывать её мы не станем.
   const conversationOpen = view.section === 'chats' && view.conversation;
@@ -284,6 +298,12 @@ const Chat: React.FC = () => {
   const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [groupInfoId, setGroupInfoId] = useState<number | null>(null);
+  // Свой профиль — модальное окно поверх любого раздела, а не подэкран
+  // настроек: он открывается по аватару с рельса, откуда бы ни нажали, и
+  // возвращать после него в настройки (где человек не был) неправильно.
+  const [profileOpen, setProfileOpen] = useState(false);
+  // Справочник «Люди» — тоже окно поверх экрана, не отдельный раздел.
+  const [peopleOpen, setPeopleOpen] = useState(false);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSentAt = useRef(0);
   // Синхронная защёлка «страница истории уже грузится» — см. loadMoreMessages
@@ -383,6 +403,46 @@ const Chat: React.FC = () => {
   // без перезахода в приложение.
   useEffect(() => onNotificationPrefsChanged(setNotificationPrefs), []);
 
+  // То же самое для настроек интерфейса (группировка контактов, ширина списка).
+  const [uiPrefs, setUiPrefs] = useState<UiPrefs>(getUiPrefs);
+  useEffect(() => onUiPrefsChanged(setUiPrefs), []);
+
+  // Растягивание списка чатов мышью. Ширина во время перетаскивания живёт в
+  // состоянии (перерисовка на каждый кадр), а в localStorage уходит один раз,
+  // на отпускании: писать туда на каждое движение мыши незачем.
+  const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  const handleResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    resizeStateRef.current = { startX: e.clientX, startWidth: uiPrefs.rosterWidth };
+  };
+
+  const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const state = resizeStateRef.current;
+    if (!state) return;
+    const next = Math.min(
+      ROSTER_MAX_WIDTH,
+      Math.max(ROSTER_MIN_WIDTH, state.startWidth + (e.clientX - state.startX))
+    );
+    setUiPrefs((prev) => (prev.rosterWidth === next ? prev : { ...prev, rosterWidth: next }));
+  };
+
+  const handleResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizeStateRef.current) return;
+    resizeStateRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    // saveUiPrefs разошлёт событие — свой же слушатель просто перезапишет
+    // состояние тем же значением, это дешевле, чем городить исключение.
+    saveUiPrefs(getUiPrefsSnapshot());
+  };
+
+  // Актуальные настройки на момент отпускания мыши — из ref, а не из замыкания
+  // обработчика, которое могло быть создано с шириной от начала перетаскивания.
+  const uiPrefsRef = useRef(uiPrefs);
+  uiPrefsRef.current = uiPrefs;
+  function getUiPrefsSnapshot() { return uiPrefsRef.current; }
+
   // Фокус окна. visibilitychange нужен отдельно от blur: свёрнутое окно и
   // фоновая вкладка не всегда дают blur, а в Electron окно, спрятанное в
   // трей, вообще не проходит через веб-события — оттуда состояние приходит
@@ -449,8 +509,8 @@ const Chat: React.FC = () => {
   // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
   // тот же открытый чат, "назад" снова сворачивает, и так до полного
   // закрытия приложения.
-  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId });
-  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId };
+  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId, profileOpen, peopleOpen });
+  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId, profileOpen, peopleOpen };
 
   useEffect(() => watchMobileKeyboard(), []);
 
@@ -500,6 +560,14 @@ const Chat: React.FC = () => {
   const goToSectionRef = useRef(goToSection);
   goToSectionRef.current = goToSection;
 
+  // Тип аккаунта сменили, пока человек сидит в разделе, которого у него больше
+  // нет (задачи, документы, пространства) — уводим в чаты. Эффектом, а не в
+  // обработчике сокета: сюда же попадает случай, когда тип из localStorage
+  // разошёлся с настоящим и правда приезжает первым же ответом /users/me.
+  useEffect(() => {
+    if (!isSectionAllowedFor(currentAccountType, section)) goToSection('chats');
+  }, [currentAccountType, section, goToSection]);
+
   useEffect(() => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('backButton', () => {
@@ -510,10 +578,8 @@ const Chat: React.FC = () => {
       if (nav.createGroupOpen) { setCreateGroupOpen(false); return; }
       if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
       if (nav.directoryOpen) { setDirectoryOpen(false); return; }
-      if (nav.view.section === 'settings' && nav.view.settings === 'profile') {
-        setView({ section: 'settings', conversation: false, settings: 'settings' });
-        return;
-      }
+      if (nav.profileOpen) { setProfileOpen(false); return; }
+      if (nav.peopleOpen) { setPeopleOpen(false); return; }
       // Тот же сброс, что и в goToSection: аппаратная кнопка «назад» возвращает
       // к списку чатов, а не в переписку, открытую до ухода в другой раздел.
       if (nav.view.section !== 'chats') { setView(VIEW_CHAT_LIST); return; }
@@ -642,10 +708,18 @@ const Chat: React.FC = () => {
     // аккаунта — сервер рассылает это всем, поэтому переспрашиваем счётчики
     // непрочитанных заново, а не просто гасим их локально (надёжнее, чем
     // вручную вычитать конкретные id).
-    newSocket.on('message_status_bulk', (data: { chatId: string; messageIds: number[]; status: 'read' }) => {
-      setMessages(prev => prev.map(m =>
-        data.messageIds.includes(m.id) ? { ...m, status: data.status } : m
-      ));
+    newSocket.on('message_status_bulk', (data: {
+      chatId: string; messageIds: number[]; status: 'read';
+      /** Только для каналов-объявлений — сколько человек прочитало. */
+      readCounts?: Record<number, number>;
+    }) => {
+      setMessages(prev => prev.map(m => {
+        if (!data.messageIds.includes(m.id)) return m;
+        const readCount = data.readCounts?.[m.id];
+        return readCount === undefined
+          ? { ...m, status: data.status }
+          : { ...m, status: data.status, read_count: readCount };
+      }));
 
       if (data.status === 'read') {
         refetchUnread();
@@ -739,7 +813,7 @@ const Chat: React.FC = () => {
     // включить/выключить режим тишины или сменить роль/группу/тип прямо во
     // время сессии — применяем сразу, без перелогина. Это всегда про самого
     // себя: сервер шлёт это только в комнату 'user:<id>' затронутого.
-    newSocket.on('account_updated', (data: { muted?: boolean; role?: string | null }) => {
+    newSocket.on('account_updated', (data: { muted?: boolean; role?: string | null; account_type?: string }) => {
       if (typeof data.muted === 'boolean') {
         setMuted(data.muted);
         localStorage.setItem('muted', String(data.muted));
@@ -747,6 +821,14 @@ const Chat: React.FC = () => {
       if (data.role !== undefined) {
         setCurrentUserRole(data.role);
         localStorage.setItem('role', data.role || '');
+      }
+      // Тип аккаунта решает, какие разделы вообще видны (см. NavRail). Сервер
+      // слал его и раньше, но клиент читал только muted/role — смена типа
+      // доезжала лишь после перелогина. Уводом из закрывшегося раздела
+      // занимается отдельный эффект ниже, не этот обработчик.
+      if (data.account_type !== undefined) {
+        setCurrentAccountType(data.account_type || 'staff');
+        localStorage.setItem('accountType', data.account_type || 'staff');
       }
     });
 
@@ -1381,6 +1463,10 @@ const Chat: React.FC = () => {
     // Групповые чаты (созданные вручную, не отдел из панели супер-админа) —
     // отдельным блоком сразу после избранного, до отделов настоящих.
     if (c.section === 'group') return 0.5;
+    // Без жёсткой группировки все люди в одном ранге — порядок между ними
+    // решает свежесть переписки. Раньше разделы по группам были всегда, и
+    // человек, которому только что написали, уезжал вниз, в свой раздел.
+    if (!uiPrefs.groupContacts) return 1;
     // groupLabel у "безгруппных" — это плейсхолдер "Без группы", а не реальное
     // название группы. truthy-проверка тут не годится: indexOf вернёт -1,
     // и 2 + (-1) = 0 столкнёт их с избранными вместо конца списка.
@@ -1402,25 +1488,31 @@ const Chat: React.FC = () => {
       chatGroupId: g.id,
       avatarPath: null as string | null,
     })),
-    ...allUsers.map(u => {
-      const commentData = comments[u.id];
-      const baseName = nameFor(u);
-      const rowName = commentData?.comment ? `${baseName} (${commentData.comment})` : baseName;
-
-      return {
-        id: getChatId(u.id),
-        name: rowName,
-        section: 'staff' as ChatSection,
-        groupLabel: u.groupName || 'Без группы',
-        deletable: true,
-        online: onlineUsers.includes(u.id),
-        userId: u.id,
-        avatarPath: u.avatarPath,
-        status: describeStatus(u.statusPreset, u.statusCustom),
-      };
-    })
+    // Комментарий к имени раньше дописывался в скобках прямо в name — из-за
+    // этого длинное имя с комментарием не помещалось в строку и обрезалось,
+    // причём обрезался как раз комментарий. Теперь это отдельное поле и
+    // отдельная строка карточки (см. row-comment в ChatList).
+    ...allUsers.map(u => ({
+      id: getChatId(u.id),
+      name: nameFor(u),
+      comment: comments[u.id]?.comment || null,
+      section: 'staff' as ChatSection,
+      groupLabel: u.groupName || 'Без группы',
+      deletable: true,
+      online: onlineUsers.includes(u.id),
+      userId: u.id,
+      avatarPath: u.avatarPath,
+      status: describeStatus(u.statusPreset, u.statusCustom),
+    }))
   ]
-    .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    // Ищем и по комментарию: раньше он был частью name и попадал в поиск сам
+    // собой, а людей нередко и находят по нему («бухгалтерия», «второй этаж»).
+    .filter(c => {
+      const needle = searchQuery.toLowerCase();
+      if (!needle) return true;
+      return c.name.toLowerCase().includes(needle)
+        || ((c as { comment?: string | null }).comment || '').toLowerCase().includes(needle);
+    })
     .sort((a, b) => {
       const rankDiff = groupRank(a) - groupRank(b);
       if (rankDiff !== 0) return rankDiff;
@@ -1429,7 +1521,14 @@ const Chat: React.FC = () => {
       return bTime - aTime;
     })
     // Избранным — свой ярлык раздела, чтобы не путался с их реальной группой.
-    .map(c => ({ ...c, groupLabel: c.section !== 'general' && favorites.includes(c.id) ? 'Избранное' : c.groupLabel }));
+    // Без жёсткой группировки заголовки отделов не нужны вовсе: ранг у всех
+    // людей один, и разделитель разрезал бы список в случайном месте.
+    .map(c => ({
+      ...c,
+      groupLabel: c.section !== 'general' && favorites.includes(c.id)
+        ? 'Избранное'
+        : (!uiPrefs.groupContacts && c.section === 'staff' ? null : c.groupLabel),
+    }));
 
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
 
@@ -1499,7 +1598,7 @@ const Chat: React.FC = () => {
   // ловушка, что чинили в кнопках «назад» у настроек и календаря.
   const openOwnProfile = () => {
     closeKeyboard();
-    setView({ section: 'settings', conversation: false, settings: 'profile' });
+    setProfileOpen(true);
   };
 
   // На узком экране список и переписка не сосуществуют: рисуется ровно одна
@@ -1509,10 +1608,13 @@ const Chat: React.FC = () => {
   const showConversation = isChats && (!narrowLayout || conversationOpen);
 
   return (
-    <div className={'chat-layout'
-      + (isChats ? '' : ' is-single-pane')
-      + (conversationOpen ? ' is-conversation-view' : '')
-      + (skipPaneAnim ? ' is-no-pane-anim' : '')}>
+    <div
+      className={'chat-layout'
+        + (isChats ? '' : ' is-single-pane')
+        + (conversationOpen ? ' is-conversation-view' : '')
+        + (skipPaneAnim ? ' is-no-pane-anim' : '')}
+      style={{ ['--roster-w' as string]: `${uiPrefs.rosterWidth}px` }}
+    >
       <NotificationStack
         toasts={toasts}
         durationMs={notificationPrefs.durationMs}
@@ -1527,7 +1629,10 @@ const Chat: React.FC = () => {
 
       <NavRail
         active={section}
-        onSelect={goToSection}
+        // «Люди» — не раздел, а окно поверх текущего экрана: справочник
+        // открывают, чтобы посмотреть человека и вернуться к тому, что делали,
+        // а не чтобы уйти из переписки.
+        onSelect={(id) => (id === 'people' ? setPeopleOpen(true) : goToSection(id))}
         unreadTotal={totalUnread}
         username={currentDisplayName}
         avatarPath={currentAvatarPath}
@@ -1554,6 +1659,20 @@ const Chat: React.FC = () => {
         onOpenGroupInfo={(chatGroupId) => setGroupInfoId(chatGroupId)}
         onCreateGroup={() => setCreateGroupOpen(true)}
         onOpenSettings={() => goToSection('settings')}
+        resizeHandle={!narrowLayout && (
+          <div
+            className="roster-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Ширина списка чатов"
+            onPointerDown={handleResizeStart}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeEnd}
+            onPointerCancel={handleResizeEnd}
+            onDoubleClick={() => saveUiPrefs({ ...uiPrefsRef.current, rosterWidth: DEFAULT_UI_PREFS.rosterWidth })}
+            title="Потяните, чтобы изменить ширину. Двойной клик — вернуть по умолчанию"
+          />
+        )}
       />
       )}
       {directoryOpen && (
@@ -1619,7 +1738,20 @@ const Chat: React.FC = () => {
       )}
       {section === 'settings' && (
         <main className="section-host">
-          {settingsView === 'profile' ? (
+          <SettingsPanel
+            username={currentDisplayName}
+            avatarPath={currentAvatarPath}
+            onClose={() => goToSection('chats')}
+            onOpenProfile={openOwnProfile}
+            onDeleteAccount={handleDeleteSelf}
+            onLogout={handleLogout}
+          />
+        </main>
+      )}
+
+      {profileOpen && (
+        <div className="modal-overlay" onClick={() => setProfileOpen(false)}>
+          <div className="modal-card profile-modal" onClick={(e) => e.stopPropagation()}>
             <ProfileEdit
               currentUsername={currentUsername}
               currentDisplayName={currentDisplayName}
@@ -1629,14 +1761,6 @@ const Chat: React.FC = () => {
               currentDepartment={currentDepartment}
               currentPosition={currentPosition}
               currentBirthDate={currentBirthDate}
-              onBack={() => setView(v => ({ ...v, settings: 'settings' }))}
-              onSaved={handleProfileSaved}
-              onAvatarChanged={handleAvatarChanged}
-            />
-          ) : (
-            <SettingsPanel
-              username={currentDisplayName}
-              avatarPath={currentAvatarPath}
               statusPreset={currentStatusPreset}
               statusCustom={currentStatusCustom}
               onStatusChanged={(preset, custom) => {
@@ -1645,26 +1769,28 @@ const Chat: React.FC = () => {
                 localStorage.setItem('statusPreset', preset || '');
                 localStorage.setItem('statusCustom', custom || '');
               }}
-              onClose={() => goToSection('chats')}
-              onOpenProfile={() => setView(v => ({ ...v, settings: 'profile' }))}
-              onDeleteAccount={handleDeleteSelf}
-              onLogout={handleLogout}
+              onBack={() => setProfileOpen(false)}
+              onSaved={handleProfileSaved}
+              onAvatarChanged={handleAvatarChanged}
             />
-          )}
-        </main>
+          </div>
+        </div>
       )}
 
-      {section === 'people' && (
-        <main className="section-host">
-          <PeopleSection
-            currentUserId={currentUserId}
-            existingContactIds={users.map(u => u.id)}
-            onlineUserIds={onlineUsers}
-            onOpenChat={handleStartChat}
-            onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
-            onAddContact={handleAddContact}
-          />
-        </main>
+      {peopleOpen && (
+        <div className="modal-overlay" onClick={() => setPeopleOpen(false)}>
+          <div className="modal-card people-modal" onClick={(e) => e.stopPropagation()}>
+            <PeopleSection
+              currentUserId={currentUserId}
+              existingContactIds={users.map(u => u.id)}
+              onlineUserIds={onlineUsers}
+              onOpenChat={(user) => { setPeopleOpen(false); handleStartChat(user); }}
+              onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
+              onAddContact={handleAddContact}
+              onClose={() => setPeopleOpen(false)}
+            />
+          </div>
+        </div>
       )}
 
       {section === 'calendar' && (
@@ -1675,11 +1801,16 @@ const Chat: React.FC = () => {
 
       {section === 'tasks' && (
         <main className="section-host">
-          <TasksPanel currentUserId={currentUserId} changeToken={tasksChangeToken} />
+          <TasksPanel
+            currentUserId={currentUserId}
+            changeToken={tasksChangeToken}
+            draftDescription={taskDraftText}
+            onDraftConsumed={() => setTaskDraftText(null)}
+          />
         </main>
       )}
 
-      {!isChats && section !== 'settings' && section !== 'people' && section !== 'calendar' && section !== 'tasks' && (
+      {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>
@@ -1747,6 +1878,11 @@ const Chat: React.FC = () => {
             onStartEdit={(id, text) => setEditingMessage({ id, text })}
             editingId={editingMessage?.id ?? null}
             onDeleteMessage={handleDeleteMessage}
+            // Аккаунтам «Интернет» раздел «Задачи» не положен — пункт меню им
+            // не показываем вовсе, иначе он молча возвращал бы в чаты.
+            onCreateTask={isSectionAllowedFor(currentAccountType, 'tasks')
+              ? (text) => { setTaskDraftText(text); goToSection('tasks'); }
+              : undefined}
           />
           {muted && (
             <div className="muted-banner">
@@ -1769,9 +1905,10 @@ const Chat: React.FC = () => {
                   ? 'Писать могут только администраторы и модераторы'
                 // Статус собеседника прямо в поле ввода: видно ровно в тот
                 // момент, когда собираешься писать, — не нужно вспоминать,
-                // что человек в отпуске, уже отправив сообщение.
+                // что человек в отпуске, уже отправив сообщение. Имя тут не
+                // повторяем: оно и так в шапке прямо над полем.
                 : activeChatMeta?.status
-                  ? `${activeChatMeta.status.emoji} ${activeChatMeta.name} — ${activeChatMeta.status.label.toLowerCase()}`
+                  ? `${activeChatMeta.status.emoji} ${activeChatMeta.status.label}`
                   : undefined
             }
             editing={editingMessage}

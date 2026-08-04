@@ -14,6 +14,13 @@ interface TasksPanelProps {
    * перезапросится сам.
    */
   changeToken?: number;
+  /**
+   * Текст сообщения, из которого просят завести задачу (пункт «Создать
+   * задачу» в переписке). Приходит вместе с переходом в раздел — сразу
+   * открываем диалог новой задачи с этим текстом в описании.
+   */
+  draftDescription?: string | null;
+  onDraftConsumed?: () => void;
 }
 
 const STATUS_LABELS = TASK_STATUS_LABELS;
@@ -27,7 +34,9 @@ function dueLabel(task: TaskItem): { text: string; overdue: boolean } | null {
   return { text: formatDayLong(dayKeyOf(task.due_at)), overdue };
 }
 
-const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 }) => {
+const TasksPanel: React.FC<TasksPanelProps> = ({
+  currentUserId, changeToken = 0, draftDescription = null, onDraftConsumed
+}) => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +54,11 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [changeToken]);
+
+  // Пришли из переписки с текстом сообщения — открываем новую задачу сразу.
+  useEffect(() => {
+    if (draftDescription) setEditing('new');
+  }, [draftDescription]);
 
   const mine = tasks.filter((t) => t.created_by.id !== currentUserId);
   const authored = tasks.filter((t) => t.created_by.id === currentUserId);
@@ -166,7 +180,8 @@ const TasksPanel: React.FC<TasksPanelProps> = ({ currentUserId, changeToken = 0 
         <TaskDialog
           task={editing === 'new' ? null : editing}
           currentUserId={currentUserId}
-          onClose={() => setEditing(null)}
+          initialDescription={editing === 'new' ? (draftDescription || undefined) : undefined}
+          onClose={() => { setEditing(null); onDraftConsumed?.(); }}
           onSave={handleSave}
           onDelete={editing !== 'new' && editing?.can_edit ? handleDelete : undefined}
           onStatusChange={editing !== 'new' && editing && !editing.archived ? (status) => changeStatus(editing.id, status) : undefined}

@@ -9,6 +9,16 @@ const verifyToken = require('../middleware/verifyToken');
 const { isParticipant } = require('../services/chatParticipants');
 const router = express.Router();
 
+// Канал-объявление: в нём считаем «просмотрено» (см. историю чата ниже).
+// Проверяем по chat_id, чтобы не тащить сюда весь routes/groups.js — нужен
+// один флаг, а не права на запись.
+function isAnnouncementChat(chatId) {
+  const match = String(chatId).match(/^group_(\d+)$/);
+  if (!match) return false;
+  const group = db.prepare('SELECT announcements_only FROM chat_groups WHERE id = ?').get(Number(match[1]));
+  return !!(group && group.announcements_only);
+}
+
 const CHAT_IMAGES_DIR = path.join(__dirname, '..', 'uploads', 'chat-images');
 fs.mkdirSync(CHAT_IMAGES_DIR, { recursive: true });
 
@@ -142,10 +152,19 @@ router.get('/:chatId', verifyToken, (req, res) => {
     // и клиент, отбирая по нему непрочитанное, пропускал сообщения, которые
     // прочитал кто-то другой, — они навсегда оставались непрочитанными лично
     // для этого человека, и бейдж возвращался при каждом обновлении счётчиков.
+    // Счётчик «просмотрено» — только в каналах-объявлениях: там сообщение
+    // пишут для всех и важно, сколько человек его увидело. В обычной переписке
+    // это лишний подзапрос на каждое сообщение и лишняя цифра в интерфейсе.
+    // message_reads.PRIMARY KEY начинается с message_id, так что COUNT идёт по
+    // индексу, а не сканом.
+    const readCountColumn = isAnnouncementChat(chatId)
+      ? ', (SELECT COUNT(*) FROM message_reads mr WHERE mr.message_id = m.id) AS read_count'
+      : '';
+
     const messages = useCursor
       ? db.prepare(`
           SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
-                 (r.message_id IS NOT NULL) AS read_by_me
+                 (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
           FROM messages m
           JOIN users u ON m.sender_id = u.id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
@@ -155,7 +174,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
         `).all(req.userId, chatId, before, limit)
       : db.prepare(`
           SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
-                 (r.message_id IS NOT NULL) AS read_by_me
+                 (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
           FROM messages m
           JOIN users u ON m.sender_id = u.id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
