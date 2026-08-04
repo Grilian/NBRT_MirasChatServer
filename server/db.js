@@ -299,6 +299,23 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_message_hidden_user ON message_hidden(user_id);
 
+  -- Реакции на сообщения. PRIMARY KEY (message_id, user_id) — это и есть
+  -- правило «одна реакция на человека»: повторная установка идёт через
+  -- ON CONFLICT DO UPDATE и заменяет прежнюю, а не добавляет вторую.
+  -- Эмодзи храним строкой, как и в emoji_items: набор задаётся в панели и
+  -- может меняться, ссылаться на строку справочника незачем.
+  CREATE TABLE IF NOT EXISTS message_reactions (
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id),
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_message_reactions_user ON message_reactions(user_id);
+
   -- Задачи-поручения. Отдельно от календарных «задач» (is_task на событии,
   -- привязаны к дате): здесь может быть несколько причастных, а не только
   -- владелец события, и видимость строго по составу task_participants —
@@ -404,6 +421,16 @@ try {
 // пересланном сообщении должно остаться то, что видел пересылавший.
 try {
   db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+
+// Миграция: когда сообщение прочитали — для пункта «Прочитано в [время]» в
+// меню сообщения. Только для личной переписки: там получатель ровно один и
+// метка однозначна. В общих чатах и группах «кто и когда прочитал» живёт в
+// message_reads по человеку, и одной метки на сообщение там не бывает.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN read_at INTEGER`);
 } catch (e) {
   // Колонка уже есть
 }

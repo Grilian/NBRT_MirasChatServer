@@ -43,8 +43,12 @@ function markRead(userId, chatId, ids) {
   `).all(...ids, chatId, userId).map((row) => row.id);
   if (!affected.length) return [];
 
+  // read_at — только здесь, в личной ветке: получатель ровно один, поэтому
+  // «прочитано в» однозначно. В общих чатах эта же метка была бы враньём —
+  // там время прочтения у каждого своё и лежит в message_reads.
   const affectedPlaceholders = affected.map(() => '?').join(',');
-  db.prepare(`UPDATE messages SET status = 'read' WHERE id IN (${affectedPlaceholders})`).run(...affected);
+  db.prepare(`UPDATE messages SET status = 'read', read_at = ? WHERE id IN (${affectedPlaceholders})`)
+    .run(Date.now(), ...affected);
   return affected;
 }
 

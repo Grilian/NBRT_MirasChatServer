@@ -711,6 +711,70 @@ function InternetUsersPanel({
   );
 }
 
+// Базовые реакции — короткий ряд, который предлагается над контекстным меню
+// сообщения. Правится одним полем, как и пак смайликов: это набор строк, а не
+// сущности со своими свойствами.
+function ReactionsPanel() {
+  const [value, setValue] = useState('');
+  const [saved, setSaved] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+
+  const load = async () => {
+    try {
+      const { data } = await superAdminApi.get('/superadmin/reactions');
+      setSaved(data.emoji);
+      setValue(data.emoji.join(' '));
+    } catch {
+      setError('Не удалось загрузить реакции');
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const { data } = await superAdminApi.put('/superadmin/reactions', { emoji: value });
+      setSaved(data.emoji);
+      setValue(data.emoji.join(' '));
+      setError('');
+      setStatus('Сохранено');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось сохранить');
+    }
+  };
+
+  return (
+    <div className="sa-card sa-card--compact">
+      <h2>Реакции</h2>
+      {error && <p className="form-error">{error}</p>}
+
+      <p className="sa-hint">
+        Через пробел, до 12 штук — этот ряд человек видит над меню сообщения.
+        Уже поставленные реакции набор не меняет: они останутся, даже если убрать
+        эмодзи из списка. Пустое поле вернёт набор по умолчанию.
+      </p>
+
+      <div className="sa-reaction-preview">
+        {saved.map((emoji) => <span key={emoji}>{emoji}</span>)}
+      </div>
+
+      <form onSubmit={save} className="sa-inline-form">
+        <input
+          type="text"
+          value={value}
+          placeholder="👍 ❤️ 😂"
+          onChange={(e) => { setValue(e.target.value); setStatus(''); }}
+        />
+        <button type="submit" className="btn-primary">Сохранить</button>
+      </form>
+
+      {status && <p className="sa-hint">{status}</p>}
+    </div>
+  );
+}
+
 // Личный чат «для себя» — заметки и пересылки. Настраивать тут пока нечего,
 // кроме названия: сам чат существует у каждого по определению (chat_id вида
 // self_<id>), заводить и удалять его нельзя.
@@ -898,7 +962,7 @@ function EmojiPacksPanel() {
   );
 }
 
-type Tab = 'users' | 'internet' | 'groups' | 'departments' | 'emoji' | 'selfchat' | 'updates';
+type Tab = 'users' | 'internet' | 'groups' | 'departments' | 'emoji' | 'reactions' | 'selfchat' | 'updates';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'users', label: 'Пользователи' },
@@ -906,6 +970,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'groups', label: 'Группы' },
   { id: 'departments', label: 'Отделы' },
   { id: 'emoji', label: 'Смайлики' },
+  { id: 'reactions', label: 'Реакции' },
   { id: 'selfchat', label: 'Избранное' },
   { id: 'updates', label: 'Обновления' },
 ];
@@ -991,6 +1056,7 @@ export default function SuperAdminApp() {
         {tab === 'groups' && <GroupsPanel groups={groups} onChanged={load} />}
         {tab === 'departments' && <DepartmentsPanel departments={departments} onChanged={load} />}
         {tab === 'emoji' && <EmojiPacksPanel />}
+        {tab === 'reactions' && <ReactionsPanel />}
         {tab === 'selfchat' && <SelfChatPanel />}
         {tab === 'updates' && <UpdateSchedulePanel />}
       </main>

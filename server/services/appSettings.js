@@ -73,9 +73,35 @@ function setInternetSeenAt(ms) {
   setSetting(INTERNET_SEEN_AT, String(ms));
 }
 
+// Базовый набор реакций — то, что предлагается над контекстным меню
+// сообщения. Хранится строкой через пробел, как и пак смайликов: набор
+// короткий, править его удобнее одним полем, чем таблицей на пять строк.
+const REACTION_EMOJI = 'reaction_emoji';
+const DEFAULT_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+const MAX_REACTIONS = 12;
+
+function getReactionEmoji() {
+  const raw = getSetting(REACTION_EMOJI);
+  if (!raw) return [...DEFAULT_REACTIONS];
+  const list = raw.split(/\s+/).filter(Boolean);
+  return list.length ? list : [...DEFAULT_REACTIONS];
+}
+
+function setReactionEmoji(value) {
+  const list = String(value || '').split(/\s+/).filter(Boolean).slice(0, MAX_REACTIONS);
+  if (!list.length) {
+    setSetting(REACTION_EMOJI, null); // пусто — возвращаемся к набору по умолчанию
+    return [...DEFAULT_REACTIONS];
+  }
+  setSetting(REACTION_EMOJI, list.join(' '));
+  return list;
+}
+
 module.exports = {
   getUpdateNotBefore,
   setUpdateNotBefore,
+  getReactionEmoji,
+  setReactionEmoji,
   getSelfChatName,
   setSelfChatName,
   DEFAULT_SELF_CHAT_NAME,

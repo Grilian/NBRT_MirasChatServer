@@ -27,6 +27,7 @@ const emojiRoutes = require('./routes/emoji');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { isSharedChat, markRead, readCountsFor } = require('./services/readReceipts');
+const { isValidEmoji, reactionsFor, setReaction, removeReaction } = require('./services/reactions');
 const { notifyNewMessage } = require('./services/push');
 const { isValidChatImagePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
@@ -686,6 +687,56 @@ io.on('connection', (socket) => {
       emitToChat(row.chat_id, 'message_deleted', { id, chat_id: row.chat_id }, row.sender_id);
     } catch (e) {
       console.error('Ошибка удаления сообщения:', e);
+    }
+  });
+
+  // Поставить/сменить свою реакцию. Замена прежней — на уровне схемы
+  // (PRIMARY KEY на паре message+user), отдельной проверки «уже ставил» не
+  // нужно. Повторный клик по той же реакции снимает её — как в Telegram.
+  socket.on('reaction_set', ({ messageId, emoji }) => {
+    try {
+      const userId = Number(socket.userId);
+      if (!userId || !isValidEmoji(emoji)) return;
+
+      const row = db.prepare('SELECT id, chat_id, deleted FROM messages WHERE id = ?').get(messageId);
+      if (!row || row.deleted) return;
+      if (!isParticipant(row.chat_id, userId)) return;
+
+      const existing = db.prepare('SELECT emoji FROM message_reactions WHERE message_id = ? AND user_id = ?')
+        .get(row.id, userId);
+
+      if (existing && existing.emoji === emoji) removeReaction(row.id, userId);
+      else setReaction(row.id, userId, emoji);
+
+      emitToChat(row.chat_id, 'reactions_changed', {
+        chat_id: row.chat_id, message_id: row.id, reactions: reactionsFor(row.id),
+      }, userId);
+    } catch (e) {
+      console.error('Ошибка установки реакции:', e);
+    }
+  });
+
+  // Снять реакцию. Свою — всегда; чужую — только автор сообщения и только под
+  // своим: это про «уберите это из-под моей реплики», а не про модерацию чужих
+  // реакций где угодно.
+  socket.on('reaction_remove', ({ messageId, userId: targetUserId }) => {
+    try {
+      const userId = Number(socket.userId);
+      if (!userId) return;
+
+      const row = db.prepare('SELECT id, chat_id, sender_id, deleted FROM messages WHERE id = ?').get(messageId);
+      if (!row || row.deleted) return;
+      if (!isParticipant(row.chat_id, userId)) return;
+
+      const target = Number(targetUserId) || userId;
+      if (target !== userId && Number(row.sender_id) !== userId) return;
+
+      removeReaction(row.id, target);
+      emitToChat(row.chat_id, 'reactions_changed', {
+        chat_id: row.chat_id, message_id: row.id, reactions: reactionsFor(row.id),
+      }, userId);
+    } catch (e) {
+      console.error('Ошибка снятия реакции:', e);
     }
   });
 

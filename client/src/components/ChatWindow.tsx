@@ -1,8 +1,11 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { nameFor } from '../utils/user';
-import { formatDaySeparator, formatMoscowTime, moscowDayKey } from '../utils/time';
+import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKey } from '../utils/time';
+import { isNativeMobile } from '../utils/mobileNotify';
 import { onKeyboardShow } from '../utils/mobileKeyboard';
 import { resolveUploadUrl } from '../utils/uploads';
+import Avatar from './Avatar';
+import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 
 interface Message {
   id: number;
@@ -17,6 +20,8 @@ interface Message {
   status?: 'sent' | 'delivered' | 'read';
   edited_at?: string | null;
   deleted?: boolean | number;
+  /** Когда прочитали — только в личной переписке (см. readReceipts.js). */
+  read_at?: number | null;
   /** Сколько человек прочитало — приходит только в каналах-объявлениях. */
   read_count?: number;
   reply_to_id?: number | null;
@@ -26,6 +31,7 @@ interface Message {
   reply_to_deleted?: number | boolean | null;
   forwarded_from_name?: string | null;
   forwarded_from_chat?: string | null;
+  reactions?: MessageReaction[];
 }
 
 interface ChatWindowProps {
@@ -52,9 +58,25 @@ interface ChatWindowProps {
   onStartReply?: (msg: { id: number; text: string; author: string; hasImage: boolean }) => void;
   /** Переслать выбранные сообщения — открывает выбор чата. */
   onForward?: (ids: number[]) => void;
+  /** Набор базовых реакций из панели управления. */
+  reactionEmoji?: string[];
+  /** Поставить/снять свою реакцию (повторная та же — снимает). */
+  onToggleReaction?: (messageId: number, emoji: string) => void;
+  /** Снять реакцию конкретного человека (своя — всегда, чужая — под своим). */
+  onRemoveReaction?: (messageId: number, userId: number) => void;
+  /** Переслать в личный чат «Избранное» одним нажатием, минуя выбор чата. */
+  onForwardToSelf?: (ids: number[]) => void;
+  /** Название личного чата из панели управления — оно в пункте меню. */
+  selfChatName?: string;
 }
 
 const LONG_PRESS_MS = 450;
+
+// Пункт контекстного меню сообщения. 'info' — не действие, а отметка
+// («Прочитано в …»), поэтому у неё нет ни иконки, ни обработчика.
+type MenuItem =
+  | { kind: 'action'; key: string; label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean }
+  | { kind: 'info'; key: string; label: string };
 
 // Идущие подряд сообщения одного человека Telegram склеивает в блок: имя
 // показывается один раз сверху, «хвостик» — только у последнего. Разрыв
@@ -117,7 +139,8 @@ function buildRows(messages: Message[]): RenderedRow[] {
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
-  onStartReply, onForward
+  onStartReply, onForward, reactionEmoji, onToggleReaction, onRemoveReaction,
+  onForwardToSelf, selfChatName
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
   // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
@@ -131,6 +154,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const prevMessagesLengthRef = useRef(0);
 
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
+  // Сообщение, чьи реакции сейчас разбирают в детальном списке.
+  const [reactionsFor, setReactionsFor] = useState<number | null>(null);
+  const reactionPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -235,11 +261,18 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     const overflowY = rect.bottom - window.innerHeight;
     if (overflowX <= 0 && overflowY <= 0) return;
 
-    setMenuFor((prev) => prev && ({
-      ...prev,
-      x: overflowX > 0 ? Math.max(4, prev.x - overflowX) : prev.x,
-      y: overflowY > 0 ? Math.max(4, prev.y - overflowY) : prev.y,
-    }));
+    const nextX = overflowX > 0 ? Math.max(4, menuFor.x - overflowX) : menuFor.x;
+    const nextY = overflowY > 0 ? Math.max(4, menuFor.y - overflowY) : menuFor.y;
+
+    // Сдвигать дальше некуда — меню просто выше окна (низкий экран, а пунктов
+    // в нём прибавилось). Без этой проверки эффект бесконечно переставлял
+    // меню в ту же позицию: сдвиг упирался в Math.max(4, …), overflow
+    // оставался, состояние менялось «на то же самое», и React рвал цикл
+    // ошибкой «Maximum update depth exceeded». За переполнение по высоте
+    // теперь отвечает прокрутка внутри самого меню (см. .msg-context-menu).
+    if (nextX === menuFor.x && nextY === menuFor.y) return;
+
+    setMenuFor((prev) => prev && ({ ...prev, x: nextX, y: nextY }));
   }, [menuFor]);
 
   const handleScroll = () => {
@@ -300,12 +333,205 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  // Жест выделения на Android. Долгое удержание открывает меню (иначе до него
+  // на телефоне не добраться — правой кнопки там нет), а если палец при этом
+  // повести вверх или вниз, вместо меню начинается выделение и тянется по тем
+  // сообщениям, через которые он проходит.
+  //
+  // Обработчики висят на всей строке .msg, а не на пузыре: по требованию
+  // пустая область слева и справа от сообщения тоже должна ловить нажатие.
+  const touchGesture = useRef<{ startY: number; anchorId: number; dragging: boolean } | null>(null);
+
+  const messageIdAtPoint = (x: number, y: number): number | null => {
+    const el = document.elementFromPoint(x, y)?.closest('[data-msg-id]');
+    const raw = el?.getAttribute('data-msg-id');
+    return raw ? Number(raw) : null;
+  };
+
+  // Пока идёт жест, системное выделение текста должно молчать: иначе Android
+  // поверх нашего выделения поднимает свои маркеры и меню «Копировать».
+  const [touchSelecting, setTouchSelecting] = useState(false);
+
   const handleTouchStart = (e: React.TouchEvent, msg: Message) => {
     const touch = e.touches[0];
     clearLongPress();
+
+    // В режиме выделения жест уже идёт: удержание меню не открывает (обычный
+    // тап там только отмечает сообщение), но протяжку по-прежнему ловим —
+    // ею продолжают набирать выделение.
+    if (selectMode) {
+      touchGesture.current = { startY: touch.clientY, anchorId: msg.id, dragging: true };
+      return;
+    }
+
+    touchGesture.current = { startY: touch.clientY, anchorId: msg.id, dragging: false };
     longPressTimer.current = setTimeout(() => {
+      // Обнуляем сразу: дальше по этому ref отличают «удержание ещё идёт» от
+      // «уже сработало». Без этого id оставался в ref навсегда, и движение
+      // пальца после открытия меню принимали за обычную прокрутку — жест
+      // выделения не начинался вовсе.
+      longPressTimer.current = null;
       openMenuAt(msg, touch.clientX, touch.clientY);
     }, LONG_PRESS_MS);
+  };
+
+  const DRAG_THRESHOLD_PX = 12;
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const gesture = touchGesture.current;
+    const touch = e.touches[0];
+    if (!gesture || !touch) { clearLongPress(); return; }
+
+    const movedFar = Math.abs(touch.clientY - gesture.startY) > DRAG_THRESHOLD_PX;
+
+    // Палец пошёл раньше, чем сработало удержание — это обычная прокрутка
+    // ленты, а не жест: снимаем таймер и не мешаем.
+    if (!gesture.dragging && longPressTimer.current) {
+      if (movedFar) clearLongPress();
+      return;
+    }
+
+    // Удержание уже сработало (меню открыто) и палец повели — переходим в
+    // выделение: меню закрываем, начальное сообщение отмечаем.
+    if (!gesture.dragging) {
+      if (!movedFar) return;
+      gesture.dragging = true;
+      setMenuFor(null);
+      setTouchSelecting(true);
+      setSelectMode(true);
+      setSelectedIds(new Set([gesture.anchorId]));
+      // Диапазон на этом же событии не считаем: меню ещё в DOM (React
+      // перерисуется только после обработчика) и перекрывает точку под
+      // пальцем — elementFromPoint вернул бы само меню, а не сообщение.
+      // Настоящая протяжка шлёт десятки touchmove, следующий и посчитает.
+      return;
+    }
+
+    // Ведём по сообщениям: всё между началом жеста и текущим — выделено.
+    const overId = messageIdAtPoint(touch.clientX, touch.clientY);
+    if (overId === null) return;
+
+    const ids = messages.map((m) => m.id);
+    const from = ids.indexOf(gesture.anchorId);
+    const to = ids.indexOf(overId);
+    if (from === -1 || to === -1) return;
+
+    const [lo, hi] = from <= to ? [from, to] : [to, from];
+    setSelectedIds(new Set(ids.slice(lo, hi + 1)));
+  };
+
+  const handleTouchEnd = () => {
+    clearLongPress();
+    touchGesture.current = null;
+    setTouchSelecting(false);
+  };
+
+  // Долгое удержание по самой реакции снимает её — на Android другого способа
+  // нет: контекстное меню там занято сообщением, а крестик в углу реакции на
+  // тач-экране слишком мелкая цель.
+  const clearReactionLongPress = () => {
+    if (reactionPressTimer.current) {
+      clearTimeout(reactionPressTimer.current);
+      reactionPressTimer.current = null;
+    }
+  };
+
+  const startReactionLongPress = (messageId: number, userId: number) => {
+    clearReactionLongPress();
+    reactionPressTimer.current = setTimeout(() => {
+      onRemoveReaction?.(messageId, userId);
+    }, LONG_PRESS_MS);
+  };
+
+  useEffect(() => clearReactionLongPress, []);
+
+  // Состав меню задан в требованиях отдельно для ПК и Android и отдельно для
+  // своего/чужого сообщения. Собираем списком, а не гирляндой из && прямо в
+  // разметке: порядок пунктов там разный, и уследить за ним по месту нельзя.
+  const buildMenuItems = (msg: Message, mine: boolean): MenuItem[] => {
+    const icon = (d: string, extra?: string) => (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d={d} />{extra && <path d={extra} />}
+      </svg>
+    );
+
+    const reply: MenuItem | null = onStartReply ? {
+      kind: 'action', key: 'reply', label: 'Ответить',
+      icon: icon('m9 17-5-5 5-5', 'M20 18v-2a4 4 0 0 0-4-4H4'),
+      onClick: () => {
+        setMenuFor(null);
+        onStartReply({ id: msg.id, text: msg.text, author: nameFor(msg), hasImage: !!msg.file_path });
+      },
+    } : null;
+
+    const edit: MenuItem | null = mine ? {
+      kind: 'action', key: 'edit', label: 'Изменить',
+      icon: icon('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'),
+      onClick: () => startEdit(msg),
+    } : null;
+
+    // У картинки без подписи копировать нечего — текста в сообщении нет.
+    const copy: MenuItem | null = msg.text ? {
+      kind: 'action', key: 'copy', label: 'Копировать',
+      icon: icon('M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'),
+      onClick: () => copyMessageText(msg),
+    } : null;
+
+    const task: MenuItem | null = msg.text && onCreateTask ? {
+      kind: 'action', key: 'task', label: 'Создать задачу',
+      icon: icon('m8.5 12.2 2.4 2.4 4.6-5'),
+      onClick: () => { setMenuFor(null); onCreateTask(msg.text); },
+    } : null;
+
+    const forward: MenuItem | null = onForward ? {
+      kind: 'action', key: 'forward', label: 'Переслать',
+      icon: icon('m15 17 5-5-5-5', 'M4 18v-2a4 4 0 0 1 4-4h12'),
+      onClick: () => { setMenuFor(null); onForward([msg.id]); },
+    } : null;
+
+    // Название берём из панели управления: там его меняют на «Облако» или
+    // «Архив», и пункт меню обязан называть чат так же, как список чатов.
+    const forwardSelf: MenuItem | null = onForwardToSelf ? {
+      kind: 'action', key: 'forward-self', label: `Переслать в ${selfChatName || 'Избранное'}`,
+      icon: icon('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'),
+      onClick: () => { setMenuFor(null); onForwardToSelf([msg.id]); },
+    } : null;
+
+    const remove: MenuItem = {
+      kind: 'action', key: 'delete', label: 'Удалить', danger: true,
+      icon: icon('M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'),
+      onClick: () => confirmDelete(msg.id),
+    };
+
+    // На Android выделение начинается долгим нажатием с протяжкой, поэтому
+    // пункта в меню там нет — он только на ПК, где такого жеста нет.
+    const select: MenuItem | null = !isNativeMobile ? {
+      kind: 'action', key: 'select', label: 'Выделить',
+      icon: icon('M9 11l3 3L22 4', 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'),
+      onClick: () => { setMenuFor(null); setSelectMode(true); toggleSelected(msg.id); },
+    } : null;
+
+    // Отметки показываем только при наличии данных — как и требует спека.
+    // read_at есть лишь в личной переписке: в группах время прочтения у
+    // каждого своё, одной метки на сообщение там не существует.
+    const readInfo: MenuItem | null = mine && msg.read_at ? {
+      kind: 'info', key: 'read-at', label: `Прочитано в ${formatMoscowDateTime(msg.read_at)}`,
+    } : null;
+
+    const editedInfo: MenuItem | null = msg.edited_at ? {
+      kind: 'info', key: 'edited-at',
+      label: `Изменено в ${formatMoscowTime(msg.edited_at)}`,
+    } : null;
+
+    const order = isNativeMobile
+      ? (mine
+        ? [readInfo, editedInfo, reply, copy, task, forward, forwardSelf, edit, remove]
+        : [reply, copy, task, forward, forwardSelf, remove])
+      : (mine
+        ? [reply, edit, copy, task, forward, forwardSelf, remove, select, readInfo, editedInfo]
+        : [reply, copy, task, forward, forwardSelf, remove, select]);
+
+    return order.filter((item): item is MenuItem => item !== null);
   };
 
   const startEdit = (msg: Message) => {
@@ -400,7 +626,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
       <div
         ref={messagesContainerRef}
-        className="conv-body"
+        className={'conv-body' + (touchSelecting || selectMode ? ' is-touch-selecting' : '')}
         onScroll={handleScroll}
       >
         {loadingMore && <div className="load-more-hint">Загрузка…</div>}
@@ -438,9 +664,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 className={className}
                 onClick={selectMode && selectable ? () => toggleSelected(msg.id) : undefined}
                 onContextMenu={!selectMode ? (e) => handleContextMenu(e, msg) : undefined}
-                onTouchStart={!selectMode ? (e) => handleTouchStart(e, msg) : undefined}
-                onTouchEnd={!selectMode ? clearLongPress : undefined}
-                onTouchMove={!selectMode ? clearLongPress : undefined}
+                // Жест продолжается и после входа в режим выделения — иначе
+                // палец, доехав до второго сообщения, терял бы обработчик.
+                onTouchStart={(e) => handleTouchStart(e, msg)}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
+                onTouchMove={handleTouchMove}
               >
                 {selectMode && selectable && (
                   <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
@@ -502,6 +731,57 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       {mine && <TickIcon status={msg.status || 'sent'} />}
                     </span>
                 </div>
+
+                {/* Реакции — под пузырём, каждая с аватаром поставившего (в
+                    спеке именно так, не просто счётчик). Клик открывает
+                    детальный список, крестик снимает — он появляется только
+                    там, где снимать вправе (своя реакция или своё сообщение). */}
+                {!!msg.reactions?.length && (
+                  <div className="msg-reactions">
+                    {msg.reactions.map((reaction) => {
+                      const isMine = reaction.user.id === currentUserId;
+                      const removable = isMine || mine;
+                      return (
+                        <span
+                          key={reaction.user.id}
+                          className={'reaction-chip' + (isMine ? ' is-mine' : '')}
+                          role="button"
+                          tabIndex={0}
+                          title={`${nameFor(reaction.user)} — ${formatMoscowTime(new Date(reaction.created_at).toISOString())}`}
+                          onClick={(e) => { e.stopPropagation(); setReactionsFor(msg.id); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReactionsFor(msg.id); }
+                          }}
+                          // Долгое удержание по конкретной реакции — снятие на
+                          // Android: контекстного меню и крестика там нет.
+                          onTouchStart={removable ? (e) => {
+                            e.stopPropagation();
+                            startReactionLongPress(msg.id, reaction.user.id);
+                          } : undefined}
+                          onTouchEnd={clearReactionLongPress}
+                          onTouchMove={clearReactionLongPress}
+                        >
+                          <Avatar
+                            name={nameFor(reaction.user)}
+                            avatarPath={reaction.user.avatar_path}
+                            size="sm"
+                          />
+                          <span className="reaction-chip-emoji">{reaction.emoji}</span>
+                          {removable && onRemoveReaction && (
+                            <button
+                              type="button"
+                              className="reaction-chip-remove"
+                              aria-label="Убрать реакцию"
+                              onClick={(e) => { e.stopPropagation(); onRemoveReaction(msg.id, reaction.user.id); }}
+                            >
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </React.Fragment>
           );
@@ -529,57 +809,48 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             className="msg-context-menu"
             style={{ left: menuFor.x, top: menuFor.y }}
           >
-            {/* Копировать — на любом сообщении, не только своём: раньше меню
-                вообще не открывалось на чужих репликах. У картинки без
-                подписи копировать нечего — текста в сообщении просто нет. */}
-            {/* «Ответить» первым: в переписке это самое частое действие. */}
-            {onStartReply && (
-              <button type="button" onClick={() => {
-                setMenuFor(null);
-                onStartReply({
-                  id: menuMsg.id,
-                  text: menuMsg.text,
-                  author: nameFor(menuMsg),
-                  hasImage: !!menuMsg.file_path,
-                });
-              }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 17-5-5 5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
-                Ответить
-              </button>
+            {/* Ряд реакций — над пунктами меню, как в спеке. Набор задаётся
+                в панели управления, повторный клик по своей снимает её. */}
+            {!!reactionEmoji?.length && onToggleReaction && (
+              <div className="msg-menu-reactions">
+                {reactionEmoji.map((emoji) => {
+                  const isCurrent = menuMsg.reactions?.some(
+                    (r) => r.user.id === currentUserId && r.emoji === emoji
+                  );
+                  return (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className={'msg-menu-reaction' + (isCurrent ? ' is-active' : '')}
+                      onClick={() => { setMenuFor(null); onToggleReaction(menuMsg.id, emoji); }}
+                    >
+                      {emoji}
+                    </button>
+                  );
+                })}
+              </div>
             )}
-            {menuMsg.text && (
-              <button type="button" onClick={() => copyMessageText(menuMsg)}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-                Копировать
-              </button>
-            )}
-            {onForward && (
-              <button type="button" onClick={() => { setMenuFor(null); onForward([menuMsg.id]); }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 17 5-5-5-5" /><path d="M4 18v-2a4 4 0 0 1 4-4h12" /></svg>
-                Переслать
-              </button>
-            )}
-            {/* Поручение по чужой реплике нужно не реже, чем по своей —
-                пункт доступен на любом сообщении с текстом. */}
-            {menuMsg.text && onCreateTask && (
-              <button type="button" onClick={() => { setMenuFor(null); onCreateTask(menuMsg.text); }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></svg>
-                Создать задачу
-              </button>
-            )}
-            {/* Править можно только своё — чужой текст переписывать нельзя ни
-                при каких правах. Удалять доступно на любом: область удаления
-                (у себя или у всех) выбирается в диалоге и решается сервером. */}
-            {menuMine && (
-              <button type="button" onClick={() => startEdit(menuMsg)}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-                Редактировать
-              </button>
-            )}
-            <button type="button" className="danger" onClick={() => confirmDelete(menuFor.id)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
-              Удалить
-            </button>
+
+            {/* Состав и порядок пунктов различаются по платформе и по тому,
+                своё сообщение или чужое — см. buildMenuItems. Правка только
+                своего (чужой текст переписывать нельзя ни при каких правах),
+                удаление на любом: область (у себя/у всех) выбирается в диалоге
+                и окончательно решается сервером. */}
+            {buildMenuItems(menuMsg, menuMine).map((item) => (
+              item.kind === 'info' ? (
+                <div key={item.key} className="msg-menu-info">{item.label}</div>
+              ) : (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={item.danger ? 'danger' : undefined}
+                  onClick={item.onClick}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              )
+            ))}
           </div>
         );
       })()}
@@ -592,6 +863,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           <img src={lightboxUrl} alt="" className="lightbox-img" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
+
+      {reactionsFor !== null && (() => {
+        const msg = messages.find((m) => m.id === reactionsFor);
+        if (!msg) return null;
+        return (
+          <ReactionDetailsModal
+            reactions={msg.reactions || []}
+            canRemoveOthers={msg.sender_id === currentUserId}
+            currentUserId={currentUserId}
+            onClose={() => setReactionsFor(null)}
+            onRemove={(userId) => onRemoveReaction?.(msg.id, userId)}
+          />
+        );
+      })()}
     </div>
   );
 };

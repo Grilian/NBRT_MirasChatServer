@@ -7,6 +7,7 @@ const sharp = require('sharp');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { isParticipant } = require('../services/chatParticipants');
+const { reactionsForMessages } = require('../services/reactions');
 const router = express.Router();
 
 // Канал-объявление: в нём считаем «просмотрено» (см. историю чата ниже).
@@ -168,7 +169,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
 
     const messages = useCursor
       ? db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
                  m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat,
                  rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
@@ -184,7 +185,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LIMIT ?
         `).all(req.userId, chatId, before, req.userId, limit)
       : db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
                  m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat,
                  rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
@@ -222,6 +223,10 @@ router.get('/:chatId', verifyToken, (req, res) => {
         m.reply_to_file = null;
       }
     }
+
+    // Реакции — одним запросом на всю страницу, а не по запросу на сообщение.
+    const reactionsByMessage = reactionsForMessages(messages.map((m) => m.id));
+    for (const m of messages) m.reactions = reactionsByMessage[m.id] || [];
 
     // Есть ли что-то ещё выше самого старого из отданных. Скрытые лично этим
     // человеком не считаем: иначе «загрузить ещё» обещало бы страницу, которая

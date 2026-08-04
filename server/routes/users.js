@@ -11,7 +11,7 @@ const { deleteAvatarFile } = require('../utils/files');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { clearExpiredStatuses } = require('../services/statusExpiry');
 const { selfChatId } = require('../services/chatParticipants');
-const { getSelfChatName } = require('../services/appSettings');
+const { getSelfChatName, getReactionEmoji } = require('../services/appSettings');
 const router = express.Router();
 
 const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
@@ -109,6 +109,9 @@ router.get('/me', verifyToken, (req, res) => {
       // одной строки — этот ответ он и так забирает при каждом входе.
       self_chat_id: selfChatId(user.id),
       self_chat_name: getSelfChatName(),
+      // Базовые реакции — тоже настройка на всю организацию, и нужна клиенту
+      // сразу при открытии чата, а не отдельным запросом.
+      reaction_emoji: getReactionEmoji(),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

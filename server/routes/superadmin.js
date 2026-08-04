@@ -10,6 +10,7 @@ const {
   getUpdateNotBefore, setUpdateNotBefore,
   getSelfChatName, setSelfChatName,
   getInternetSeenAt, setInternetSeenAt,
+  getReactionEmoji, setReactionEmoji,
 } = require('../services/appSettings');
 const router = express.Router();
 
@@ -306,6 +307,23 @@ router.put('/update-schedule', verifySuperAdmin, (req, res) => {
     res.json({ notBefore: ms });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== Базовые реакции =====
+//
+// Короткий набор, который предлагается над контекстным меню сообщения. Уже
+// поставленные реакции менять набора не касается: они остаются такими, как
+// их поставили, даже если эмодзи убрали из списка.
+router.get('/reactions', verifySuperAdmin, (req, res) => {
+  res.json({ emoji: getReactionEmoji() });
+});
+
+router.put('/reactions', verifySuperAdmin, (req, res) => {
+  try {
+    res.json({ emoji: setReactionEmoji(req.body.emoji) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 

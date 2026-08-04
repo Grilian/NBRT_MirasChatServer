@@ -723,11 +723,22 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   position: fixed; z-index: 40; background: var(--paper-raised); border: 1px solid var(--line);
   border-radius: var(--radius-md); box-shadow: var(--shadow-md); min-width: 180px; padding: 6px;
   transform: translate(-8px, 4px);
+  /* Пунктов стало больше (ряд реакций, пересылка в «Избранное», отметки), и на
+     невысоком окне меню перестаёт помещаться целиком — тогда прокручиваем его
+     внутри, а не пытаемся сдвинуть выше края. */
+  max-height: calc(100vh - 16px); overflow-y: auto;
 }
 .msg-context-menu button { width: 100%; text-align: left; border: none; background: none; padding: 9px 10px; border-radius: 6px; font-size: 14px; color: var(--ink); cursor: pointer; display: flex; align-items: center; gap: 10px; }
 .msg-context-menu button:hover { background: var(--paper-sunken); }
 .msg-context-menu button.danger { color: var(--unread); }
 .msg-context-menu button.danger:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
+/* «Прочитано в …» / «Изменено в …» — отметки, а не действия: не кликаются и
+   не подсвечиваются при наведении. */
+.msg-menu-info {
+  padding: 7px 10px; font-size: 12.5px; color: var(--ink-faint);
+  border-top: 1px solid var(--line); margin-top: 4px;
+}
+.msg-menu-info + .msg-menu-info { border-top: none; margin-top: 0; padding-top: 0; }
 
 .select-messages-btn {
   position: absolute; left: 16px; top: 12px; z-index: 5;
@@ -748,6 +759,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .select-toolbar-delete:hover { background: color-mix(in srgb, var(--unread) 22%, transparent); }
 .select-toolbar-delete:disabled { opacity: .5; cursor: default; }
+/* Пока идёт жест выделения, системное выделение текста должно молчать: иначе
+   Android поверх нашего поднимает свои маркеры и меню «Копировать», и человек
+   получает два выделения разом. */
+.conv-body.is-touch-selecting {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
 .msg.is-selectable { cursor: pointer; padding-left: 30px; }
 .msg.is-selectable.mine { padding-left: 0; padding-right: 30px; }
 .msg-select-check { position: absolute; left: 0; top: 8px; width: 18px; height: 18px; accent-color: var(--accent); }
@@ -1188,6 +1205,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-btn-danger { border: none; background: none; color: var(--unread); font-size: 12.5px; cursor: pointer; padding: 4px 6px; }
 .sa-btn-danger:hover { text-decoration: underline; }
 .sa-verified-badge { color: var(--accent); font-weight: 700; margin-left: 4px; }
+.sa-reaction-preview { display: flex; gap: 8px; font-size: 22px; margin: 4px 0 12px; }
 .sa-new-badge {
   display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill);
   background: var(--unread); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .03em;
@@ -1207,6 +1225,48 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   box-shadow: var(--shadow-lg);
 }
 .modal-card .conv-head { background: var(--paper-raised); }
+/* ===== Реакции ===== */
+/* Под пузырём, каждая с аватаром поставившего — в спеке именно так, а не
+   просто «эмодзи + счётчик»: в рабочей переписке важно, кто именно отметил. */
+.msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.msg.mine .msg-reactions { justify-content: flex-end; }
+.reaction-chip {
+  position: relative; display: inline-flex; align-items: center; gap: 3px;
+  background: var(--paper-raised); border: 1px solid var(--line); border-radius: var(--radius-pill);
+  padding: 1px 7px 1px 2px; cursor: pointer; font-size: 13px; line-height: 1;
+}
+.reaction-chip:hover { border-color: var(--border-strong, var(--accent)); }
+.reaction-chip.is-mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.reaction-chip .avatar { width: 18px; height: 18px; font-size: 8px; }
+.reaction-chip-emoji { font-size: 14px; }
+.reaction-chip-remove {
+  display: none; border: none; background: none; color: var(--ink-faint);
+  cursor: pointer; padding: 0 0 0 2px; line-height: 1;
+}
+.reaction-chip:hover .reaction-chip-remove { display: inline-flex; }
+.reaction-chip-remove:hover { color: var(--unread); }
+/* На тач-экране крестик по наведению не показать — там снятие долгим
+   удержанием по самой реакции (см. startReactionLongPress). */
+@media (hover: none) {
+  .reaction-chip-remove { display: none !important; }
+}
+
+/* Ряд быстрых реакций над пунктами контекстного меню. */
+.msg-menu-reactions {
+  display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
+}
+.msg-menu-reaction {
+  border: none; background: none; cursor: pointer; font-size: 20px; line-height: 1;
+  padding: 4px 5px; border-radius: var(--radius-sm);
+}
+.msg-menu-reaction:hover { background: var(--row-hover); }
+.msg-menu-reaction.is-active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+.reactions-modal { max-width: 380px; }
+.reaction-row { cursor: default; }
+.reaction-row-emoji { font-size: 20px; flex: none; }
+.reaction-row-remove { flex: none; }
+
 /* Подтверждение удаления: область действия выбирается здесь, а не в
    системном window.confirm — там галочку «также у собеседника» не показать. */
 .confirm-modal { max-width: 400px; }

@@ -6,6 +6,7 @@ import ChatWindow from '../components/ChatWindow';
 import MessageInput, { EditingMessage, PendingImage, ReplyingMessage } from '../components/MessageInput';
 import ForwardModal, { ForwardPreviewItem, ForwardTarget } from '../components/ForwardModal';
 import DeleteMessagesModal, { DeleteRequest } from '../components/DeleteMessagesModal';
+import { MessageReaction } from '../components/ReactionDetailsModal';
 import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
@@ -88,6 +89,7 @@ interface Message {
   deleted?: boolean | number;
   /** Сколько человек прочитало — только в каналах-объявлениях. */
   read_count?: number;
+  reactions?: MessageReaction[];
 }
 interface LastMessage {
   chat_id: string;
@@ -398,6 +400,8 @@ const Chat: React.FC = () => {
   // localStorage — иначе при запуске он моргал бы дефолтным названием.
   const [selfChatId, setSelfChatId] = useState(localStorage.getItem('selfChatId') || '');
   const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Избранное');
+  // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
+  const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
   const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
   const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
@@ -649,6 +653,7 @@ const Chat: React.FC = () => {
         setCurrentStatusCustom(data.status_custom || null);
         setSelfChatId(data.self_chat_id || '');
         setSelfChatName(data.self_chat_name || 'Избранное');
+        setReactionEmoji(Array.isArray(data.reaction_emoji) ? data.reaction_emoji : []);
         localStorage.setItem('selfChatId', data.self_chat_id || '');
         localStorage.setItem('selfChatName', data.self_chat_name || 'Избранное');
         localStorage.setItem('username', data.username);
@@ -763,6 +768,12 @@ const Chat: React.FC = () => {
       // локально мы не знаем, какое сообщение стало последним, если удалили
       // как раз его.
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
+    });
+
+    // Реакции меняются часто и мелко — сервер шлёт готовый список по одному
+    // сообщению, клиент просто подставляет его вместо прежнего.
+    newSocket.on('reactions_changed', (data: { chat_id: string; message_id: number; reactions: MessageReaction[] }) => {
+      setMessages(prev => prev.map(m => (m.id === data.message_id ? { ...m, reactions: data.reactions } : m)));
     });
 
     // «Удалить только у себя»: сообщение остаётся у всех остальных, поэтому
@@ -1339,14 +1350,14 @@ const Chat: React.FC = () => {
   // Пересылка: отправляем те же сообщения в выбранный чат с подписью «переслано
   // от». Копией, а не ссылкой — исходное могут удалить, а пересланное должно
   // остаться (и наоборот: правка исходного пересланное не трогает).
-  const handleForward = (targetChatId: string) => {
-    if (!socket || !forwardIds) return;
+  const forwardTo = (ids: number[], targetChatId: string, openTarget = true) => {
+    if (!socket) return;
     const sourceName = activeChatMeta?.name || '';
 
     // Порядок сохраняем по id: выделяли в произвольном порядке, а прийти
     // должно так же, как шло в переписке.
     const toSend = messages
-      .filter((m) => forwardIds.includes(m.id) && !m.deleted)
+      .filter((m) => ids.includes(m.id) && !m.deleted)
       .sort((a, b) => a.id - b.id);
 
     for (const msg of toSend) {
@@ -1362,7 +1373,18 @@ const Chat: React.FC = () => {
     }
 
     setForwardIds(null);
-    handleSelectChat(targetChatId);
+    // В «Избранное» уходят, не отрываясь от переписки, — туда не переключаемся.
+    if (openTarget) handleSelectChat(targetChatId);
+    else pushToast({
+      chatId: 'forwarded-to-self',
+      title: selfChatName,
+      body: toSend.length > 1 ? `Переслано сообщений: ${toSend.length}` : 'Сообщение переслано',
+      avatarPath: null,
+    });
+  };
+
+  const handleForward = (targetChatId: string) => {
+    if (forwardIds) forwardTo(forwardIds, targetChatId);
   };
 
   // Начать чат с кем-то из справочника — контакт появляется в своём списке
@@ -1466,6 +1488,17 @@ const Chat: React.FC = () => {
     }
 
     for (const id of request.ids) socket.emit('message_delete', { id, forEveryone });
+  };
+
+  // Реакции. Своё состояние не трогаем — ждём reactions_changed от сервера:
+  // он приходит и себе тоже, а собирать список локально значило бы дублировать
+  // правило «одна реакция на человека» ещё и на клиенте.
+  const handleToggleReaction = (messageId: number, emoji: string) => {
+    socket?.emit('reaction_set', { messageId, emoji });
+  };
+
+  const handleRemoveReaction = (messageId: number, userId: number) => {
+    socket?.emit('reaction_remove', { messageId, userId });
   };
 
   const handleTyping = () => {
@@ -2035,6 +2068,11 @@ const Chat: React.FC = () => {
               : undefined}
             onStartReply={setReplyingMessage}
             onForward={(ids) => setForwardIds(ids)}
+            reactionEmoji={reactionEmoji}
+            onToggleReaction={handleToggleReaction}
+            onRemoveReaction={handleRemoveReaction}
+            onForwardToSelf={selfChatId ? (ids) => forwardTo(ids, selfChatId, false) : undefined}
+            selfChatName={selfChatName}
           />
           {muted && (
             <div className="muted-banner">
