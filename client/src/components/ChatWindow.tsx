@@ -233,6 +233,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     setSelectedIds(new Set());
   }, [chatId]);
 
+  // Сняли последнюю галочку — выходим из режима выделения сами, отдельной
+  // кнопки «Отмена» для этого не требуют.
+  useEffect(() => {
+    if (selectMode && selectedIds.size === 0) setSelectMode(false);
+  }, [selectMode, selectedIds]);
+
   // Закрытие контекстного меню по клику снаружи
   useEffect(() => {
     if (!menuFor) return;
@@ -333,14 +339,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  // Жест выделения на Android. Долгое удержание открывает меню (иначе до него
-  // на телефоне не добраться — правой кнопки там нет), а если палец при этом
-  // повести вверх или вниз, вместо меню начинается выделение и тянется по тем
-  // сообщениям, через которые он проходит.
+  // Жест на Android. Три исхода одного касания:
+  //  - просто отпустили без задержки и почти не двигая пальцем — тап,
+  //    открывает контекстное меню (как клик на ПК, только рукой);
+  //  - подержали не двигая LONG_PRESS_MS — вход в режим выделения, отмечается
+  //    само тронутое сообщение;
+  //  - подвинули палец раньше, чем истекло удержание, — это прокрутка ленты,
+  //    жест целиком отменяется и ничему не мешает.
+  // Пока режим выделения не наступил (ни долгим удержанием, ни раньше через
+  // пункт меню/уже начатым выделением), любое движение пальца — чужая
+  // территория: тянуть диапазон нельзя, иначе простой скролл то и дело
+  // задевал бы соседние сообщения.
   //
   // Обработчики висят на всей строке .msg, а не на пузыре: по требованию
   // пустая область слева и справа от сообщения тоже должна ловить нажатие.
-  const touchGesture = useRef<{ startY: number; anchorId: number; dragging: boolean } | null>(null);
+  const touchGesture = useRef<{
+    startX: number; startY: number; anchorId: number; moved: boolean; sweeping: boolean;
+  } | null>(null);
 
   const messageIdAtPoint = (x: number, y: number): number | null => {
     const el = document.elementFromPoint(x, y)?.closest('[data-msg-id]');
@@ -348,66 +363,57 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     return raw ? Number(raw) : null;
   };
 
-  // Пока идёт жест, системное выделение текста должно молчать: иначе Android
-  // поверх нашего выделения поднимает свои маркеры и меню «Копировать».
+  // Пока идёт протяжка, системное выделение текста должно молчать: иначе
+  // Android поверх нашего выделения поднимает свои маркеры и меню «Копировать».
   const [touchSelecting, setTouchSelecting] = useState(false);
+
+  const DRAG_THRESHOLD_PX = 12;
 
   const handleTouchStart = (e: React.TouchEvent, msg: Message) => {
     const touch = e.touches[0];
     clearLongPress();
 
-    // В режиме выделения жест уже идёт: удержание меню не открывает (обычный
-    // тап там только отмечает сообщение), но протяжку по-прежнему ловим —
-    // ею продолжают набирать выделение.
-    if (selectMode) {
-      touchGesture.current = { startY: touch.clientY, anchorId: msg.id, dragging: true };
-      return;
-    }
+    // Уже в режиме выделения — протяжка тянет диапазон с этого касания сразу,
+    // долгого удержания ждать незачем: жест продолжает то, что уже начато.
+    touchGesture.current = {
+      startX: touch.clientX, startY: touch.clientY, anchorId: msg.id,
+      moved: false, sweeping: selectMode,
+    };
 
-    touchGesture.current = { startY: touch.clientY, anchorId: msg.id, dragging: false };
+    if (selectMode) return;
+
     longPressTimer.current = setTimeout(() => {
-      // Обнуляем сразу: дальше по этому ref отличают «удержание ещё идёт» от
-      // «уже сработало». Без этого id оставался в ref навсегда, и движение
-      // пальца после открытия меню принимали за обычную прокрутку — жест
-      // выделения не начинался вовсе.
+      const gesture = touchGesture.current;
       longPressTimer.current = null;
-      openMenuAt(msg, touch.clientX, touch.clientY);
+      if (!gesture || gesture.moved) return; // палец уже увели — это была прокрутка
+      gesture.sweeping = true;
+      setTouchSelecting(true);
+      setSelectMode(true);
+      setSelectedIds(new Set([gesture.anchorId]));
     }, LONG_PRESS_MS);
   };
-
-  const DRAG_THRESHOLD_PX = 12;
 
   const handleTouchMove = (e: React.TouchEvent) => {
     const gesture = touchGesture.current;
     const touch = e.touches[0];
-    if (!gesture || !touch) { clearLongPress(); return; }
+    if (!gesture || !touch) return;
 
-    const movedFar = Math.abs(touch.clientY - gesture.startY) > DRAG_THRESHOLD_PX;
+    const movedFar = Math.abs(touch.clientX - gesture.startX) > DRAG_THRESHOLD_PX
+      || Math.abs(touch.clientY - gesture.startY) > DRAG_THRESHOLD_PX;
 
-    // Палец пошёл раньше, чем сработало удержание — это обычная прокрутка
-    // ленты, а не жест: снимаем таймер и не мешаем.
-    if (!gesture.dragging && longPressTimer.current) {
-      if (movedFar) clearLongPress();
+    if (!gesture.sweeping) {
+      // Долгое удержание ещё не сработало — движение сейчас означает обычную
+      // прокрутку, а не жест: снимаем таймер (тапом это тоже быть перестало)
+      // и не вмешиваемся, чтобы лента продолжила скроллиться как обычно.
+      if (movedFar) {
+        gesture.moved = true;
+        clearLongPress();
+      }
       return;
     }
 
-    // Удержание уже сработало (меню открыто) и палец повели — переходим в
-    // выделение: меню закрываем, начальное сообщение отмечаем.
-    if (!gesture.dragging) {
-      if (!movedFar) return;
-      gesture.dragging = true;
-      setMenuFor(null);
-      setTouchSelecting(true);
-      setSelectMode(true);
-      setSelectedIds(new Set([gesture.anchorId]));
-      // Диапазон на этом же событии не считаем: меню ещё в DOM (React
-      // перерисуется только после обработчика) и перекрывает точку под
-      // пальцем — elementFromPoint вернул бы само меню, а не сообщение.
-      // Настоящая протяжка шлёт десятки touchmove, следующий и посчитает.
-      return;
-    }
-
-    // Ведём по сообщениям: всё между началом жеста и текущим — выделено.
+    // В режиме выделения: ведём по сообщениям, всё между началом жеста и
+    // текущей точкой — выделено.
     const overId = messageIdAtPoint(touch.clientX, touch.clientY);
     if (overId === null) return;
 
@@ -420,7 +426,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     setSelectedIds(new Set(ids.slice(lo, hi + 1)));
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = (e: React.TouchEvent, msg: Message) => {
+    const gesture = touchGesture.current;
+    clearLongPress();
+    touchGesture.current = null;
+    setTouchSelecting(false);
+
+    // Тап: не было ни долгого удержания (режим выделения не включился этим
+    // жестом), ни движения. Если уже сидели в выделении — обычный клик по
+    // сообщению отмечает его сам (см. onClick), меню тут не к месту.
+    if (!selectMode && gesture && !gesture.moved && !gesture.sweeping) {
+      const touch = e.changedTouches[0];
+      if (touch) openMenuAt(msg, touch.clientX, touch.clientY);
+    }
+  };
+
+  // Отмена жеста системой (входящий звонок, смена окна) — это не отпускание
+  // пальца, тап тут не открываем, просто гасим состояние.
+  const handleTouchCancel = () => {
     clearLongPress();
     touchGesture.current = null;
     setTouchSelecting(false);
@@ -596,11 +619,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   return (
     <div className="conv-wrap">
-      {!selectMode && messages.length > 0 && (
-        <button type="button" className="select-messages-btn" onClick={() => setSelectMode(true)} title="Выбрать сообщения">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-        </button>
-      )}
       {selectMode && (
         <div className="select-toolbar">
           <button type="button" className="icon-btn" onClick={exitSelectMode} aria-label="Отмена">
@@ -667,8 +685,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 // Жест продолжается и после входа в режим выделения — иначе
                 // палец, доехав до второго сообщения, терял бы обработчик.
                 onTouchStart={(e) => handleTouchStart(e, msg)}
-                onTouchEnd={handleTouchEnd}
-                onTouchCancel={handleTouchEnd}
+                onTouchEnd={(e) => handleTouchEnd(e, msg)}
+                onTouchCancel={handleTouchCancel}
                 onTouchMove={handleTouchMove}
               >
                 {selectMode && selectable && (

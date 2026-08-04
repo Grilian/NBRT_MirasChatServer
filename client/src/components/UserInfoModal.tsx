@@ -88,8 +88,12 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
     }
   };
 
+  // modal-overlay-nested: профиль иногда открывают из уже открытого окна
+  // (справочник «Люди», в будущем — из карточки группы). У всех модалок
+  // одинаковый z-index — при равном z-index выигрывает более поздний в DOM,
+  // а People рендерится после профиля и оказывалась поверх него.
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay modal-overlay-nested" onClick={onClose}>
       <div className="modal-card user-info-modal" onClick={(e) => e.stopPropagation()}>
         <div className="conv-head">
           <div className="conv-title"><div className="settings-title">Профиль</div></div>

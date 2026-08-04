@@ -740,13 +740,6 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .msg-menu-info + .msg-menu-info { border-top: none; margin-top: 0; padding-top: 0; }
 
-.select-messages-btn {
-  position: absolute; left: 16px; top: 12px; z-index: 5;
-  width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
-  background: var(--sidebar); color: var(--ink-muted); box-shadow: var(--shadow-md);
-  display: flex; align-items: center; justify-content: center;
-}
-.select-messages-btn:hover { color: var(--accent); }
 .select-toolbar {
   position: absolute; left: 0; right: 0; top: 0; z-index: 6; display: flex; align-items: center; gap: 10px;
   padding: 9px 14px; background: var(--sidebar); border-bottom: 1px solid var(--line);
@@ -917,7 +910,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   background: var(--paper-raised); border: 1px solid var(--line);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
   animation: toast-in 220ms cubic-bezier(.22, .61, .36, 1);
+  touch-action: pan-x; /* смахивание вверх/вниз наш жест — не отдаём его прокрутке страницы */
+  transition: transform 180ms ease, opacity 180ms ease;
 }
+/* Во время самого жеста transform идёт от touchmove на каждый кадр —
+   CSS-переход тут же мешал бы, дотягивая к предыдущей точке с опозданием. */
+.toast.is-dragging { transition: none; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 
@@ -1219,6 +1217,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   position: fixed; inset: 0; background: color-mix(in srgb, black 45%, transparent); backdrop-filter: blur(2px);
   display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
 }
+/* Профиль может открыться поверх уже открытого окна (справочник «Люди») —
+   без этого он стоял бы наравне с ним по z-index, и порядок в DOM решал бы,
+   кто сверху, а не то, какое окно открыли позже. */
+.modal-overlay-nested { z-index: 55; }
 .modal-card {
   width: 100%; max-width: 420px; max-height: 80vh; background: var(--paper-raised);
   border-radius: var(--radius-lg); display: flex; flex-direction: column; overflow: hidden;

@@ -37,10 +37,44 @@ interface ToastCardProps {
   onDismiss: (chatId: string) => void;
 }
 
+// Смахивание вверх закрывает уведомление — жест того же типа, что и в
+// системных шторках. Порог в пикселях, а не в скорости: жест короткий,
+// скорость на телефоне слишком шумно измерять на паре событий touchmove.
+const SWIPE_DISMISS_PX = 48;
+
 const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDismiss }) => {
   const [paused, setPaused] = useState(false);
   const remainingRef = useRef(durationMs);
   const startedAtRef = useRef(Date.now());
+
+  const touchStartY = useRef<number | null>(null);
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+    setDragging(true);
+    setPaused(true);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartY.current === null) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    // Только вверх: вниз/в стороны — не наш жест, оставляем на месте.
+    setDragY(Math.min(0, delta));
+  };
+
+  const endDrag = () => {
+    if (touchStartY.current === null) return;
+    touchStartY.current = null;
+    setDragging(false);
+    setPaused(false);
+    if (-dragY > SWIPE_DISMISS_PX) {
+      onDismiss(toast.chatId);
+    } else {
+      setDragY(0);
+    }
+  };
 
   // Порядок эффектов важен: сначала сбрасываем остаток времени (новое
   // сообщение в ту же стопку = показ начинается заново), потом заводим
@@ -66,10 +100,18 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
 
   return (
     <div
-      className="toast"
+      className={'toast' + (dragging ? ' is-dragging' : '')}
       role="alert"
+      style={dragY < 0 ? {
+        transform: `translateY(${dragY}px)`,
+        opacity: Math.max(0, 1 - -dragY / (SWIPE_DISMISS_PX * 2.5)),
+      } : undefined}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={endDrag}
+      onTouchCancel={endDrag}
     >
       <button type="button" className="toast-main" onClick={() => onOpen(toast.chatId)}>
         <Avatar name={toast.title} avatarPath={toast.avatarPath} isGeneral={toast.isGeneral} isGroup={toast.isGroup} />
