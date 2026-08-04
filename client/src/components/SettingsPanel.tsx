@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import api from '../api/client';
 import Avatar from './Avatar';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
 import {
