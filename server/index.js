@@ -62,6 +62,25 @@ function readCountsPayload(chatId, ids) {
   return isAnnouncementChat(chatId) ? { readCounts: readCountsFor(ids) } : {};
 }
 
+// Цитата исходного сообщения для ответа — та же форма, что отдаёт история
+// (см. routes/messages.js). Удалённое цитируем пустым текстом: строка в базе
+// остаётся навсегда, но её содержимое наружу не отдаётся ни при каких
+// обстоятельствах, включая цитаты.
+function replyPreviewOf(replyToId) {
+  const row = db.prepare(`
+    SELECT m.text, m.file_path, m.deleted, u.username, u.display_name
+    FROM messages m JOIN users u ON u.id = m.sender_id
+    WHERE m.id = ?
+  `).get(replyToId);
+  if (!row) return {};
+  return {
+    reply_to_text: row.deleted ? '' : row.text,
+    reply_to_file: row.deleted ? null : row.file_path,
+    reply_to_author: row.display_name || row.username,
+    reply_to_deleted: row.deleted ? 1 : 0,
+  };
+}
+
 function clientIpOf(socket) {
   const forwarded = socket.handshake.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.trim()) {
@@ -299,6 +318,27 @@ io.on('connection', (socket) => {
     // Сообщение без текста и без картинки — отправлять нечего.
     if (!finalText && !filePath) return;
 
+    // Ответ: id принимаем только если это сообщение существует и лежит в ЭТОМ
+    // же чате — иначе цитатой можно было бы вытащить кусок чужой переписки,
+    // просто подставив её id (клиент показывает текст исходного сообщения).
+    const replyToId = Number.isInteger(Number(data.replyToId)) && Number(data.replyToId) > 0
+      ? Number(data.replyToId)
+      : null;
+    const replySource = replyToId
+      ? db.prepare('SELECT id FROM messages WHERE id = ? AND chat_id = ?').get(replyToId, data.chatId)
+      : null;
+    const finalReplyTo = replySource ? replyToId : null;
+
+    // Пересылка: подпись «переслано от кого» — снимок имени, а не ссылка.
+    // Доверять тут нечему по существу (это просто подпись), но обрезаем длину,
+    // чтобы в базу не уехала простыня.
+    const forwardedFromName = typeof data.forwardedFromName === 'string' && data.forwardedFromName.trim()
+      ? data.forwardedFromName.trim().slice(0, 100)
+      : null;
+    const forwardedFromChat = typeof data.forwardedFromChat === 'string' && data.forwardedFromChat.trim()
+      ? data.forwardedFromChat.trim().slice(0, 100)
+      : null;
+
     if (isFlooding(socket)) {
       socket.emit('message_blocked', { reason: 'rate_limit', chatId: data.chatId });
       return;
@@ -331,10 +371,16 @@ io.on('connection', (socket) => {
 
     try {
       // Сохраняем в локальную БД
-      const stmt = db.prepare(
-        'INSERT INTO messages (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      const stmt = db.prepare(`
+        INSERT INTO messages
+          (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip,
+           reply_to_id, forwarded_from_name, forwarded_from_chat)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const result = stmt.run(
+        data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
+        finalReplyTo, forwardedFromName, forwardedFromChat
       );
-      const result = stmt.run(data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket));
 
       const message = {
         id: result.lastInsertRowid,
@@ -352,6 +398,12 @@ io.on('connection', (socket) => {
         // сразу при отправке, иначе счётчик появлялся бы у автора лишь после
         // перезагрузки истории (в живом событии поля просто не было).
         ...(isAnnouncementChat(data.chatId) ? { read_count: 0 } : {}),
+        reply_to_id: finalReplyTo,
+        // Цитату собираем здесь же: без неё живо пришедший ответ показывал бы
+        // пустую полоску до перезагрузки истории.
+        ...(finalReplyTo ? replyPreviewOf(finalReplyTo) : {}),
+        forwarded_from_name: forwardedFromName,
+        forwarded_from_chat: forwardedFromChat,
       };
 
       emitToChat(data.chatId, 'chat_message', message, senderId);

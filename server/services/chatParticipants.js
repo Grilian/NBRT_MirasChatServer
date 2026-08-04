@@ -35,6 +35,12 @@ function participantsForChatId(chatId) {
     return rows.map((row) => row.user_id);
   }
 
+  // Личный чат «для себя» (заметки, пересылки). Участник ровно один — сам
+  // владелец: id зашит в chat_id, поэтому отдельной таблицы не нужно, а
+  // проверка участия сводится к сравнению с ним.
+  const selfMatch = String(chatId).match(/^self_(\d+)$/);
+  if (selfMatch) return [Number(selfMatch[1])];
+
   const match = String(chatId).match(/^chat_(\d+)_(\d+)$/);
   if (match) return [Number(match[1]), Number(match[2])];
 
@@ -47,4 +53,9 @@ function isParticipant(chatId, userId) {
   return participants.includes(Number(userId));
 }
 
-module.exports = { parseAdminChatId, participantsForChatId, isParticipant };
+/** chat_id личного чата «для себя» — по нему же его узнаёт participantsForChatId. */
+function selfChatId(userId) {
+  return `self_${Number(userId)}`;
+}
+
+module.exports = { parseAdminChatId, participantsForChatId, isParticipant, selfChatId };

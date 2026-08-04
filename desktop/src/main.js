@@ -196,7 +196,7 @@ function createTray() {
 // есть непрочитанное сообщение — состояние присылает рендерер по IPC.
 // Раньше сюда приходил голый boolean; теперь ещё и количество, чтобы точное
 // число было видно в подсказке трея, не открывая окно.
-function setUnreadBadge(count) {
+function setUnreadBadge(count, badgeDataUrl) {
   const hasUnread = count > 0;
 
   if (tray) {
@@ -205,8 +205,20 @@ function setUnreadBadge(count) {
   }
 
   if (mainWindow && !mainWindow.isDestroyed()) {
+    // Картинку с числом рисует рендерер и присылает готовой (см.
+    // utils/badgeIcon.ts): в main-процессе нет canvas, а тянуть графическую
+    // библиотеку в сборку ради кружка с цифрой незачем. Заранее нарисованная
+    // точка остаётся запасным вариантом — на случай, если рендерер прислал
+    // счётчик без картинки (старая сборка веб-части внутри новой оболочки).
+    let overlay = null;
+    if (hasUnread) {
+      overlay = badgeDataUrl
+        ? nativeImage.createFromDataURL(badgeDataUrl)
+        : nativeImage.createFromPath(path.join(ASSETS_DIR, 'overlay-unread.png'));
+    }
+
     mainWindow.setOverlayIcon(
-      hasUnread ? nativeImage.createFromPath(path.join(ASSETS_DIR, 'overlay-unread.png')) : null,
+      overlay,
       hasUnread ? `Непрочитанных сообщений: ${count}` : ''
     );
   }
@@ -508,7 +520,7 @@ ipcMain.on('window:maximize-toggle', () => {
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
-ipcMain.on('unread:set', (event, count) => setUnreadBadge(Number(count) || 0));
+ipcMain.on('unread:set', (event, count, badgeDataUrl) => setUnreadBadge(Number(count) || 0, badgeDataUrl));
 ipcMain.on('window:flash', () => flashOnNewMessage());
 
 // Клик по всплывающему уведомлению — окно может быть свёрнуто в трей

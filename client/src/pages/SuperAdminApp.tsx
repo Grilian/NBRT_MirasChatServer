@@ -25,6 +25,8 @@ interface UserRow {
   password_status: PasswordStatus;
   /** Может отсутствовать, если панель открыта против сервера постарше. */
   app_versions?: AppVersion[];
+  /** 'YYYY-MM-DD HH:MM:SS' от SQLite — по нему считается метка New. */
+  created_at?: string | null;
 }
 
 interface AppVersion {
@@ -310,7 +312,16 @@ function UserSettingsModal({
   );
 }
 
-function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[]; groups: Group[]; departments: Group[]; onChanged: () => void }) {
+function UsersPanel({ users, groups, departments, onChanged, newUserIds, embedded }: {
+  users: UserRow[];
+  groups: Group[];
+  departments: Group[];
+  onChanged: () => void;
+  /** Кого пометить меткой New — считает вкладка «Интернет». */
+  newUserIds?: number[];
+  /** Внутри другой карточки: своя рамка и заголовок тогда не нужны. */
+  embedded?: boolean;
+}) {
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState('');
@@ -370,9 +381,9 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
   };
 
   return (
-    <div className="sa-card">
+    <div className={embedded ? '' : 'sa-card'}>
       <div className="sa-card-head">
-        <h2>Пользователи <span className="sa-count">{filtered.length}</span></h2>
+        {!embedded && <h2>Пользователи <span className="sa-count">{filtered.length}</span></h2>}
         <input
           type="text"
           className="sa-search"
@@ -416,6 +427,7 @@ function UsersPanel({ users, groups, departments, onChanged }: { users: UserRow[
                   >
                     {u.display_name || u.username} ({u.username})
                     {u.account_type === 'staff' && <span className="sa-verified-badge" title="Подтверждённая учётная запись">✓</span>}
+                    {newUserIds?.includes(u.id) && <span className="sa-new-badge" title="Зарегистрировался с прошлого разбора">New</span>}
                   </span>
                 )}
               </td>
@@ -633,6 +645,133 @@ function UpdateSchedulePanel() {
   );
 }
 
+// Учётные записи с улицы. Их разбирают отдельно от сотрудников: подтвердить
+// (сменить тип на «Сотрудник») или удалить. Метка New снимается со всех разом,
+// когда админ уходит с вкладки — по условию «открыл и что-то сделал»: любое
+// действие, включая переход на другую страницу, считается разбором.
+function InternetUsersPanel({
+  users, groups, departments, onChanged,
+}: {
+  users: UserRow[];
+  groups: Group[];
+  departments: Group[];
+  onChanged: () => void;
+}) {
+  const [seenAt, setSeenAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    superAdminApi.get('/superadmin/internet-seen')
+      .then(({ data }) => { if (!cancelled) setSeenAt(data.seenAt || 0); })
+      .catch(() => { if (!cancelled) setSeenAt(0); });
+
+    // Уход с вкладки = «разобрал». Отмечаем на размонтировании, а не по
+    // таймеру: иначе метка снималась бы у человека, который просто открыл
+    // вкладку и отошёл, не посмотрев список.
+    return () => {
+      cancelled = true;
+      superAdminApi.put('/superadmin/internet-seen').catch(() => {});
+    };
+  }, []);
+
+  const internetUsers = users.filter((u) => u.account_type === 'internet');
+
+  // Пока не знаем момент последнего разбора — не мигаем метками: иначе при
+  // каждом открытии вкладки на мгновение «новыми» выглядели бы все.
+  const isNew = (user: UserRow) => {
+    if (seenAt === null || !user.created_at) return false;
+    const ms = Date.parse(user.created_at.replace(' ', 'T') + 'Z');
+    return Number.isFinite(ms) && ms > seenAt;
+  };
+
+  const newCount = internetUsers.filter(isNew).length;
+
+  return (
+    <div className="sa-card">
+      <h2>Интернет — {internetUsers.length}</h2>
+      <p className="sa-hint">
+        Регистрации с улицы. Они видят только других «Интернет» и группу «Админы»,
+        пока их не подтвердят: смените тип на «Сотрудник» в колонке «Тип».
+        {newCount > 0 && ` Новых с прошлого раза: ${newCount}.`}
+      </p>
+
+      {internetUsers.length === 0
+        ? <p className="sa-hint">Пока никого.</p>
+        : (
+          <UsersPanel
+            users={internetUsers}
+            groups={groups}
+            departments={departments}
+            onChanged={onChanged}
+            newUserIds={internetUsers.filter(isNew).map((u) => u.id)}
+            embedded
+          />
+        )}
+    </div>
+  );
+}
+
+// Личный чат «для себя» — заметки и пересылки. Настраивать тут пока нечего,
+// кроме названия: сам чат существует у каждого по определению (chat_id вида
+// self_<id>), заводить и удалять его нельзя.
+function SelfChatPanel() {
+  const [name, setName] = useState('');
+  const [saved, setSaved] = useState('');
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+
+  const load = async () => {
+    try {
+      const { data } = await superAdminApi.get('/superadmin/self-chat');
+      setName(data.name);
+      setSaved(data.name);
+    } catch {
+      setError('Не удалось загрузить название');
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const { data } = await superAdminApi.put('/superadmin/self-chat', { name });
+      setName(data.name);
+      setSaved(data.name);
+      setError('');
+      setStatus('Сохранено');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось сохранить');
+    }
+  };
+
+  return (
+    <div className="sa-card sa-card--compact">
+      <h2>Избранное / Облако / Архив</h2>
+      {error && <p className="form-error">{error}</p>}
+
+      <p className="sa-hint">
+        Это одна и та же сущность — личный чат, куда человек складывает заметки и
+        пересылает сообщения. Видит его только владелец. Название общее для всех:
+        сейчас — «{saved}».
+      </p>
+
+      <form onSubmit={save} className="sa-inline-form">
+        <input
+          type="text"
+          value={name}
+          maxLength={40}
+          placeholder="Избранное"
+          onChange={(e) => { setName(e.target.value); setStatus(''); }}
+        />
+        <button type="submit" className="btn-primary">Сохранить</button>
+      </form>
+
+      {status && <p className="sa-hint">{status}</p>}
+    </div>
+  );
+}
+
 interface EmojiPack {
   id: number;
   name: string;
@@ -759,13 +898,15 @@ function EmojiPacksPanel() {
   );
 }
 
-type Tab = 'users' | 'groups' | 'departments' | 'emoji' | 'updates';
+type Tab = 'users' | 'internet' | 'groups' | 'departments' | 'emoji' | 'selfchat' | 'updates';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'users', label: 'Пользователи' },
+  { id: 'internet', label: 'Интернет' },
   { id: 'groups', label: 'Группы' },
   { id: 'departments', label: 'Отделы' },
   { id: 'emoji', label: 'Смайлики' },
+  { id: 'selfchat', label: 'Избранное' },
   { id: 'updates', label: 'Обновления' },
 ];
 
@@ -836,6 +977,9 @@ export default function SuperAdminApp() {
           >
             {t.label}
             {t.id === 'users' && <span className="sa-tab-count">{users.length}</span>}
+            {t.id === 'internet' && (
+              <span className="sa-tab-count">{users.filter((u) => u.account_type === 'internet').length}</span>
+            )}
           </button>
         ))}
       </nav>
@@ -843,9 +987,11 @@ export default function SuperAdminApp() {
       <main className="sa-main">
         {loadError && <p className="form-error">{loadError}</p>}
         {tab === 'users' && <UsersPanel users={users} groups={groups} departments={departments} onChanged={load} />}
+        {tab === 'internet' && <InternetUsersPanel users={users} groups={groups} departments={departments} onChanged={load} />}
         {tab === 'groups' && <GroupsPanel groups={groups} onChanged={load} />}
         {tab === 'departments' && <DepartmentsPanel departments={departments} onChanged={load} />}
         {tab === 'emoji' && <EmojiPacksPanel />}
+        {tab === 'selfchat' && <SelfChatPanel />}
         {tab === 'updates' && <UpdateSchedulePanel />}
       </main>
     </div>

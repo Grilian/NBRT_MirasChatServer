@@ -6,7 +6,11 @@ const verifySuperAdmin = require('../middleware/verifySuperAdmin');
 const { isValidLogin, isReservedLogin, PASSWORD_RESET_WINDOW_MS } = require('../utils/validators');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { applyModeration, notifyModerated } = require('../services/userModeration');
-const { getUpdateNotBefore, setUpdateNotBefore } = require('../services/appSettings');
+const {
+  getUpdateNotBefore, setUpdateNotBefore,
+  getSelfChatName, setSelfChatName,
+  getInternetSeenAt, setInternetSeenAt,
+} = require('../services/appSettings');
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key';
@@ -146,7 +150,7 @@ router.get('/users', verifySuperAdmin, (req, res) => {
     const users = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.group_id, u.role, u.muted, u.account_type,
              u.password, u.password_reset_requested_at, g.name AS group_name,
-             u.department_id, d.name AS department_name
+             u.department_id, d.name AS department_name, u.created_at
       FROM users u
       LEFT JOIN groups g ON g.id = u.group_id
       LEFT JOIN departments d ON d.id = u.department_id
@@ -182,6 +186,7 @@ router.get('/users', verifySuperAdmin, (req, res) => {
       department_id: u.department_id || null,
       department_name: u.department_name || null,
       password_status: passwordStatus(u),
+      created_at: u.created_at || null,
       // Пусто — значит клиент ни разу не отчитался: либо сборка старше
       // появления этой телеметрии, либо человек с тех пор не заходил.
       // Панель в обоих случаях показывает «old».
@@ -301,6 +306,40 @@ router.put('/update-schedule', verifySuperAdmin, (req, res) => {
     res.json({ notBefore: ms });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== Вкладка «Интернет» =====
+//
+// Учётные записи, заведённые с улицы, разбирают отдельно от сотрудников:
+// их надо подтвердить (сменить тип на 'staff') или удалить. Метка New живёт
+// не на пользователе, а на моменте последнего разбора — иначе пришлось бы
+// заводить колонку и обновлять её по одной строке.
+router.get('/internet-seen', verifySuperAdmin, (req, res) => {
+  res.json({ seenAt: getInternetSeenAt() });
+});
+
+router.put('/internet-seen', verifySuperAdmin, (req, res) => {
+  const now = Date.now();
+  setInternetSeenAt(now);
+  res.json({ seenAt: now });
+});
+
+// ===== Личный чат «Избранное / Облако / Архив» =====
+//
+// Название одно на всю организацию, а не персональная настройка: это способ
+// называть одну и ту же сущность, и в клиентах она должна называться
+// одинаково у всех. Сам чат заводить не нужно — он существует у каждого по
+// определению (chat_id вида self_<id>, см. services/chatParticipants.js).
+router.get('/self-chat', verifySuperAdmin, (req, res) => {
+  res.json({ name: getSelfChatName() });
+});
+
+router.put('/self-chat', verifySuperAdmin, (req, res) => {
+  try {
+    res.json({ name: setSelfChatName(req.body.name) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 

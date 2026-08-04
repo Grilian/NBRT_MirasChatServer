@@ -380,6 +380,28 @@ try {
   // Колонка уже есть
 }
 
+// Миграция: ответ на сообщение. Без внешнего ключа намеренно — на исходное
+// сообщение можно ответить, а потом его удалят (deleted=1, строка остаётся),
+// и цитата должна пережить это, показав «сообщение удалено» вместо текста.
+// Пересылка отмечается парой forwarded_from_*: имя автора берём снимком, а не
+// join'ом по id, потому что человека могут переименовать или удалить, а в
+// пересланном сообщении должно остаться то, что видел пересылавший.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN forwarded_from_name TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN forwarded_from_chat TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 // Миграция: группы, роли, режим тишины — управляются из панели супер-админа
 try {
   db.exec(`ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES groups(id)`);

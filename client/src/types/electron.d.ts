@@ -11,7 +11,8 @@ declare global {
       onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
       getAutoLaunch: () => Promise<boolean>;
       setAutoLaunch: (enabled: boolean) => Promise<boolean>;
-      setUnreadBadge: (count: number) => void;
+      /** badgeDataUrl — PNG-кружок с числом, рисует рендерер (см. utils/badgeIcon.ts). */
+      setUnreadBadge: (count: number, badgeDataUrl?: string) => void;
       focusWindow: () => void;
       flashWindow: () => void;
       onFocusChange: (callback: (isFocused: boolean) => void) => () => void;

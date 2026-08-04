@@ -19,6 +19,13 @@ interface Message {
   deleted?: boolean | number;
   /** Сколько человек прочитало — приходит только в каналах-объявлениях. */
   read_count?: number;
+  reply_to_id?: number | null;
+  reply_to_text?: string | null;
+  reply_to_file?: string | null;
+  reply_to_author?: string | null;
+  reply_to_deleted?: number | boolean | null;
+  forwarded_from_name?: string | null;
+  forwarded_from_chat?: string | null;
 }
 
 interface ChatWindowProps {
@@ -42,6 +49,10 @@ interface ChatWindowProps {
   onDeleteMessages?: (ids: number[]) => void;
   /** Завести поручение по тексту сообщения — открывает раздел «Задачи». */
   onCreateTask?: (text: string) => void;
+  /** Ответить на сообщение — панель над полем ввода, как при правке. */
+  onStartReply?: (msg: { id: number; text: string; author: string; hasImage: boolean }) => void;
+  /** Переслать выбранные сообщения — открывает выбор чата. */
+  onForward?: (ids: number[]) => void;
 }
 
 const LONG_PRESS_MS = 450;
@@ -106,7 +117,8 @@ function buildRows(messages: Message[]): RenderedRow[] {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
-  onStartEdit, editingId, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages, onCreateTask
+  onStartEdit, editingId, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages, onCreateTask,
+  onStartReply, onForward
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
   // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
@@ -251,6 +263,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Клик по цитате уводит к исходному сообщению. Если оно ещё не подгружено
+  // (осталось выше по истории) — подсвечивать нечего, молча ничего не делаем:
+  // дотягивать историю до произвольного id пришлось бы отдельной ручкой.
+  const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const jumpToMessage = (id: number) => {
+    const node = messagesContainerRef.current?.querySelector(`[data-msg-id="${id}"]`);
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedId(id);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlightedId(null), 1600);
+  };
+
+  useEffect(() => () => { if (highlightTimer.current) clearTimeout(highlightTimer.current); }, []);
+
   // Раньше меню открывалось только на своих сообщениях — скопировать текст
   // чужой реплики было нельзя вовсе. Теперь оно доступно на любом
   // непустом сообщении; какие пункты в нём показать (только «Копировать»
@@ -354,6 +383,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
           <span className="select-toolbar-count">Выбрано: {selectedIds.size}</span>
+          {onForward && (
+            <button
+              type="button"
+              className="select-toolbar-forward"
+              disabled={selectedIds.size === 0}
+              onClick={() => { onForward(Array.from(selectedIds)); exitSelectMode(); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 17 5-5-5-5" /><path d="M4 18v-2a4 4 0 0 1 4-4h12" /></svg>
+              Переслать
+            </button>
+          )}
           <button type="button" className="select-toolbar-delete" onClick={confirmBulkDelete} disabled={selectedIds.size === 0}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
             Удалить
@@ -388,12 +428,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             selectMode && selectable ? 'is-selectable' : '',
             isSelected ? 'is-selected' : '',
             isEditing ? 'is-editing' : '',
+            highlightedId === msg.id ? 'is-highlighted' : '',
           ].filter(Boolean).join(' ');
 
           return (
             <React.Fragment key={msg.id}>
               {daySeparator && <div className="date-sep">{daySeparator}</div>}
               <div
+                data-msg-id={msg.id}
                 className={className}
                 onClick={selectMode && selectable ? () => toggleSelected(msg.id) : undefined}
                 onContextMenu={!selectMode ? (e) => handleContextMenu(e, msg) : undefined}
@@ -410,6 +452,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         повторяло бы имя из шапки на каждой реплике. */}
                     {!mine && showAuthors && startsGroup && (
                       <div className="bubble-author">{nameFor(msg)}</div>
+                    )}
+                    {msg.forwarded_from_name && (
+                      <div className="bubble-forwarded">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 17 5-5-5-5" /><path d="M4 18v-2a4 4 0 0 1 4-4h12" /></svg>
+                        Переслано от {msg.forwarded_from_name}
+                      </div>
+                    )}
+                    {msg.reply_to_id && (
+                      <button
+                        type="button"
+                        className="bubble-reply"
+                        onClick={(e) => { e.stopPropagation(); jumpToMessage(msg.reply_to_id!); }}
+                        title="Перейти к сообщению"
+                      >
+                        <span className="bubble-reply-author">{msg.reply_to_author || 'Сообщение'}</span>
+                        <span className="bubble-reply-text">
+                          {msg.reply_to_deleted
+                            ? 'сообщение удалено'
+                            : (msg.reply_to_text || (msg.reply_to_file ? '📷 Фото' : ''))}
+                        </span>
+                      </button>
                     )}
                     {msg.file_path && (
                       <button
@@ -470,10 +533,31 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             {/* Копировать — на любом сообщении, не только своём: раньше меню
                 вообще не открывалось на чужих репликах. У картинки без
                 подписи копировать нечего — текста в сообщении просто нет. */}
+            {/* «Ответить» первым: в переписке это самое частое действие. */}
+            {onStartReply && (
+              <button type="button" onClick={() => {
+                setMenuFor(null);
+                onStartReply({
+                  id: menuMsg.id,
+                  text: menuMsg.text,
+                  author: nameFor(menuMsg),
+                  hasImage: !!menuMsg.file_path,
+                });
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 17-5-5 5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
+                Ответить
+              </button>
+            )}
             {menuMsg.text && (
               <button type="button" onClick={() => copyMessageText(menuMsg)}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
                 Копировать
+              </button>
+            )}
+            {onForward && (
+              <button type="button" onClick={() => { setMenuFor(null); onForward([menuMsg.id]); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 17 5-5-5-5" /><path d="M4 18v-2a4 4 0 0 1 4-4h12" /></svg>
+                Переслать
               </button>
             )}
             {/* Поручение по чужой реплике нужно не реже, чем по своей —

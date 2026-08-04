@@ -3,7 +3,8 @@ import { io, Socket } from 'socket.io-client';
 import { App as CapApp } from '@capacitor/app';
 import ChatList, { ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
-import MessageInput, { EditingMessage, PendingImage } from '../components/MessageInput';
+import MessageInput, { EditingMessage, PendingImage, ReplyingMessage } from '../components/MessageInput';
+import ForwardModal, { ForwardPreviewItem, ForwardTarget } from '../components/ForwardModal';
 import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
@@ -19,6 +20,7 @@ import PeopleSection from '../components/PeopleSection';
 import NotificationStack, { ToastNotification } from '../components/NotificationStack';
 import api from '../api/client';
 import { nameFor } from '../utils/user';
+import { renderUnreadBadge } from '../utils/badgeIcon';
 import { describeStatus } from '../utils/statusMeta';
 import {
   ensureMobileNotificationPermission,
@@ -268,6 +270,10 @@ const Chat: React.FC = () => {
   // Текст сообщения, из которого заводят задачу («Создать задачу» в меню
   // сообщения) — уезжает в TasksPanel вместе с переходом в раздел.
   const [taskDraftText, setTaskDraftText] = useState<string | null>(null);
+  // Сообщение, на которое отвечаем — панель над полем ввода, как при правке.
+  const [replyingMessage, setReplyingMessage] = useState<ReplyingMessage | null>(null);
+  // Сообщения, выбранные для пересылки — открывают выбор чата-получателя.
+  const [forwardIds, setForwardIds] = useState<number[] | null>(null);
   // Правка сообщения живёт здесь, а не в ленте: текст уезжает в поле ввода
   // (как в Telegram), а поле ввода — сосед ленты, общий родитель у них тут.
   const [editingMessage, setEditingMessage] = useState<EditingMessage | null>(null);
@@ -384,6 +390,11 @@ const Chat: React.FC = () => {
   // урезанный рельс разделов (см. NavRail) и общий календарь ему не показывает
   // уже сам сервер.
   const [currentAccountType, setCurrentAccountType] = useState(localStorage.getItem('accountType') || 'staff');
+  // Личный чат «для себя»: id зашит в свой же user id, название задаёт панель
+  // управления (одно на всех). До первого ответа /users/me берём из
+  // localStorage — иначе при запуске он моргал бы дефолтным названием.
+  const [selfChatId, setSelfChatId] = useState(localStorage.getItem('selfChatId') || '');
+  const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Избранное');
   const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
   const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
@@ -490,7 +501,8 @@ const Chat: React.FC = () => {
   // единственный индикатор, который виден, когда вкладка не активна.
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
   useEffect(() => {
-    window.electronAPI?.setUnreadBadge(totalUnread);
+    // Картинку оверлея рисуем здесь: в main-процессе нечем (см. badgeIcon.ts).
+    window.electronAPI?.setUnreadBadge(totalUnread, renderUnreadBadge(totalUnread) || undefined);
     document.title = totalUnread > 0 ? `(${totalUnread}) MirasChat` : 'MirasChat';
   }, [totalUnread]);
 
@@ -632,6 +644,10 @@ const Chat: React.FC = () => {
         setCurrentAccountType(data.account_type || 'staff');
         setCurrentStatusPreset(data.status_preset || null);
         setCurrentStatusCustom(data.status_custom || null);
+        setSelfChatId(data.self_chat_id || '');
+        setSelfChatName(data.self_chat_name || 'Избранное');
+        localStorage.setItem('selfChatId', data.self_chat_id || '');
+        localStorage.setItem('selfChatName', data.self_chat_name || 'Избранное');
         localStorage.setItem('username', data.username);
         localStorage.setItem('displayName', data.display_name);
         localStorage.setItem('avatarPath', data.avatar_path || '');
@@ -1063,8 +1079,12 @@ const Chat: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChat]);
 
-  // Смена чата отменяет начатую правку: текст относился к прошлой переписке.
-  useEffect(() => { setEditingMessage(null); }, [activeChat]);
+  // Смена чата отменяет начатую правку и ответ: и то и другое относилось к
+  // прошлой переписке (ответить на сообщение из другого чата сервер и не даст).
+  useEffect(() => {
+    setEditingMessage(null);
+    setReplyingMessage(null);
+  }, [activeChat]);
 
   // Подгрузка старых сообщений. Курсор — id самого старого показанного
   // сообщения, а не offset по длине списка: пока человек читает историю, в чат
@@ -1230,7 +1250,7 @@ const Chat: React.FC = () => {
     // который ещё не подгрузился в список контактов) открывался ПРОШЛЫЙ чат:
     // activeChat оставался старым, а вид уже был перепиской.
     const known =
-      chatId === GENERAL_CHAT_ID
+      chatId === GENERAL_CHAT_ID || (!!selfChatId && chatId === selfChatId)
         ? true
         : /^group_\d+$/.test(chatId)
           ? chatGroups.some(g => g.chat_id === chatId)
@@ -1286,9 +1306,40 @@ const Chat: React.FC = () => {
         filePath: image?.file_path,
         fileWidth: image?.file_width,
         fileHeight: image?.file_height,
+        replyToId: replyingMessage?.id,
       });
       socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
+      setReplyingMessage(null);
     }
+  };
+
+  // Пересылка: отправляем те же сообщения в выбранный чат с подписью «переслано
+  // от». Копией, а не ссылкой — исходное могут удалить, а пересланное должно
+  // остаться (и наоборот: правка исходного пересланное не трогает).
+  const handleForward = (targetChatId: string) => {
+    if (!socket || !forwardIds) return;
+    const sourceName = activeChatMeta?.name || '';
+
+    // Порядок сохраняем по id: выделяли в произвольном порядке, а прийти
+    // должно так же, как шло в переписке.
+    const toSend = messages
+      .filter((m) => forwardIds.includes(m.id) && !m.deleted)
+      .sort((a, b) => a.id - b.id);
+
+    for (const msg of toSend) {
+      socket.emit('chat_message', {
+        chatId: targetChatId,
+        text: msg.text,
+        filePath: msg.file_path,
+        fileWidth: msg.file_width,
+        fileHeight: msg.file_height,
+        forwardedFromName: nameFor(msg),
+        forwardedFromChat: sourceName,
+      });
+    }
+
+    setForwardIds(null);
+    handleSelectChat(targetChatId);
   };
 
   // Начать чат с кем-то из справочника — контакт появляется в своём списке
@@ -1459,6 +1510,7 @@ const Chat: React.FC = () => {
 
   function groupRank(c: { id: string; section: ChatSection; groupLabel: string | null }) {
     if (c.section === 'general') return -1;
+    if (c.section === 'self') return -0.5;
     if (favorites.includes(c.id)) return 0;
     // Групповые чаты (созданные вручную, не отдел из панели супер-админа) —
     // отдельным блоком сразу после избранного, до отделов настоящих.
@@ -1480,6 +1532,15 @@ const Chat: React.FC = () => {
   // (настроены в панели супер-админа), внутри каждой — тоже по свежести.
   const chats = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
+    // Личный чат «для себя» — сразу за общим, до всех остальных: это заметки
+    // и пересылки, к нему возвращаются часто, и искать его среди переписок по
+    // свежести было бы неудобно.
+    ...(selfChatId ? [{
+      id: selfChatId,
+      name: selfChatName,
+      section: 'self' as ChatSection,
+      groupLabel: null as string | null,
+    }] : []),
     ...chatGroups.map(g => ({
       id: g.chat_id,
       name: g.name,
@@ -1541,6 +1602,7 @@ const Chat: React.FC = () => {
   } | null = (() => {
     if (!activeChat) return null;
     if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
+    if (selfChatId && activeChat === selfChatId) return { name: selfChatName, section: 'self' };
     if (/^group_\d+$/.test(activeChat)) {
       const group = chatGroups.find(g => g.chat_id === activeChat);
       return group
@@ -1777,6 +1839,35 @@ const Chat: React.FC = () => {
         </div>
       )}
 
+      {forwardIds && (
+        <ForwardModal
+          items={messages
+            .filter((m) => forwardIds.includes(m.id) && !m.deleted)
+            .sort((a, b) => a.id - b.id)
+            .map((m): ForwardPreviewItem => ({
+              id: m.id,
+              text: m.text,
+              author: nameFor(m),
+              hasImage: !!m.file_path,
+            }))}
+          targets={chats.map((c): ForwardTarget => ({
+            id: c.id,
+            name: c.name,
+            section: c.section,
+            avatarPath: (c as { avatarPath?: string | null }).avatarPath,
+            // В канал-объявление без прав переслать нельзя — сервер такое
+            // сообщение отклонит, так что и предлагать его незачем.
+            disabled: (() => {
+              const group = chatGroups.find((g) => g.chat_id === c.id);
+              if (!group?.announcements_only) return false;
+              return currentUserRole !== 'admin' && currentUserRole !== 'moderator';
+            })(),
+          }))}
+          onClose={() => setForwardIds(null)}
+          onConfirm={handleForward}
+        />
+      )}
+
       {peopleOpen && (
         <div className="modal-overlay" onClick={() => setPeopleOpen(false)}>
           <div className="modal-card people-modal" onClick={(e) => e.stopPropagation()}>
@@ -1852,6 +1943,8 @@ const Chat: React.FC = () => {
                     </div>
                   ) : activeChatMeta.section === 'group' ? (
                     <div className="status">{activeChatMeta.memberCount} участников</div>
+                  ) : activeChatMeta.section === 'self' ? (
+                    <div className="status is-broadcast">заметки и пересылки, видите только вы</div>
                   ) : (
                     <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
                       {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
@@ -1883,6 +1976,8 @@ const Chat: React.FC = () => {
             onCreateTask={isSectionAllowedFor(currentAccountType, 'tasks')
               ? (text) => { setTaskDraftText(text); goToSection('tasks'); }
               : undefined}
+            onStartReply={setReplyingMessage}
+            onForward={(ids) => setForwardIds(ids)}
           />
           {muted && (
             <div className="muted-banner">
@@ -1915,6 +2010,8 @@ const Chat: React.FC = () => {
             onSubmitEdit={handleEditMessage}
             onCancelEdit={() => setEditingMessage(null)}
             onRequestEditLast={requestEditLast}
+            replying={replyingMessage}
+            onCancelReply={() => setReplyingMessage(null)}
           />
         </main>
       )}

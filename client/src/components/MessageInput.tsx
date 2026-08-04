@@ -13,6 +13,13 @@ export interface EditingMessage {
   text: string;
 }
 
+export interface ReplyingMessage {
+  id: number;
+  text: string;
+  author: string;
+  hasImage: boolean;
+}
+
 interface MessageInputProps {
   onSend: (text: string, image?: PendingImage) => void;
   onTyping?: () => void;
@@ -25,6 +32,9 @@ interface MessageInputProps {
   onCancelEdit?: () => void;
   /** Стрелка вверх в пустом поле — правка последнего своего сообщения. */
   onRequestEditLast?: () => void;
+  /** Отвечаем на сообщение — такая же панель над полем, как при правке. */
+  replying?: ReplyingMessage | null;
+  onCancelReply?: () => void;
 }
 
 // Ограничение совпадает с серверным (MAX_MESSAGE_LENGTH в server/index.js):
@@ -43,6 +53,7 @@ interface StagedImage {
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend, onTyping, disabled, placeholder,
   editing, onSubmitEdit, onCancelEdit, onRequestEditLast,
+  replying, onCancelReply,
 }) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage | null>(null);
@@ -180,6 +191,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
       return;
     }
 
+    if (e.key === 'Escape' && replying) {
+      e.preventDefault();
+      onCancelReply?.();
+      return;
+    }
+
     // Стрелка вверх в пустом поле — правка последнего своего сообщения, как в
     // Telegram. Только когда поле действительно пустое: иначе она должна
     // двигать курсор по набранному тексту.
@@ -266,6 +283,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
               <div className="composer-editing-text">{editing.text}</div>
             </div>
             <button type="button" className="composer-editing-cancel" onClick={cancelEdit} aria-label="Отменить редактирование">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
+        )}
+
+        {/* Ответ и правка одновременно невозможны: правка занимает поле ввода
+            текстом исходного сообщения, отвечать в этот момент нечем. */}
+        {!editing && replying && (
+          <div className="composer-editing composer-replying">
+            <svg className="composer-editing-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 17-5-5 5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
+            <div className="composer-editing-body">
+              <div className="composer-editing-title">Ответ · {replying.author}</div>
+              <div className="composer-editing-text">
+                {replying.text || (replying.hasImage ? '📷 Фото' : '')}
+              </div>
+            </div>
+            <button type="button" className="composer-editing-cancel" onClick={() => onCancelReply?.()} aria-label="Отменить ответ">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
             </button>
           </div>

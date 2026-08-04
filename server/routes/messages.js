@@ -164,9 +164,14 @@ router.get('/:chatId', verifyToken, (req, res) => {
     const messages = useCursor
       ? db.prepare(`
           SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
+                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat,
+                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
+                 COALESCE(ru.display_name, ru.username) AS reply_to_author,
                  (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
           FROM messages m
           JOIN users u ON m.sender_id = u.id
+          LEFT JOIN messages rm ON rm.id = m.reply_to_id
+          LEFT JOIN users ru ON ru.id = rm.sender_id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
           WHERE m.chat_id = ? AND m.id < ?
           ORDER BY m.id DESC
@@ -174,9 +179,14 @@ router.get('/:chatId', verifyToken, (req, res) => {
         `).all(req.userId, chatId, before, limit)
       : db.prepare(`
           SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
+                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat,
+                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
+                 COALESCE(ru.display_name, ru.username) AS reply_to_author,
                  (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
           FROM messages m
           JOIN users u ON m.sender_id = u.id
+          LEFT JOIN messages rm ON rm.id = m.reply_to_id
+          LEFT JOIN users ru ON ru.id = rm.sender_id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
           WHERE m.chat_id = ?
           ORDER BY m.id DESC
@@ -197,6 +207,12 @@ router.get('/:chatId', verifyToken, (req, res) => {
         m.file_path = null;
         m.file_width = null;
         m.file_height = null;
+      }
+      // То же и для цитаты: ответить успели, а исходное потом удалили —
+      // содержимое не должно уехать наружу окольным путём, через ответ.
+      if (m.reply_to_deleted) {
+        m.reply_to_text = '';
+        m.reply_to_file = null;
       }
     }
 

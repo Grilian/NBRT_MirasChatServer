@@ -10,6 +10,8 @@ const { isValidLogin, isReservedLogin, isValidPassword, isValidDisplayName, isVa
 const { deleteAvatarFile } = require('../utils/files');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { clearExpiredStatuses } = require('../services/statusExpiry');
+const { selfChatId } = require('../services/chatParticipants');
+const { getSelfChatName } = require('../services/appSettings');
 const router = express.Router();
 
 const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
@@ -102,6 +104,11 @@ router.get('/me', verifyToken, (req, res) => {
       status_custom: user.status_custom || null,
       status_expires_at: user.status_expires_at || null,
       created_at: user.created_at || null,
+      // Личный чат «для себя»: его chat_id и название, заданное в панели.
+      // Отдаём отсюда, чтобы клиенту не понадобился отдельный запрос ради
+      // одной строки — этот ответ он и так забирает при каждом входе.
+      self_chat_id: selfChatId(user.id),
+      self_chat_name: getSelfChatName(),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

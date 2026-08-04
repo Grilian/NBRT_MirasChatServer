@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   getAutoLaunch: () => ipcRenderer.invoke('autostart:get'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
-  setUnreadBadge: (count) => ipcRenderer.send('unread:set', count),
+  setUnreadBadge: (count, badgeDataUrl) => ipcRenderer.send('unread:set', count, badgeDataUrl),
   focusWindow: () => ipcRenderer.send('window:focus'),
   flashWindow: () => ipcRenderer.send('window:flash'),
   onFocusChange: (callback) => {

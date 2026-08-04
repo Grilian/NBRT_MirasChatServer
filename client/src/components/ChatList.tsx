@@ -2,7 +2,7 @@ import React from 'react';
 import Avatar from './Avatar';
 import { formatChatListTime } from '../utils/time';
 
-export type ChatSection = 'general' | 'staff' | 'group';
+export type ChatSection = 'general' | 'staff' | 'group' | 'self';
 
 interface Chat {
   id: string;
@@ -58,6 +58,7 @@ function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOp
       online={chat.online}
       isGeneral={chat.section === 'general'}
       isGroup={chat.section === 'group'}
+      isSelf={chat.section === 'self'}
     />
   );
   if (chat.userId) {
