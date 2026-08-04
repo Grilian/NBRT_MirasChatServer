@@ -33,10 +33,10 @@
 - Картинка в пузыре: `.bubble-image:not(:first-child)` — правило намеренно по «не первый ребёнок», а не по конкретному соседу. Отрицательный верхний отступ (картинка в край пузыря) верен, только когда над ней ничего нет; на имени автора этот баг ловили один раз, на «Переслано от» — второй.
 
 **Состояние миграций БД** (порядок применения)
-- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only` → `messages.sender_ip` → `users.status_expires_at` → `messages.reply_to_id`/`forwarded_from_name`/`forwarded_from_chat` → `message_hidden` → `messages.read_at` → `message_reactions`. Все идемпотентны; на проде накатано по `messages.reply_to_id` включительно (сервер обновлён), `message_hidden` и всё, что после, — ещё нет.
+- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only` → `messages.sender_ip` → `users.status_expires_at` → `messages.reply_to_id`/`forwarded_from_name`/`forwarded_from_chat` → `message_hidden` → `messages.read_at` → `message_reactions`. Все идемпотентны, накатаны на проде.
 
 **Текущая версия и деплой**
-- Прод сейчас: 1.5.11 на всех платформах (сервер/веб/Windows/Android) — versionCode 28 для Android.
+- Прод сейчас: 1.5.12 на всех платформах (сервер/веб/Windows/Android) — versionCode 29 для Android.
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
