@@ -5,6 +5,7 @@ import ChatList, { ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
 import MessageInput, { EditingMessage, PendingImage, ReplyingMessage } from '../components/MessageInput';
 import ForwardModal, { ForwardPreviewItem, ForwardTarget } from '../components/ForwardModal';
+import DeleteMessagesModal, { DeleteRequest } from '../components/DeleteMessagesModal';
 import SettingsPanel from '../components/SettingsPanel';
 import ProfileEdit from '../components/ProfileEdit';
 import DirectoryModal from '../components/DirectoryModal';
@@ -274,6 +275,8 @@ const Chat: React.FC = () => {
   const [replyingMessage, setReplyingMessage] = useState<ReplyingMessage | null>(null);
   // Сообщения, выбранные для пересылки — открывают выбор чата-получателя.
   const [forwardIds, setForwardIds] = useState<number[] | null>(null);
+  // Запрос на удаление — открывает диалог с выбором области действия.
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   // Правка сообщения живёт здесь, а не в ленте: текст уезжает в поле ввода
   // (как в Telegram), а поле ввода — сосед ленты, общий родитель у них тут.
   const [editingMessage, setEditingMessage] = useState<EditingMessage | null>(null);
@@ -760,6 +763,26 @@ const Chat: React.FC = () => {
       // локально мы не знаем, какое сообщение стало последним, если удалили
       // как раз его.
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
+    });
+
+    // «Удалить только у себя»: сообщение остаётся у всех остальных, поэтому
+    // событие приходит только в свою же комнату. Убираем его из ленты совсем —
+    // в отличие от deleted, где строка ещё живёт со снятым содержимым.
+    newSocket.on('message_hidden', (data: { id: number; chat_id: string }) => {
+      setMessages(prev => prev.filter(m => m.id !== data.id));
+      api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
+      refetchUnread();
+    });
+
+    // Прав убрать у всех не хватило — сервер отказал. Сообщаем честно, вместо
+    // того чтобы молча оставить сообщение на месте.
+    newSocket.on('message_delete_denied', () => {
+      pushToast({
+        chatId: 'delete-denied',
+        title: 'Не удалось удалить',
+        body: 'Убрать чужое сообщение у всех может владелец группы или администрация.',
+        avatarPath: null,
+      });
     });
 
     // Массовое удаление создателем группы — тот же эффект, что и одиночное
@@ -1399,23 +1422,50 @@ const Chat: React.FC = () => {
     }
   };
 
-  const handleDeleteMessage = (id: number) => {
-    if (!socket) return;
-    socket.emit('message_delete', { id });
+  // Удаление всегда идёт через диалог: у него есть область действия («только у
+  // меня» / «у всех»), и выбрать её надо до отправки. Само удаление — в
+  // performDelete, а тут только собираем запрос и решаем, что предложить.
+  const requestDelete = (ids: number[]) => {
+    if (!ids.length || !activeChatMeta) return;
+
+    const mineOnly = ids.every((id) => {
+      const msg = messages.find((m) => m.id === id);
+      return !!msg && msg.sender_id === currentUserId;
+    });
+
+    // Право убрать у всех: своё — всегда; чужое — в личной переписке (там
+    // собеседник один), а в группе и общем чате только владельцу группы или
+    // администрации. Это зеркало серверной canDeleteForEveryone: клиент лишь
+    // не предлагает того, что сервер всё равно отклонит.
+    const isShared = activeChatMeta.section === 'group' || activeChatMeta.section === 'general';
+    const isAdmin = currentUserRole === 'admin' || currentUserRole === 'moderator';
+    const canDeleteForEveryone = mineOnly
+      || (isShared ? (!!activeChatMeta.isGroupOwner || isAdmin) : true);
+
+    setDeleteRequest({
+      ids,
+      partnerName: activeChatMeta.section === 'staff' ? activeChatMeta.name : null,
+      canDeleteForEveryone,
+      isGroup: isShared,
+    });
   };
 
-  // Владелец группы может стирать чужие сообщения — обычный message_delete
-  // (сокет) такое не позволяет, поэтому для него отдельная REST-ручка на
-  // весь список разом. Для своих сообщений (в любом чате, не только группе)
-  // ограничения по владению сокет и так проверяет сам — просто шлём
-  // message_delete на каждый id.
-  const handleDeleteMessages = (ids: number[]) => {
-    if (activeChatMeta?.chatGroupId && activeChatMeta.isGroupOwner) {
-      api.post(`/groups/${activeChatMeta.chatGroupId}/messages/delete`, { ids }).catch(console.error);
+  const performDelete = (forEveryone: boolean) => {
+    const request = deleteRequest;
+    setDeleteRequest(null);
+    if (!request || !socket) return;
+
+    // Владелец/администрация в группе снимают чужие сообщения пачкой одной
+    // REST-ручкой — сокет по одному сообщению за раз тут был бы десятком
+    // круговых обходов. Всё остальное (в том числе «скрыть у себя») идёт
+    // сокетом: там область действия передаётся флагом.
+    const bulkInGroup = forEveryone && request.isGroup && activeChatMeta?.chatGroupId && request.ids.length > 1;
+    if (bulkInGroup) {
+      api.post(`/groups/${activeChatMeta!.chatGroupId}/messages/delete`, { ids: request.ids }).catch(console.error);
       return;
     }
-    if (!socket) return;
-    for (const id of ids) socket.emit('message_delete', { id });
+
+    for (const id of request.ids) socket.emit('message_delete', { id, forEveryone });
   };
 
   const handleTyping = () => {
@@ -1839,6 +1889,14 @@ const Chat: React.FC = () => {
         </div>
       )}
 
+      {deleteRequest && (
+        <DeleteMessagesModal
+          request={deleteRequest}
+          onCancel={() => setDeleteRequest(null)}
+          onConfirm={performDelete}
+        />
+      )}
+
       {forwardIds && (
         <ForwardModal
           items={messages
@@ -1962,15 +2020,14 @@ const Chat: React.FC = () => {
             messages={messages}
             currentUserId={currentUserId}
             showAuthors={activeChat === GENERAL_CHAT_ID || activeChatMeta?.section === 'group'}
-            canDeleteAnyMessage={!!activeChatMeta?.isGroupOwner}
-            onDeleteMessages={handleDeleteMessages}
+            onDeleteMessages={requestDelete}
             onScrollTop={loadMoreMessages}
             hasMore={hasMore}
             loadingMore={loadingMore}
             unreadCount={activeChat ? unreadCounts[activeChat] : 0}
             onStartEdit={(id, text) => setEditingMessage({ id, text })}
             editingId={editingMessage?.id ?? null}
-            onDeleteMessage={handleDeleteMessage}
+            onDeleteMessage={(id) => requestDelete([id])}
             // Аккаунтам «Интернет» раздел «Задачи» не положен — пункт меню им
             // не показываем вовсе, иначе он молча возвращал бы в чаты.
             onCreateTask={isSectionAllowedFor(currentAccountType, 'tasks')

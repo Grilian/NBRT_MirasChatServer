@@ -81,6 +81,30 @@ function replyPreviewOf(replyToId) {
   };
 }
 
+// Кто может убрать сообщение у ВСЕХ. Своё — всегда. Чужое: в личной переписке
+// любой из двоих (собеседник ровно один, право симметрично), в общем чате и
+// группах — владелец группы либо орг-администрация. Обычному участнику группы
+// чужое доступно только «скрыть у себя»: иначе один человек мог бы вычистить
+// переписку у полусотни людей, и восстановить её смог бы только админ
+// запросом к базе (содержимое-то остаётся, но из интерфейса пропадает).
+function canDeleteForEveryone(message, userId) {
+  if (Number(message.sender_id) === Number(userId)) return true;
+
+  const groupMatch = String(message.chat_id).match(/^group_(\d+)$/);
+  if (groupMatch) {
+    const membership = db.prepare(
+      'SELECT role FROM chat_group_members WHERE chat_group_id = ? AND user_id = ?'
+    ).get(Number(groupMatch[1]), userId);
+    if (membership && membership.role === 'owner') return true;
+    return canPostAnnouncement(userId); // admin/moderator по users.role
+  }
+
+  if (message.chat_id === 'general') return canPostAnnouncement(userId);
+
+  // Личная переписка: участие уже проверено вызывающим кодом.
+  return true;
+}
+
 function clientIpOf(socket) {
   const forwarded = socket.handshake.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.trim()) {
@@ -630,13 +654,35 @@ io.on('connection', (socket) => {
   // базе — удаление лишь прячет сообщение из интерфейса (routes/messages.js
   // отдаёт клиенту пустые text/file_path, когда deleted=1). Физически строка
   // и файл не трогаются вообще ни при каких обстоятельствах.
-  socket.on('message_delete', ({ id }) => {
+  // forEveryone решает область: без него сообщение прячется только у того, кто
+  // удаляет (message_hidden), с ним — исчезает у всех (deleted=1). Своё можно
+  // убрать у всех всегда; чужое — в личной переписке любому её участнику (там
+  // собеседник ровно один, и это симметрично), а в группе только владельцу
+  // группы и орг-администрации: иначе любой из полусотни участников мог бы
+  // стереть чужую реплику у всех разом.
+  socket.on('message_delete', ({ id, forEveryone }) => {
     try {
-      const row = db.prepare('SELECT chat_id, sender_id FROM messages WHERE id = ?').get(id);
-      if (!row || Number(row.sender_id) !== Number(socket.userId)) return;
+      const userId = Number(socket.userId);
+      if (!userId) return;
+
+      const row = db.prepare('SELECT id, chat_id, sender_id, deleted FROM messages WHERE id = ?').get(id);
+      if (!row || row.deleted) return;
+      if (!isParticipant(row.chat_id, userId)) return;
+
+      if (!forEveryone) {
+        db.prepare('INSERT OR IGNORE INTO message_hidden (message_id, user_id, hidden_at) VALUES (?, ?, ?)')
+          .run(row.id, userId, Date.now());
+        // Только этому человеку и только в его сессии — остальных это не касается.
+        io.to('user:' + userId).emit('message_hidden', { id: row.id, chat_id: row.chat_id });
+        return;
+      }
+
+      if (!canDeleteForEveryone(row, userId)) {
+        socket.emit('message_delete_denied', { id: row.id, chat_id: row.chat_id });
+        return;
+      }
 
       db.prepare('UPDATE messages SET deleted = 1 WHERE id = ?').run(id);
-
       emitToChat(row.chat_id, 'message_deleted', { id, chat_id: row.chat_id }, row.sender_id);
     } catch (e) {
       console.error('Ошибка удаления сообщения:', e);

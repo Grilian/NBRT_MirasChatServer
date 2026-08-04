@@ -25,8 +25,11 @@
 - Задача: `{id, title, description, status, due_at, created_by, participants[], can_edit, archived}` — см. `server/routes/tasks.js`. `status` — `not_started`/`in_progress`/`done`.
 - Статус профиля: `users.status_preset` (пресет из фиксированного набора) + `users.status_custom` (свой текст) — взаимоисключающие, см. `utils/statusMeta.ts`.
 
+- Область удаления сообщения: `forEveryone` в сокет-событии `message_delete`. Без него — персональное скрытие (таблица `message_hidden`, per-user), сообщение убирается только у того, кто удаляет; с ним — `deleted=1`, у всех. Право убрать у всех (`canDeleteForEveryone` в `index.js`): своё — всегда, чужое в личной переписке — любому из двоих, чужое в группе/общем чате — только владельцу группы или орг-администрации (`users.role` admin/moderator). Тот же набор прав у REST-ручки массового удаления (`requireGroupCleaner` в `routes/groups.js`). Скрытое фильтруется из истории, превью последнего сообщения и счётчиков непрочитанного — везде через `NOT EXISTS ... message_hidden`, а не в JS после выборки (иначе страница пагинации приезжала бы короче лимита, а `hasMore` врал).
+- Картинка в пузыре: `.bubble-image:not(:first-child)` — правило намеренно по «не первый ребёнок», а не по конкретному соседу. Отрицательный верхний отступ (картинка в край пузыря) верен, только когда над ней ничего нет; на имени автора этот баг ловили один раз, на «Переслано от» — второй.
+
 **Состояние миграций БД** (порядок применения)
-- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only`. Все идемпотентны, накатаны на проде.
+- `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only` → `messages.sender_ip` → `users.status_expires_at` → `messages.reply_to_id`/`forwarded_from_name`/`forwarded_from_chat` → `message_hidden`. Все идемпотентны; на проде накатано по `messages.reply_to_id` включительно (сервер обновлён), `message_hidden` — ещё нет.
 
 **Текущая версия и деплой**
 - Прод сейчас: 1.5.11 на всех платформах (сервер/веб/Windows/Android) — versionCode 28 для Android.

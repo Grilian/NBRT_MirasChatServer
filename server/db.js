@@ -283,6 +283,22 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id);
 
+  -- «Удалить только у себя». Отдельно от messages.deleted: тот значит «убрано
+  -- у всех», а здесь — персональное скрытие, когда человек убирает сообщение
+  -- из своей переписки, не трогая её у собеседника. Содержимое, как и при
+  -- обычном удалении, остаётся в messages нетронутым (юридическое требование
+  -- хранить переписку целиком) — прячется только выдача конкретному человеку.
+  CREATE TABLE IF NOT EXISTS message_hidden (
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    hidden_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id),
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_message_hidden_user ON message_hidden(user_id);
+
   -- Задачи-поручения. Отдельно от календарных «задач» (is_task на событии,
   -- привязаны к дате): здесь может быть несколько причастных, а не только
   -- владелец события, и видимость строго по составу task_participants —

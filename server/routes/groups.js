@@ -248,10 +248,16 @@ router.delete('/:id/members/:userId', verifyToken, requireMember, (req, res) => 
   }
 });
 
-// Удаление выбранных сообщений создателем — не только своих: то, ради чего
-// эта ручка вообще заведена отдельно от обычного message_delete (сокет),
-// который трогает только сообщение своего отправителя.
-router.post('/:id/messages/delete', verifyToken, requireMember, requireOwner, (req, res) => {
+// Массовое удаление чужих сообщений в группе — владелец либо орг-администрация
+// (те же права, что и у одиночного удаления «для всех», см. canDeleteForEveryone
+// в index.js). Обычный участник свои сообщения удаляет сокетом по одному, а
+// чужие может только скрыть у себя.
+function requireGroupCleaner(req, res, next) {
+  if (req.groupRole === 'owner' || canPostAnnouncement(req.userId)) return next();
+  return res.status(403).json({ error: 'Удалять чужие сообщения может владелец группы или администрация' });
+}
+
+router.post('/:id/messages/delete', verifyToken, requireMember, requireGroupCleaner, (req, res) => {
   try {
     const ids = Array.isArray(req.body.ids)
       ? Array.from(new Set(req.body.ids.map(Number).filter(Number.isInteger)))

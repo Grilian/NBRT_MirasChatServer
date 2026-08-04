@@ -28,17 +28,20 @@ router.get('/', verifyToken, (req, res) => {
     // несколько получателей, и общий status значит лишь "прочитано хоть
     // кем-то", а не "прочитано мной" — иначе бейдж пропадал бы у всех, как
     // только кто-то один открыл чат.
+    // Скрытое лично этим человеком («удалить только у себя») в счётчик не
+    // берём: открыть его он всё равно не сможет, а бейдж висел бы навсегда.
     const personalRows = db.prepare(`
       SELECT chat_id, COUNT(*) AS count
-      FROM messages
+      FROM messages m
       WHERE
           sender_id != ?
           AND status != 'read'
           AND (deleted IS NULL OR deleted = 0)
           AND chat_id != 'general'
           AND chat_id NOT LIKE 'group\\_%' ESCAPE '\\'
+          AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
       GROUP BY chat_id
-    `).all(currentUserId);
+    `).all(currentUserId, currentUserId);
 
     const sharedRows = db.prepare(`
       SELECT m.chat_id, COUNT(*) AS count
@@ -49,8 +52,9 @@ router.get('/', verifyToken, (req, res) => {
           AND r.message_id IS NULL
           AND (m.deleted IS NULL OR m.deleted = 0)
           AND (m.chat_id = 'general' OR m.chat_id LIKE 'group\\_%' ESCAPE '\\')
+          AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
       GROUP BY m.chat_id
-    `).all(currentUserId, currentUserId);
+    `).all(currentUserId, currentUserId, currentUserId);
 
     const unreadCounts = {};
     [...personalRows, ...sharedRows].forEach(row => {

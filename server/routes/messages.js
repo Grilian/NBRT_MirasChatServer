@@ -88,15 +88,20 @@ router.post('/upload-image', verifyToken, (req, res) => {
 // подобрав их id. Фильтруем по участию текущего пользователя.
 router.get('/meta/last', verifyToken, (req, res) => {
   try {
+    // «Последнее» считаем персонально: сообщение, скрытое этим человеком у
+    // себя, не должно оставаться превью его чата — там встаёт предыдущее.
     const rows = db.prepare(`
       SELECT m.chat_id, m.text, m.file_path, m.created_at, m.deleted
       FROM messages m
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
         FROM messages
+        WHERE NOT EXISTS (
+          SELECT 1 FROM message_hidden h WHERE h.message_id = messages.id AND h.user_id = ?
+        )
         GROUP BY chat_id
       ) latest ON latest.chat_id = m.chat_id AND latest.max_id = m.id
-    `).all();
+    `).all(req.userId);
 
     const result = {};
     rows.forEach(row => {
@@ -174,9 +179,10 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LEFT JOIN users ru ON ru.id = rm.sender_id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
           WHERE m.chat_id = ? AND m.id < ?
+            AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
           ORDER BY m.id DESC
           LIMIT ?
-        `).all(req.userId, chatId, before, limit)
+        `).all(req.userId, chatId, before, req.userId, limit)
       : db.prepare(`
           SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, u.username, u.display_name,
                  m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat,
@@ -189,9 +195,10 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LEFT JOIN users ru ON ru.id = rm.sender_id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
           WHERE m.chat_id = ?
+            AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
           ORDER BY m.id DESC
           LIMIT ? OFFSET ?
-        `).all(req.userId, chatId, limit, offset);
+        `).all(req.userId, chatId, req.userId, limit, offset);
 
     // Переворачиваем чтобы старые были в начале
     messages.reverse();
@@ -216,11 +223,19 @@ router.get('/:chatId', verifyToken, (req, res) => {
       }
     }
 
-    // Есть ли что-то ещё выше самого старого из отданных
+    // Есть ли что-то ещё выше самого старого из отданных. Скрытые лично этим
+    // человеком не считаем: иначе «загрузить ещё» обещало бы страницу, которая
+    // после фильтрации окажется пустой, и прокрутка вверх упиралась бы в
+    // бесконечную «Загрузку…».
     const oldestId = messages.length ? messages[0].id : null;
     const hasMore = oldestId === null
       ? false
-      : db.prepare('SELECT 1 FROM messages WHERE chat_id = ? AND id < ? LIMIT 1').get(chatId, oldestId) !== undefined;
+      : db.prepare(`
+          SELECT 1 FROM messages m
+          WHERE m.chat_id = ? AND m.id < ?
+            AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+          LIMIT 1
+        `).get(chatId, oldestId, req.userId) !== undefined;
 
     res.json({ messages, hasMore });
   } catch (e) {

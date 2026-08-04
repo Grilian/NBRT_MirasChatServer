@@ -635,10 +635,13 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
 }
 .bubble-image:only-child { margin-bottom: -7px; border-radius: var(--radius-md); }
-/* В общем чате и группах над картинкой стоит имя автора — отрицательный
-   верхний отступ затягивал её прямо на эту строку, и картинка налезала на имя.
-   Под именем картинка встаёт обычным блоком, со всеми скруглёнными углами. */
-.bubble-author + .bubble-image { margin-top: 4px; border-radius: var(--radius-md); }
+/* Отрицательный верхний отступ затягивает картинку под верхний край пузыря —
+   это верно, только когда над ней ничего нет. Стоит появиться строке выше
+   (имя автора в общем чате, «Переслано от», цитата ответа), и картинка
+   наползает на неё. Правило намеренно общее — по «не первый ребёнок», а не по
+   конкретному соседу: на имени автора этот баг уже ловили один раз, на
+   пересылке — второй, и следующий элемент над картинкой поймал бы третий. */
+.bubble-image:not(:first-child) { margin-top: 4px; border-radius: var(--radius-md); }
 .bubble-image img { width: 100%; height: 100%; object-fit: cover; display: block; max-height: 320px; }
 
 .lightbox-overlay {
@@ -1204,6 +1207,16 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   box-shadow: var(--shadow-lg);
 }
 .modal-card .conv-head { background: var(--paper-raised); }
+/* Подтверждение удаления: область действия выбирается здесь, а не в
+   системном window.confirm — там галочку «также у собеседника» не показать. */
+.confirm-modal { max-width: 400px; }
+.confirm-body { padding: 14px 20px 4px; display: flex; flex-direction: column; gap: 10px; }
+.confirm-text { font-size: 14px; color: var(--ink-muted); margin: 0; }
+.confirm-warning { font-size: 14px; color: var(--ink); margin: 0; font-weight: 500; }
+.confirm-check { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.confirm-check input { accent-color: var(--accent); width: 17px; height: 17px; flex: none; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
+
 /* Пересылка: сверху — что уедет, снизу — куда. */
 .forward-modal { max-width: 460px; }
 .forward-preview {

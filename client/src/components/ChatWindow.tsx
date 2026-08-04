@@ -45,7 +45,6 @@ interface ChatWindowProps {
   editingId?: number | null;
   onDeleteMessage: (id: number) => void;
   /** Создатель группы может удалять чужие сообщения — не только свои. */
-  canDeleteAnyMessage?: boolean;
   onDeleteMessages?: (ids: number[]) => void;
   /** Завести поручение по тексту сообщения — открывает раздел «Задачи». */
   onCreateTask?: (text: string) => void;
@@ -117,7 +116,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
-  onStartEdit, editingId, onDeleteMessage, canDeleteAnyMessage, onDeleteMessages, onCreateTask,
+  onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
@@ -136,9 +135,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Режим выбора доступен всем — свои сообщения может отметить кто угодно,
-  // чужие может отметить только владелец группы (canDeleteAnyMessage). При
-  // уходе из чата и на смену прав гасим его, а не оставляем висеть с чужими id.
+  // Режим выбора доступен всем и на любых сообщениях. При уходе из чата гасим
+  // его, а не оставляем висеть с id из прошлой переписки.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
@@ -320,11 +318,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     setMenuFor(null);
   };
 
+  // Спрашивать через window.confirm больше нельзя: у удаления появилась
+  // область действия («только у меня» / «у всех»), а её в системном окне не
+  // покажешь. Решение принимает диалог в Chat.tsx, сюда возвращается только
+  // выбранный вариант.
   const confirmDelete = (id: number) => {
     setMenuFor(null);
-    if (window.confirm('Удалить сообщение без возможности восстановления?')) {
-      onDeleteMessage(id);
-    }
+    onDeleteMessage(id);
   };
 
   useEffect(() => {
@@ -354,10 +354,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const confirmBulkDelete = () => {
     if (selectedIds.size === 0 || !onDeleteMessages) return;
-    if (window.confirm(`Удалить выбранные сообщения (${selectedIds.size}) без возможности восстановления?`)) {
-      onDeleteMessages(Array.from(selectedIds));
-      exitSelectMode();
-    }
+    onDeleteMessages(Array.from(selectedIds));
+    exitSelectMode();
   };
 
   if (!chatId) {
@@ -415,9 +413,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         {rows.map(({ message: msg, startsGroup, endsGroup, daySeparator }) => {
           const mine = msg.sender_id === currentUserId;
           const isEditing = editingId === msg.id;
-          // В режиме выбора отмечать можно своё сообщение всегда, а чужое —
-          // только владельцу группы (см. canDeleteAnyMessage в Chat.tsx).
-          const selectable = mine || !!canDeleteAnyMessage;
+          // Отмечать можно любое сообщение: своё удаляется как раньше, чужое —
+          // как минимум скрывается у себя. Хватит ли прав убрать его у всех,
+          // решают диалог удаления и сервер, а не доступность галочки.
+          const selectable = true;
 
           const isSelected = selectedIds.has(msg.id);
           const className = [
@@ -568,18 +567,19 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 Создать задачу
               </button>
             )}
+            {/* Править можно только своё — чужой текст переписывать нельзя ни
+                при каких правах. Удалять доступно на любом: область удаления
+                (у себя или у всех) выбирается в диалоге и решается сервером. */}
             {menuMine && (
-              <>
-                <button type="button" onClick={() => startEdit(menuMsg)}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-                  Редактировать
-                </button>
-                <button type="button" className="danger" onClick={() => confirmDelete(menuFor.id)}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
-                  Удалить
-                </button>
-              </>
+              <button type="button" onClick={() => startEdit(menuMsg)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                Редактировать
+              </button>
             )}
+            <button type="button" className="danger" onClick={() => confirmDelete(menuFor.id)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+              Удалить
+            </button>
           </div>
         );
       })()}
