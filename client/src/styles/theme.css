@@ -868,11 +868,17 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 /* Плашка приложенной картинки над полем ввода — превью до отправки, с
    индикатором загрузки, пока файл ещё грузится на сервер. */
-.composer-attachment { display: flex; align-items: center; gap: 8px; }
+/* Картинок может быть много — превью переносятся на новую строку, а не
+   выдавливают композер за край. */
+.composer-attachment { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .composer-attachment-preview {
-  position: relative; width: 52px; height: 52px; border-radius: var(--radius-md); overflow: hidden;
+  position: relative; width: 52px; height: 52px; border-radius: var(--radius-md); overflow: visible;
   background: var(--paper-sunken); flex: none;
 }
+.composer-attachment-preview img { border-radius: var(--radius-md); }
+/* Не влезающие в лимит одной отправки — приглушены: видно, что они прикреплены,
+   но уйдут следующей пачкой. */
+.composer-attachment-preview.is-overflow { opacity: .45; }
 .composer-attachment-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .composer-attachment-spinner {
   position: absolute; inset: 0; background: color-mix(in srgb, black 40%, transparent);
@@ -881,9 +887,13 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 @keyframes composer-spin { to { transform: rotate(360deg); } }
 .composer-attachment-error { font-size: 12.5px; color: var(--unread); }
+/* Крестик у каждого превью в углу: одной кнопкой на всю пачку убирать нечего,
+   а рядом с превью он ушёл бы в перенос вместе с картинками. */
 .composer-attachment-remove {
+  position: absolute; top: -6px; right: -6px; z-index: 1;
   border: none; background: var(--paper-sunken); color: var(--ink-muted); cursor: pointer;
-  width: 22px; height: 22px; border-radius: 50%; font-size: 15px; line-height: 1; flex: none;
+  width: 20px; height: 20px; border-radius: 50%; font-size: 14px; line-height: 1; flex: none;
+  box-shadow: var(--shadow-sm);
 }
 .composer-attachment-remove:hover { background: var(--row-hover); color: var(--unread); }
 
