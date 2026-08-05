@@ -3,6 +3,7 @@ import api from '../api/client';
 import { dayKeyOf, formatDayLong, instantOf, toDateInput } from '../calendar/dates';
 import { nameFor } from '../utils/user';
 import { TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskDraft, TaskItem, TaskPerson, TaskStatus } from './types';
+import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
 
 interface DirectoryEntry {
   id: number;
@@ -189,7 +190,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
 
           <div className="field">
             <label>Название</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={200} />
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus={AUTOFOCUS_ON_OPEN} maxLength={200} />
           </div>
 
           <div className="field">

@@ -9,6 +9,7 @@ import {
   EventDraft, RecurrenceFreq, REMINDER_OPTIONS, SeriesScope,
 } from './types';
 import { colorOfLayer } from './layers';
+import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
 
 interface Person {
   id: number;
@@ -315,7 +316,7 @@ const EventDialog: React.FC<EventDialogProps> = ({
             <label htmlFor="cal-title">Название</label>
             <input
               id="cal-title"
-              autoFocus
+              autoFocus={AUTOFOCUS_ON_OPEN}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder={isTask ? 'Что нужно сделать' : 'Например, планёрка'}

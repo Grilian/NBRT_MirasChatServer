@@ -41,6 +41,9 @@ interface ToastCardProps {
 // системных шторках. Порог в пикселях, а не в скорости: жест короткий,
 // скорость на телефоне слишком шумно измерять на паре событий touchmove.
 const SWIPE_DISMISS_PX = 48;
+// Ниже этого сдвига касание всё ещё считается тапом «открыть чат»: палец
+// никогда не стоит на месте идеально, и дрожание не должно съедать клик.
+const TAP_SLOP_PX = 8;
 
 const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDismiss }) => {
   const [paused, setPaused] = useState(false);
@@ -64,16 +67,19 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
     setDragY(Math.min(0, delta));
   };
 
-  const endDrag = () => {
+  const endDrag = (e: React.TouchEvent) => {
     if (touchStartY.current === null) return;
     touchStartY.current = null;
     setDragging(false);
     setPaused(false);
-    if (-dragY > SWIPE_DISMISS_PX) {
-      onDismiss(toast.chatId);
-    } else {
-      setDragY(0);
-    }
+
+    // Палец заметно двигали — это смахивание, а не тап. Гасим синтетический
+    // click, который браузер шлёт следом: он приходится по карточке и открыл
+    // бы чат, хотя уведомление именно что убирали.
+    if (-dragY > TAP_SLOP_PX) e.preventDefault();
+
+    if (-dragY > SWIPE_DISMISS_PX) onDismiss(toast.chatId);
+    else setDragY(0);
   };
 
   // Порядок эффектов важен: сначала сбрасываем остаток времени (новое

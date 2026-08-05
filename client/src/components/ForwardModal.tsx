@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import Avatar from './Avatar';
 import { ChatSection } from './ChatList';
+import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
 
 export interface ForwardTarget {
   id: string;
@@ -68,7 +69,7 @@ const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, on
             placeholder="Куда переслать…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            autoFocus
+            autoFocus={AUTOFOCUS_ON_OPEN}
           />
         </div>
 

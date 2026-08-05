@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
+import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
 
 interface DirectoryUser {
   id: number;
@@ -54,7 +55,7 @@ const DirectoryModal: React.FC<DirectoryModalProps> = ({ existingContactIds, onC
             placeholder="Поиск по имени"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            autoFocus
+            autoFocus={AUTOFOCUS_ON_OPEN}
           />
         </div>
 

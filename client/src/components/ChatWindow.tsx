@@ -354,8 +354,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // Обработчики висят на всей строке .msg, а не на пузыре: по требованию
   // пустая область слева и справа от сообщения тоже должна ловить нажатие.
   const touchGesture = useRef<{
-    startX: number; startY: number; anchorId: number; moved: boolean; sweeping: boolean;
+    startX: number; startY: number; anchorId: number;
+    moved: boolean; sweeping: boolean; startedSelection: boolean; menuWasOpen: boolean;
+    /** Что было отмечено до начала протяжки — диапазон добавляется к этому,
+        иначе новая протяжка стирала бы всё, отмеченное до неё. */
+    baseSelection: Set<number>;
   } | null>(null);
+
+  // Протяжка читает актуальное выделение из ref: колбэк долгого удержания
+  // живёт с того рендера, на котором завёлся таймер, и в state там уже старое.
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
 
   const messageIdAtPoint = (x: number, y: number): number | null => {
     const el = document.elementFromPoint(x, y)?.closest('[data-msg-id]');
@@ -367,29 +376,63 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // Android поверх нашего выделения поднимает свои маркеры и меню «Копировать».
   const [touchSelecting, setTouchSelecting] = useState(false);
 
+  // Во время протяжки-выделения лента не должна ехать под пальцем: сообщения
+  // уезжали бы, а elementFromPoint читал бы точку уже по новому содержимому —
+  // выделение прыгало по соседям. React вешает touchmove пассивно (17+), из
+  // его обработчика preventDefault не работает, поэтому слушатель свой.
+  const sweepingRef = useRef(false);
+
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const lockScroll = (e: TouchEvent) => { if (sweepingRef.current) e.preventDefault(); };
+    el.addEventListener('touchmove', lockScroll, { passive: false });
+    return () => el.removeEventListener('touchmove', lockScroll);
+    // Зависимость от chatId обязательна: без выбранного чата рендерится
+    // заглушка, контейнера ещё нет, и эффект с пустыми зависимостями навесил
+    // бы слушатель ровно один раз — в тот момент, когда вешать не на что.
+  }, [chatId]);
+
   const DRAG_THRESHOLD_PX = 12;
 
   const handleTouchStart = (e: React.TouchEvent, msg: Message) => {
     const touch = e.touches[0];
     clearLongPress();
 
-    // Уже в режиме выделения — протяжка тянет диапазон с этого касания сразу,
-    // долгого удержания ждать незачем: жест продолжает то, что уже начато.
+    // Палец лёг на кнопку внутри сообщения (картинка, цитата-переход,
+    // плашка реакции, галочка выбора) — у неё своё действие. Жест не заводим
+    // вовсе: иначе touchend погасил бы синтетический click ради меню, и
+    // картинка перестала бы открываться по тапу.
+    if ((e.target as HTMLElement).closest('button, a, input, [role="button"]')) {
+      touchGesture.current = null;
+      return;
+    }
+
     touchGesture.current = {
       startX: touch.clientX, startY: touch.clientY, anchorId: msg.id,
-      moved: false, sweeping: selectMode,
+      moved: false, sweeping: false, startedSelection: false,
+      // Открытое меню закрывает обработчик клика снаружи — он сработает на
+      // этом же touchstart. Без отметки тап по сообщению открывал бы меню
+      // заново, и закрыть его тапом было бы невозможно вовсе.
+      menuWasOpen: !!menuFor,
+      baseSelection: new Set(),
     };
 
-    if (selectMode) return;
-
+    // Таймер заводим и в режиме выделения: удержание там начинает новую
+    // протяжку. Обычное же движение пальцем в режиме выделения остаётся
+    // прокруткой — иначе до сообщений за пределами экрана было бы не
+    // добраться, а отметить их нужно ровно так же, как видимые.
     longPressTimer.current = setTimeout(() => {
       const gesture = touchGesture.current;
       longPressTimer.current = null;
       if (!gesture || gesture.moved) return; // палец уже увели — это была прокрутка
       gesture.sweeping = true;
+      gesture.startedSelection = true;
+      gesture.baseSelection = new Set(selectedIdsRef.current);
+      sweepingRef.current = true;
       setTouchSelecting(true);
       setSelectMode(true);
-      setSelectedIds(new Set([gesture.anchorId]));
+      setSelectedIds(new Set([...Array.from(gesture.baseSelection), gesture.anchorId]));
     }, LONG_PRESS_MS);
   };
 
@@ -412,8 +455,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       return;
     }
 
-    // В режиме выделения: ведём по сообщениям, всё между началом жеста и
-    // текущей точкой — выделено.
+    // Протяжка после удержания: всё между началом жеста и текущей точкой —
+    // выделено, поверх того, что было отмечено до неё.
     const overId = messageIdAtPoint(touch.clientX, touch.clientY);
     if (overId === null) return;
 
@@ -423,22 +466,38 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (from === -1 || to === -1) return;
 
     const [lo, hi] = from <= to ? [from, to] : [to, from];
-    setSelectedIds(new Set(ids.slice(lo, hi + 1)));
+    setSelectedIds(new Set([...Array.from(gesture.baseSelection), ...ids.slice(lo, hi + 1)]));
   };
 
   const handleTouchEnd = (e: React.TouchEvent, msg: Message) => {
     const gesture = touchGesture.current;
     clearLongPress();
     touchGesture.current = null;
+    sweepingRef.current = false;
     setTouchSelecting(false);
 
-    // Тап: не было ни долгого удержания (режим выделения не включился этим
-    // жестом), ни движения. Если уже сидели в выделении — обычный клик по
-    // сообщению отмечает его сам (см. onClick), меню тут не к месту.
-    if (!selectMode && gesture && !gesture.moved && !gesture.sweeping) {
-      const touch = e.changedTouches[0];
-      if (touch) openMenuAt(msg, touch.clientX, touch.clientY);
-    }
+    if (!gesture) return;
+    // Прокрутка — жеста не было, синтетику браузера не трогаем.
+    if (gesture.moved) return;
+
+    // Гасим синтетические mouse-события, которые браузер досылает после
+    // touchend, и делаем работу тапа сами. Полагаться на них нельзя: click
+    // приходит в ту же точку с задержкой, когда там уже нарисовано меню, и
+    // «нажимал» пункт под пальцем (ловили как самопроизвольную пересылку); а
+    // после долгого удержания он приходил по самому сообщению и тут же снимал
+    // только что поставленную отметку — режим выделения захлопывался сразу.
+    e.preventDefault();
+
+    // Долгое удержание уже сделало своё дело — сообщение отмечено, тапа не было.
+    if (gesture.startedSelection) return;
+
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+
+    // В режиме выделения тап отмечает/снимает, вне его — открывает меню
+    // (кроме случая, когда этим же тапом меню только что закрыли).
+    if (selectMode) toggleSelected(msg.id);
+    else if (!gesture.menuWasOpen) openMenuAt(msg, touch.clientX, touch.clientY);
   };
 
   // Отмена жеста системой (входящий звонок, смена окна) — это не отпускание
@@ -446,6 +505,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const handleTouchCancel = () => {
     clearLongPress();
     touchGesture.current = null;
+    sweepingRef.current = false;
     setTouchSelecting(false);
   };
 
@@ -459,11 +519,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  const reactionRemovedByPress = useRef(false);
+
   const startReactionLongPress = (messageId: number, userId: number) => {
     clearReactionLongPress();
+    reactionRemovedByPress.current = false;
     reactionPressTimer.current = setTimeout(() => {
+      reactionPressTimer.current = null;
+      reactionRemovedByPress.current = true;
       onRemoveReaction?.(messageId, userId);
     }, LONG_PRESS_MS);
+  };
+
+  const endReactionLongPress = (e: React.TouchEvent) => {
+    clearReactionLongPress();
+    // Реакцию только что сняли удержанием — плашки под пальцем уже нет, и
+    // синтетический click после touchend пришёлся бы по сообщению за ней,
+    // открыв контекстное меню на ровном месте.
+    if (reactionRemovedByPress.current) {
+      reactionRemovedByPress.current = false;
+      e.preventDefault();
+    }
   };
 
   useEffect(() => clearReactionLongPress, []);
@@ -709,7 +785,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       <button
                         type="button"
                         className="bubble-reply"
-                        onClick={(e) => { e.stopPropagation(); jumpToMessage(msg.reply_to_id!); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // В режиме выбора любая часть сообщения работает на
+                          // выбор — уводить к цитате отсюда некуда.
+                          if (selectMode) { toggleSelected(msg.id); return; }
+                          jumpToMessage(msg.reply_to_id!);
+                        }}
                         title="Перейти к сообщению"
                       >
                         <span className="bubble-reply-author">{msg.reply_to_author || 'Сообщение'}</span>
@@ -725,7 +807,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         type="button"
                         className="bubble-image"
                         style={msg.file_width && msg.file_height ? { aspectRatio: `${msg.file_width} / ${msg.file_height}` } : undefined}
-                        onClick={() => setLightboxUrl(resolveUploadUrl(msg.file_path))}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectMode) { toggleSelected(msg.id); return; }
+                          setLightboxUrl(resolveUploadUrl(msg.file_path));
+                        }}
                       >
                         <img src={resolveUploadUrl(msg.file_path) || ''} alt="" />
                       </button>
@@ -766,7 +852,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           role="button"
                           tabIndex={0}
                           title={`${nameFor(reaction.user)} — ${formatMoscowTime(new Date(reaction.created_at).toISOString())}`}
-                          onClick={(e) => { e.stopPropagation(); setReactionsFor(msg.id); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectMode) { toggleSelected(msg.id); return; }
+                            setReactionsFor(msg.id);
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReactionsFor(msg.id); }
                           }}
@@ -776,7 +866,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                             e.stopPropagation();
                             startReactionLongPress(msg.id, reaction.user.id);
                           } : undefined}
-                          onTouchEnd={clearReactionLongPress}
+                          onTouchEnd={endReactionLongPress}
                           onTouchMove={clearReactionLongPress}
                         >
                           <Avatar

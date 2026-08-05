@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import api from '../api/client';
 import MemberPicker from './MemberPicker';
+import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
 
 export interface CreatedGroup {
   id: number;
@@ -58,7 +59,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onCreated 
             placeholder="Название группы"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            autoFocus
+            autoFocus={AUTOFOCUS_ON_OPEN}
           />
         </div>
 
