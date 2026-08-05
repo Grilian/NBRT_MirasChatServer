@@ -10,8 +10,8 @@ android {
         // Поднимать вручную перед каждой сборкой APK (см. README, раздел
         // «Сборка Android-приложения»): versionCode должен строго расти,
         // иначе Android откажется ставить сборку поверх установленной.
-        versionCode 31
-        versionName "1.5.14"
+        versionCode 32
+        versionName "1.5.15"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
