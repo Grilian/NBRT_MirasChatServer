@@ -647,8 +647,28 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .lightbox-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 60;
   display: flex; align-items: center; justify-content: center; padding: 24px;
+  overflow: hidden;
+  /* Щипок и протяжку внутри просмотра разбирает наш код (см. ImageLightbox).
+     Без этого браузер забирал бы жест себе и масштабировал страницу целиком
+     вместе с интерфейсом, а не картинку. */
+  touch-action: none;
 }
-.lightbox-img { max-width: 100%; max-height: 100%; border-radius: var(--radius-md); }
+.lightbox-img {
+  max-width: 100%; max-height: 100%; border-radius: var(--radius-md);
+  /* Переход только для «сбросить» и двойного клика; во время самого жеста
+     класс is-zoomed его снимает, иначе картинка догоняла бы палец с
+     опозданием. */
+  transition: transform 160ms ease; transform-origin: center center;
+  user-select: none; -webkit-user-drag: none;
+}
+.lightbox-overlay.is-zoomed .lightbox-img { transition: none; cursor: grab; }
+.lightbox-overlay.is-zoomed .lightbox-img:active { cursor: grabbing; }
+.lightbox-reset {
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+  border: none; background: rgba(255, 255, 255, .16); color: #fff; cursor: pointer;
+  border-radius: var(--radius-pill); padding: 9px 16px; font-size: 13.5px; font-weight: 600;
+}
+.lightbox-reset:hover { background: rgba(255, 255, 255, .26); }
 .lightbox-close {
   position: absolute; top: 16px; right: 16px; border: none; background: rgba(255, 255, 255, .12);
   color: #fff; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center;
@@ -704,12 +724,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   border-radius: var(--radius-md); padding: 8px 12px; font-size: 14.5px; font-family: inherit;
 }
 
-/* Кнопка «к последним сообщениям» */
+/* Кнопка «к последним сообщениям» — тёмный круг над полосой ввода справа. */
 .jump-to-bottom {
-  position: absolute; right: 20px; bottom: 16px; z-index: 5;
-  width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer;
-  background: var(--sidebar); color: var(--ink-muted);
-  display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md);
+  position: absolute; right: 14px; bottom: 12px; z-index: 5;
+  width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--paper-raised); color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-lg);
 }
 .jump-to-bottom:hover { color: var(--accent); }
 .jump-badge {
@@ -718,25 +738,41 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   font: 600 12px/21px var(--font-ui); text-align: center;
 }
 
-/* Контекстное меню сообщения — правый клик (десктоп) / долгое нажатие (тач) */
-.msg-context-menu {
-  position: fixed; z-index: 40; background: var(--paper-raised); border: 1px solid var(--line);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-md); min-width: 180px; padding: 6px;
+/* Контекстное меню сообщения — правый клик (десктоп) / тап (тач).
+   Слой держит вместе плашку реакций и карточку с пунктами: позиция и подгонка
+   по краям экрана считаются на нём одном. */
+.msg-menu-layer {
+  position: fixed; z-index: 40;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
   transform: translate(-8px, 4px);
-  /* Пунктов стало больше (ряд реакций, пересылка в «Избранное», отметки), и на
-     невысоком окне меню перестаёт помещаться целиком — тогда прокручиваем его
-     внутри, а не пытаемся сдвинуть выше края. */
-  max-height: calc(100vh - 16px); overflow-y: auto;
+  max-height: calc(100vh - 16px);
 }
-.msg-context-menu button { width: 100%; text-align: left; border: none; background: none; padding: 9px 10px; border-radius: 6px; font-size: 14px; color: var(--ink); cursor: pointer; display: flex; align-items: center; gap: 10px; }
+.msg-context-menu {
+  background: var(--paper-raised); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); min-width: 232px; padding: 6px 0;
+  /* Пунктов много (пересылка в «Избранное», отметки), и на невысоком окне
+     карточка перестаёт помещаться — тогда прокручиваем её внутри, а не
+     пытаемся сдвинуть выше края экрана. Плашка реакций в прокрутку не
+     попадает: она вынесена из карточки и остаётся на месте. */
+  min-height: 0; overflow-y: auto;
+}
+.msg-context-menu button {
+  width: 100%; text-align: left; border: none; background: none; cursor: pointer;
+  display: flex; align-items: center; gap: 18px;
+  padding: 12px 18px; font-size: 15px; color: var(--ink);
+}
+/* Иконка не должна ужиматься под длинной подписью — ряд выравнивается по
+   одной вертикали во всех пунктах, как в референсе. */
+.msg-context-menu button > svg { flex: none; width: 20px; height: 20px; opacity: .85; }
+.msg-menu-label { flex: 1; min-width: 0; }
 .msg-context-menu button:hover { background: var(--paper-sunken); }
 .msg-context-menu button.danger { color: var(--unread); }
 .msg-context-menu button.danger:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
 /* «Прочитано в …» / «Изменено в …» — отметки, а не действия: не кликаются и
    не подсвечиваются при наведении. */
 .msg-menu-info {
-  padding: 7px 10px; font-size: 12.5px; color: var(--ink-faint);
-  border-top: 1px solid var(--line); margin-top: 4px;
+  padding: 8px 18px; font-size: 12.5px; color: var(--ink-faint);
+  border-top: 1px solid var(--line); margin-top: 6px;
 }
 .msg-menu-info + .msg-menu-info { border-top: none; margin-top: 0; padding-top: 0; }
 
@@ -770,26 +806,36 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 
 /* ---- Поле ввода ---- */
+/* Полоса ввода: смайлик и скрепка живут ВНУТРИ скруглённой полосы, отправка —
+   отдельным кругом снаружи справа (по референсу). Панели правки/ответа и
+   превью картинки идут отдельными строками над полосой, поэтому сам composer —
+   колонка, а строка ввода лежит в .composer-row. */
 .composer {
-  flex: none; display: flex; align-items: flex-end; gap: 10px; padding: 10px 18px 14px;
+  flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 12px;
   background: var(--sidebar); border-top: 1px solid var(--line);
   /* Панель смайликов позиционируется от composer'а — она разворачивается
      вверх, поверх ленты сообщений. */
   position: relative;
   border-radius: 0; transition: background var(--ease);
 }
+.composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.composer-bar {
+  flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 2px;
+  padding: 3px; background: var(--paper-sunken);
+  border-radius: 24px; border: 1px solid transparent;
+  transition: border-color var(--ease), background var(--ease);
+}
+.composer-bar:focus-within { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 /* Перетаскивание картинки прямо на composer — та же метафора, что вставка
    через Ctrl+V, только мышью. Подсветка всей полосы ввода, чтобы было видно,
    куда можно бросить файл, ещё до того, как он окажется над textarea. */
 .composer.is-drag-over { background: color-mix(in srgb, var(--accent) 10%, var(--sidebar)); }
 .composer-file-input { display: none; }
-.composer-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* Фон и скругление теперь на всей полосе (.composer-bar), поле внутри —
+   прозрачное: иначе получалась бы «плашка в плашке». */
 .composer-field {
   flex: 1; min-width: 0; position: relative; display: flex; align-items: center;
-  background: var(--paper-sunken); border-radius: var(--radius-lg);
-  border: 1px solid transparent; transition: border-color var(--ease), background var(--ease);
 }
-.composer-field:focus-within { border-color: var(--accent); background: var(--paper-raised); }
 
 /* Плашка приложенной картинки над полем ввода — превью до отправки, с
    индикатором загрузки, пока файл ещё грузится на сервер. */
@@ -836,7 +882,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .msg.is-editing .bubble { outline: 2px solid var(--accent); outline-offset: 1px; }
 .composer textarea {
   width: 100%; border: none; background: transparent; color: var(--ink); resize: none;
-  padding: 11px 16px; font-size: 14.5px; line-height: 1.35; max-height: 180px; overflow-y: auto;
+  padding: 9px 4px; font-size: 15px; line-height: 1.35; max-height: 180px; overflow-y: auto;
 }
 .composer textarea:focus { outline: none; }
 .composer textarea:disabled { opacity: .6; }
@@ -854,10 +900,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .send-btn:disabled { opacity: .45; cursor: default; }
 .send-btn:active:not(:disabled) { transform: scale(.94); }
 
+/* Внутри полосы кнопки без собственного фона — он был бы плашкой на плашке.
+   Подсветка появляется только при наведении. */
 .attach-btn, .emoji-btn {
-  flex: none; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
-  background: var(--paper-sunken); color: var(--ink-muted);
-  display: flex; align-items: center; justify-content: center; align-self: flex-end; margin-bottom: 2px;
+  flex: none; width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
+  background: none; color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; align-self: flex-end;
 }
 .attach-btn:hover:not(:disabled), .emoji-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
 .attach-btn:disabled, .emoji-btn:disabled { opacity: .45; cursor: default; }
@@ -1253,16 +1301,25 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   .reaction-chip-remove { display: none !important; }
 }
 
-/* Ряд быстрых реакций над пунктами контекстного меню. */
+/* Быстрые реакции — отдельная плашка-пилюля над карточкой меню (по референсу).
+   Набор задаётся в панели управления и бывает длиннее, чем влезает по ширине,
+   поэтому прокручивается вбок, а не переносится на вторую строку: перенос
+   ломал бы форму пилюли. */
 .msg-menu-reactions {
-  display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
+  display: flex; align-items: center; gap: 2px; flex: none;
+  padding: 5px 8px; max-width: min(340px, calc(100vw - 24px));
+  background: var(--paper-raised); border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-lg);
+  overflow-x: auto; scrollbar-width: none;
 }
+.msg-menu-reactions::-webkit-scrollbar { display: none; }
 .msg-menu-reaction {
-  border: none; background: none; cursor: pointer; font-size: 20px; line-height: 1;
-  padding: 4px 5px; border-radius: var(--radius-sm);
+  flex: none; border: none; background: none; cursor: pointer;
+  font-size: 26px; line-height: 1; width: 42px; height: 42px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
 }
 .msg-menu-reaction:hover { background: var(--row-hover); }
-.msg-menu-reaction.is-active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.msg-menu-reaction.is-active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
 .reactions-modal { max-width: 380px; }
 .reaction-row { cursor: default; }

@@ -257,6 +257,52 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={closeEmoji} />}
 
+      {/* Правка, ответ и приложенная картинка — НАД полосой ввода и во всю её
+          ширину, а не внутри: полоса скруглена под одну строку, и вложенная в
+          неё панель ломала бы форму. */}
+      {editing && (
+        <div className="composer-editing">
+          <svg className="composer-editing-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+          <div className="composer-editing-body">
+            <div className="composer-editing-title">Редактирование</div>
+            <div className="composer-editing-text">{editing.text}</div>
+          </div>
+          <button type="button" className="composer-editing-cancel" onClick={cancelEdit} aria-label="Отменить редактирование">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Ответ и правка одновременно невозможны: правка занимает поле ввода
+          текстом исходного сообщения, отвечать в этот момент нечем. */}
+      {!editing && replying && (
+        <div className="composer-editing composer-replying">
+          <svg className="composer-editing-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 17-5-5 5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
+          <div className="composer-editing-body">
+            <div className="composer-editing-title">Ответ · {replying.author}</div>
+            <div className="composer-editing-text">
+              {replying.text || (replying.hasImage ? '📷 Фото' : '')}
+            </div>
+          </div>
+          <button type="button" className="composer-editing-cancel" onClick={() => onCancelReply?.()} aria-label="Отменить ответ">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
+      {staged && (
+        <div className="composer-attachment">
+          <div className="composer-attachment-preview">
+            <img src={staged.previewUrl} alt="" />
+            {staged.uploading && <span className="composer-attachment-spinner" aria-hidden="true" />}
+          </div>
+          {staged.error && <span className="composer-attachment-error">{staged.error}</span>}
+          <button type="button" className="composer-attachment-remove" onClick={removeStaged} aria-label="Убрать изображение">×</button>
+        </div>
+      )}
+
+      <div className="composer-row">
+      <div className="composer-bar">
       <button
         type="button"
         className={'emoji-btn' + (emojiOpen ? ' is-active' : '')}
@@ -274,48 +320,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
         </svg>
       </button>
 
-      <div className="composer-main">
-        {editing && (
-          <div className="composer-editing">
-            <svg className="composer-editing-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-            <div className="composer-editing-body">
-              <div className="composer-editing-title">Редактирование</div>
-              <div className="composer-editing-text">{editing.text}</div>
-            </div>
-            <button type="button" className="composer-editing-cancel" onClick={cancelEdit} aria-label="Отменить редактирование">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-            </button>
-          </div>
-        )}
-
-        {/* Ответ и правка одновременно невозможны: правка занимает поле ввода
-            текстом исходного сообщения, отвечать в этот момент нечем. */}
-        {!editing && replying && (
-          <div className="composer-editing composer-replying">
-            <svg className="composer-editing-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 17-5-5 5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
-            <div className="composer-editing-body">
-              <div className="composer-editing-title">Ответ · {replying.author}</div>
-              <div className="composer-editing-text">
-                {replying.text || (replying.hasImage ? '📷 Фото' : '')}
-              </div>
-            </div>
-            <button type="button" className="composer-editing-cancel" onClick={() => onCancelReply?.()} aria-label="Отменить ответ">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-            </button>
-          </div>
-        )}
-
-        {staged && (
-          <div className="composer-attachment">
-            <div className="composer-attachment-preview">
-              <img src={staged.previewUrl} alt="" />
-              {staged.uploading && <span className="composer-attachment-spinner" aria-hidden="true" />}
-            </div>
-            {staged.error && <span className="composer-attachment-error">{staged.error}</span>}
-            <button type="button" className="composer-attachment-remove" onClick={removeStaged} aria-label="Убрать изображение">×</button>
-          </div>
-        )}
-
         <div className="composer-field">
           <textarea
             ref={textareaRef}
@@ -329,21 +333,22 @@ const MessageInput: React.FC<MessageInputProps> = ({
           />
           {remaining < 200 && <span className="composer-counter">{remaining}</span>}
         </div>
+
+        {/* В режиме правки картинку не прикрепить: сервер меняет только текст. */}
+        {!editing && (
+          <button
+            type="button"
+            className="attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            aria-label="Прикрепить изображение"
+            title="Прикрепить изображение"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+          </button>
+        )}
       </div>
 
-      {/* В режиме правки картинку не прикрепить: сервер меняет только текст. */}
-      {!editing && (
-        <button
-          type="button"
-          className="attach-btn"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled}
-          aria-label="Прикрепить изображение"
-          title="Прикрепить изображение"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
-        </button>
-      )}
       <button
         type="submit"
         className="send-btn"
@@ -356,6 +361,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.6 22 12 3.4 3.4 3 10l13 2-13 2z" /></svg>
         )}
       </button>
+      </div>
     </form>
   );
 };

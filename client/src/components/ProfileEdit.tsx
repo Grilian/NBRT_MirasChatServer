@@ -3,6 +3,7 @@ import api from '../api/client';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
 import { resolveUploadUrl } from '../utils/uploads';
+import ImageLightbox from './ImageLightbox';
 import {
   STATUS_DURATION_OPTIONS, STATUS_PRESETS, STATUS_PRESET_ORDER, StatusPreset, statusExpiryFrom,
 } from '../utils/statusMeta';
@@ -334,12 +335,7 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
       </div>
 
       {avatarPreview && avatarPath && (
-        <div className="lightbox-overlay" onClick={() => setAvatarPreview(false)}>
-          <button type="button" className="lightbox-close" onClick={() => setAvatarPreview(false)} aria-label="Закрыть">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-          <img src={resolveUploadUrl(avatarPath) || ''} alt="" className="lightbox-img" onClick={(e) => e.stopPropagation()} />
-        </div>
+        <ImageLightbox url={resolveUploadUrl(avatarPath) || ''} onClose={() => setAvatarPreview(false)} />
       )}
     </div>
   );

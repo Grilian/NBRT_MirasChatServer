@@ -6,6 +6,7 @@ import { onKeyboardShow } from '../utils/mobileKeyboard';
 import { resolveUploadUrl } from '../utils/uploads';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
+import ImageLightbox from './ImageLightbox';
 
 interface Message {
   id: number;
@@ -287,7 +288,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
     setShouldScrollToBottom(isAtBottom);
-    setShowJumpButton(scrollHeight - scrollTop - clientHeight > 300);
+    // Порог был 300px — на коротком экране до него попросту не долистать, и
+    // кнопка не появлялась вовсе. Хватает одного «экранчика» отступа от низа.
+    setShowJumpButton(scrollHeight - scrollTop - clientHeight > 120);
 
     if (scrollTop < 150 && onScrollTop && hasMore && !loadingMore) {
       pendingRestoreRef.current = { height: scrollHeight, top: scrollTop };
@@ -652,13 +655,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     onDeleteMessage(id);
   };
 
-  useEffect(() => {
-    if (!lightboxUrl) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxUrl(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightboxUrl]);
-
   const copyMessageText = (msg: Message) => {
     setMenuFor(null);
     navigator.clipboard?.writeText(msg.text).catch((e) => console.error('Не удалось скопировать:', e));
@@ -912,13 +908,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         const menuMine = menuMsg.sender_id === currentUserId;
 
         return (
+          // Ряд реакций — отдельная плашка НАД карточкой меню, а не первая
+          // строка внутри неё: так в референсе, и так они не участвуют в
+          // прокрутке списка пунктов. Слой существует ради общей позиции —
+          // подгонка по краям экрана меряет его целиком (см. useLayoutEffect),
+          // иначе плашка вылезала бы за верхний край независимо от карточки.
           <div
             ref={menuRef}
-            className="msg-context-menu"
+            className="msg-menu-layer"
             style={{ left: menuFor.x, top: menuFor.y }}
           >
-            {/* Ряд реакций — над пунктами меню, как в спеке. Набор задаётся
-                в панели управления, повторный клик по своей снимает её. */}
             {!!reactionEmoji?.length && onToggleReaction && (
               <div className="msg-menu-reactions">
                 {reactionEmoji.map((emoji) => {
@@ -944,33 +943,28 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 своего (чужой текст переписывать нельзя ни при каких правах),
                 удаление на любом: область (у себя/у всех) выбирается в диалоге
                 и окончательно решается сервером. */}
-            {buildMenuItems(menuMsg, menuMine).map((item) => (
-              item.kind === 'info' ? (
-                <div key={item.key} className="msg-menu-info">{item.label}</div>
-              ) : (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={item.danger ? 'danger' : undefined}
-                  onClick={item.onClick}
-                >
-                  {item.icon}
-                  {item.label}
-                </button>
-              )
-            ))}
+            <div className="msg-context-menu">
+              {buildMenuItems(menuMsg, menuMine).map((item) => (
+                item.kind === 'info' ? (
+                  <div key={item.key} className="msg-menu-info">{item.label}</div>
+                ) : (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={item.danger ? 'danger' : undefined}
+                    onClick={item.onClick}
+                  >
+                    {item.icon}
+                    <span className="msg-menu-label">{item.label}</span>
+                  </button>
+                )
+              ))}
+            </div>
           </div>
         );
       })()}
 
-      {lightboxUrl && (
-        <div className="lightbox-overlay" onClick={() => setLightboxUrl(null)}>
-          <button type="button" className="lightbox-close" onClick={() => setLightboxUrl(null)} aria-label="Закрыть">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-          <img src={lightboxUrl} alt="" className="lightbox-img" onClick={(e) => e.stopPropagation()} />
-        </div>
-      )}
+      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
 
       {reactionsFor !== null && (() => {
         const msg = messages.find((m) => m.id === reactionsFor);
