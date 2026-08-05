@@ -73,6 +73,23 @@ interface ChatWindowProps {
 
 const LONG_PRESS_MS = 450;
 
+// Сколько лиц показываем в чипе реакции, прежде чем перейти на число.
+const REACTION_FACES_MAX = 3;
+
+/**
+ * Одинаковые реакции складываем в один чип. Порядок групп — по первому
+ * поставившему, чтобы чипы не прыгали местами при каждой новой реакции.
+ */
+function groupReactions(reactions: MessageReaction[]) {
+  const groups: { emoji: string; list: MessageReaction[] }[] = [];
+  for (const reaction of reactions) {
+    const existing = groups.find((g) => g.emoji === reaction.emoji);
+    if (existing) existing.list.push(reaction);
+    else groups.push({ emoji: reaction.emoji, list: [reaction] });
+  }
+  return groups;
+}
+
 // Пункт контекстного меню сообщения. 'info' — не действие, а отметка
 // («Прочитано в …»), поэтому у неё нет ни иконки, ни обработчика.
 type MenuItem =
@@ -157,7 +174,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
   // Сообщение, чьи реакции сейчас разбирают в детальном списке.
   const [reactionsFor, setReactionsFor] = useState<number | null>(null);
-  const reactionPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -512,40 +528,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     setTouchSelecting(false);
   };
 
-  // Долгое удержание по самой реакции снимает её — на Android другого способа
-  // нет: контекстное меню там занято сообщением, а крестик в углу реакции на
-  // тач-экране слишком мелкая цель.
-  const clearReactionLongPress = () => {
-    if (reactionPressTimer.current) {
-      clearTimeout(reactionPressTimer.current);
-      reactionPressTimer.current = null;
-    }
-  };
-
-  const reactionRemovedByPress = useRef(false);
-
-  const startReactionLongPress = (messageId: number, userId: number) => {
-    clearReactionLongPress();
-    reactionRemovedByPress.current = false;
-    reactionPressTimer.current = setTimeout(() => {
-      reactionPressTimer.current = null;
-      reactionRemovedByPress.current = true;
-      onRemoveReaction?.(messageId, userId);
-    }, LONG_PRESS_MS);
-  };
-
-  const endReactionLongPress = (e: React.TouchEvent) => {
-    clearReactionLongPress();
-    // Реакцию только что сняли удержанием — плашки под пальцем уже нет, и
-    // синтетический click после touchend пришёлся бы по сообщению за ней,
-    // открыв контекстное меню на ровном месте.
-    if (reactionRemovedByPress.current) {
-      reactionRemovedByPress.current = false;
-      e.preventDefault();
-    }
-  };
-
-  useEffect(() => clearReactionLongPress, []);
+  // Снятие реакции живёт в детальном списке (ReactionDetailsModal): со
+  // стакингом чип перестал быть одним человеком, и ни крестик на нём, ни
+  // удержание по нему не знают, чью реакцию убирать. Свою по-прежнему
+  // снимает повторный выбор того же эмодзи в контекстном меню.
 
   // Состав меню задан в требованиях отдельно для ПК и Android и отдельно для
   // своего/чужого сообщения. Собираем списком, а не гирляндой из && прямо в
@@ -838,16 +824,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     там, где снимать вправе (своя реакция или своё сообщение). */}
                 {!!msg.reactions?.length && (
                   <div className="msg-reactions">
-                    {msg.reactions.map((reaction) => {
-                      const isMine = reaction.user.id === currentUserId;
-                      const removable = isMine || mine;
+                    {groupReactions(msg.reactions).map(({ emoji, list }) => {
+                      const isMine = list.some((r) => r.user.id === currentUserId);
                       return (
                         <span
-                          key={reaction.user.id}
+                          key={emoji}
                           className={'reaction-chip' + (isMine ? ' is-mine' : '')}
                           role="button"
                           tabIndex={0}
-                          title={`${nameFor(reaction.user)} — ${formatMoscowTime(new Date(reaction.created_at).toISOString())}`}
+                          title={list.map((r) => nameFor(r.user)).join(', ')}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (selectMode) { toggleSelected(msg.id); return; }
@@ -856,30 +841,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReactionsFor(msg.id); }
                           }}
-                          // Долгое удержание по конкретной реакции — снятие на
-                          // Android: контекстного меню и крестика там нет.
-                          onTouchStart={removable ? (e) => {
-                            e.stopPropagation();
-                            startReactionLongPress(msg.id, reaction.user.id);
-                          } : undefined}
-                          onTouchEnd={endReactionLongPress}
-                          onTouchMove={clearReactionLongPress}
                         >
-                          <Avatar
-                            name={nameFor(reaction.user)}
-                            avatarPath={reaction.user.avatar_path}
-                            size="sm"
-                          />
-                          <span className="reaction-chip-emoji">{reaction.emoji}</span>
-                          {removable && onRemoveReaction && (
-                            <button
-                              type="button"
-                              className="reaction-chip-remove"
-                              aria-label="Убрать реакцию"
-                              onClick={(e) => { e.stopPropagation(); onRemoveReaction(msg.id, reaction.user.id); }}
-                            >
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6 6 18M6 6l12 12" /></svg>
-                            </button>
+                          <span className="reaction-chip-emoji">{emoji}</span>
+                          {/* До трёх — лица внахлёст, дальше их не разобрать, и
+                              число читается быстрее любой стопки аватаров. */}
+                          {list.length <= REACTION_FACES_MAX ? (
+                            <span className="reaction-chip-faces">
+                              {list.map((r) => (
+                                <Avatar
+                                  key={r.user.id}
+                                  name={nameFor(r.user)}
+                                  avatarPath={r.user.avatar_path}
+                                  size="sm"
+                                />
+                              ))}
+                            </span>
+                          ) : (
+                            <span className="reaction-chip-count">{list.length}</span>
                           )}
                         </span>
                       );
