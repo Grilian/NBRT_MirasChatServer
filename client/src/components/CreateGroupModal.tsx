@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import api from '../api/client';
 import MemberPicker from './MemberPicker';
 import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
+import { WritePolicy } from '../utils/writePolicy';
 
 export interface CreatedGroup {
   id: number;
@@ -12,6 +13,9 @@ export interface CreatedGroup {
   member_count: number;
   members: { id: number; display_name: string | null; username: string; avatar_path: string | null; role: string }[];
   announcements_only: boolean;
+  write_policy: WritePolicy;
+  write_user_ids: number[];
+  write_department_ids: number[];
 }
 
 interface CreateGroupModalProps {

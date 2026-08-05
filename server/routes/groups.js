@@ -1,6 +1,9 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
+const {
+  canPostToGroup, writeSettingsOf, saveWriteSettings, isWritePolicy,
+} = require('../services/chatPermissions');
 
 const router = express.Router();
 
@@ -45,10 +48,10 @@ function groupMembers(groupId) {
   `).all(groupId);
 }
 
-// can_post зависит от орг-роли конкретного зрителя, а group_updated шлётся
-// одним и тем же объектом сразу всем участникам — поэтому его тут нет,
-// клиент сам решает "могу ли я" по собственной роли (см. canPostAnnouncement
-// на клиенте), а не ждёт этого поля с сервера.
+// can_post зависит от конкретного зрителя, а group_updated шлётся одним и тем
+// же объектом сразу всем участникам — поэтому его тут нет. Вместо него letят
+// сама политика и списки, по которым клиент считает «могу ли я» для себя; в
+// REST-выдачах ниже, где запрос персональный, can_post проставляется сервером.
 function groupSummary(groupId) {
   const group = db.prepare('SELECT id, name, created_by, created_at, announcements_only FROM chat_groups WHERE id = ?').get(groupId);
   if (!group) return null;
@@ -62,6 +65,7 @@ function groupSummary(groupId) {
     member_count: members.length,
     members,
     announcements_only: !!group.announcements_only,
+    ...writeSettingsOf(groupId),
   };
 }
 
@@ -87,6 +91,10 @@ router.get('/', verifyToken, (req, res) => {
       member_count: row.member_count,
       role: row.role,
       announcements_only: !!row.announcements_only,
+      ...writeSettingsOf(row.id),
+      // Запрос персональный — считаем право сразу здесь, чтобы клиенту не
+      // приходилось повторять ту же логику и разойтись с сервером.
+      can_post: canPostToGroup(row.id, req.userId),
     })));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -157,6 +165,20 @@ router.put('/:id', verifyToken, requireMember, requireOwner, (req, res) => {
         .run(name, req.body.announcements_only ? 1 : 0, req.groupId);
     } else {
       db.prepare('UPDATE chat_groups SET name = ? WHERE id = ?').run(name, req.groupId);
+    }
+
+    // Политика — тоже необязательное поле: старый клиент, присылающий одно
+    // название, не должен молча сбрасывать права на «всем можно».
+    if (req.body.write_policy !== undefined) {
+      if (!isWritePolicy(req.body.write_policy)) {
+        return res.status(400).json({ error: 'Неизвестная политика записи' });
+      }
+      saveWriteSettings(
+        req.groupId,
+        req.body.write_policy,
+        Array.isArray(req.body.write_user_ids) ? req.body.write_user_ids.map(Number) : [],
+        Array.isArray(req.body.write_department_ids) ? req.body.write_department_ids.map(Number) : [],
+      );
     }
 
     const summary = groupSummary(req.groupId);

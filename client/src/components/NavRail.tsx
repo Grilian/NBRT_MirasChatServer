@@ -1,6 +1,7 @@
 import React from 'react';
 import Avatar from './Avatar';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
+import { describeStatus } from '../utils/statusMeta';
 
 // Разделы приложения. Список объявлен один раз и целиком — рельс рассчитан на
 // финальный набор пунктов, чтобы навигацию не пришлось переделывать по мере
@@ -145,12 +146,16 @@ interface NavRailProps {
   online: boolean;
   onOpenProfile: () => void;
   accountType?: string;
+  statusPreset?: string | null;
+  statusCustom?: string | null;
 }
 
 const NavRail: React.FC<NavRailProps> = ({
-  active, onSelect, unreadTotal, username, avatarPath, online, onOpenProfile, accountType
+  active, onSelect, unreadTotal, username, avatarPath, online, onOpenProfile, accountType,
+  statusPreset, statusCustom,
 }) => {
   const sections = SECTIONS.filter((s) => isSectionAllowedFor(accountType, s.id));
+  const ownStatus = describeStatus(statusPreset, statusCustom);
 
   // Текущую тему читаем в момент клика, а не держим в состоянии: её же меняет
   // выпадающий список в настройках, и своя копия успела бы разойтись с тем,
@@ -205,9 +210,19 @@ const NavRail: React.FC<NavRailProps> = ({
           <Avatar name={username} avatarPath={avatarPath} size="sm" online={online} />
           <span className="rail-account-text">
             <span className="rail-account-name">{username}</span>
-            <span className={'rail-account-status' + (online ? '' : ' is-offline')}>
-              {online ? 'Онлайн' : 'Нет связи'}
-            </span>
+            {/* Свой статус важнее присутствия: «Онлайн» человек и так видит по
+                зелёной точке на аватаре, а вот что у него выставлено — узнать
+                было негде, кроме как открыв профиль. Присутствие остаётся
+                подписью, только когда статус не задан. */}
+            {ownStatus ? (
+              <span className="rail-account-status" title={ownStatus.label}>
+                {ownStatus.emoji} {ownStatus.label}
+              </span>
+            ) : (
+              <span className={'rail-account-status' + (online ? '' : ' is-offline')}>
+                {online ? 'Онлайн' : 'Нет связи'}
+              </span>
+            )}
           </span>
         </button>
       </div>

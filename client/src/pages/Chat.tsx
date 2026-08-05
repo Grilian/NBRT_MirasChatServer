@@ -24,6 +24,7 @@ import api from '../api/client';
 import { nameFor } from '../utils/user';
 import { renderUnreadBadge } from '../utils/badgeIcon';
 import { describeStatus } from '../utils/statusMeta';
+import { WritePolicy, WRITE_BLOCKED_HINT } from '../utils/writePolicy';
 import {
   ensureMobileNotificationPermission,
   showMobileNotification,
@@ -111,6 +112,11 @@ interface ChatGroupSummary {
   member_count: number;
   role: 'owner' | 'member';
   announcements_only: boolean;
+  write_policy: WritePolicy;
+  write_user_ids: number[];
+  write_department_ids: number[];
+  /** Считает сервер под конкретного зрителя — клиент эту логику не повторяет. */
+  can_post?: boolean;
 }
 interface AllUser {
   id: number;
@@ -847,6 +853,10 @@ const Chat: React.FC = () => {
     });
     newSocket.on('group_updated', (group: ChatGroupSummary) => {
       setChatGroups(prev => prev.map(g => g.id === group.id ? { ...g, ...group } : g));
+      // can_post считается под конкретного зрителя, а это событие одно на всех
+      // участников — в нём его нет. После смены прав перечитываем список, иначе
+      // у человека остался бы composer от прежней политики.
+      api.get('/groups').then(({ data }) => setChatGroups(data)).catch(console.error);
     });
     newSocket.on('group_removed', (data: { id: number; chat_id: string }) => {
       setChatGroups(prev => prev.filter(g => g.id !== data.id));
@@ -1680,7 +1690,7 @@ const Chat: React.FC = () => {
   const activeChatMeta: {
     name: string; section: ChatSection; online?: boolean; avatarPath?: string | null; userId?: number;
     chatGroupId?: number; memberCount?: number; isGroupOwner?: boolean;
-    announcementsOnly?: boolean; canPostHere?: boolean;
+    announcementsOnly?: boolean; canPostHere?: boolean; writePolicy?: WritePolicy;
     status?: { emoji: string; label: string } | null;
   } | null = (() => {
     if (!activeChat) return null;
@@ -1692,10 +1702,16 @@ const Chat: React.FC = () => {
         ? {
             name: group.name, section: 'group', chatGroupId: group.id, memberCount: group.member_count,
             isGroupOwner: group.role === 'owner', announcementsOnly: group.announcements_only,
-            // Право писать — по орг-роли (users.role), не по роли в самой группе:
-            // владелец канала не обязательно администратор/модератор, и сервер
-            // ровно так же проверяет отправку (см. canPostAnnouncement в groups.js).
-            canPostHere: !group.announcements_only || currentUserRole === 'admin' || currentUserRole === 'moderator',
+            writePolicy: group.write_policy,
+            // Право писать считает сервер (services/chatPermissions.js) и
+            // присылает в can_post. Повторять правила на клиенте нельзя: две
+            // копии одной логики неизбежно разъезжаются, и человек либо видит
+            // открытый композер там, где отправка отлетит, либо наоборот.
+            // can_post приходит только из REST-выдачи списка групп; на
+            // socket-событие group_updated (оно одно на всех) его нет —
+            // до перезагрузки списка считаем, что писать можно, а отказ
+            // придёт от сервера через message_blocked.
+            canPostHere: group.can_post !== false,
           }
         : null;
     }
@@ -1782,6 +1798,8 @@ const Chat: React.FC = () => {
         username={currentDisplayName}
         avatarPath={currentAvatarPath}
         online={socketConnected}
+        statusPreset={currentStatusPreset}
+        statusCustom={currentStatusCustom}
         onOpenProfile={openOwnProfile}
         accountType={currentAccountType}
       />
@@ -2079,20 +2097,20 @@ const Chat: React.FC = () => {
               Ваш аккаунт временно ограничен — отправка сообщений недоступна.
             </div>
           )}
-          {!muted && activeChatMeta?.announcementsOnly && !activeChatMeta.canPostHere && (
+          {!muted && activeChatMeta?.section === 'group' && activeChatMeta.canPostHere === false && (
             <div className="muted-banner">
-              Это канал-объявление — писать могут только администраторы и модераторы.
+              {WRITE_BLOCKED_HINT[activeChatMeta.writePolicy || 'nobody']}
             </div>
           )}
           <MessageInput
             onSend={handleSendMessage}
             onTyping={handleTyping}
-            disabled={!activeChat || muted || (!!activeChatMeta?.announcementsOnly && !activeChatMeta.canPostHere)}
+            disabled={!activeChat || muted || activeChatMeta?.canPostHere === false}
             placeholder={
               muted
                 ? 'Отправка сообщений ограничена'
-                : activeChatMeta?.announcementsOnly && !activeChatMeta.canPostHere
-                  ? 'Писать могут только администраторы и модераторы'
+                : activeChatMeta?.canPostHere === false
+                  ? WRITE_BLOCKED_HINT[activeChatMeta.writePolicy || 'nobody']
                 // Статус собеседника прямо в поле ввода: видно ровно в тот
                 // момент, когда собираешься писать, — не нужно вспоминать,
                 // что человек в отпуске, уже отправив сообщение. Имя тут не

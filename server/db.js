@@ -627,16 +627,54 @@ try {
   // Колонка уже есть
 }
 
-// Миграция: канал-объявление. Группа, где писать могут только люди с ролью
-// admin/moderator в организации (users.role), а не по составу самой группы —
-// это про орг-роль, а не про то, кто её создал. Обычные участники состоят в
-// группе и читают, но при попытке отправить получают message_blocked, как в
-// режиме тишины.
+// Миграция: канал-объявление. ИСТОРИЧЕСКИ этот флаг означал сразу две вещи —
+// «писать могут только админы» и «показывать счётчик просмотров». Право писать
+// с него снято и живёт в write_policy (ниже), флаг остался только за
+// счётчиком просмотров.
 try {
   db.exec(`ALTER TABLE chat_groups ADD COLUMN announcements_only INTEGER NOT NULL DEFAULT 0`);
 } catch (e) {
   // Колонка уже есть
 }
+
+// Миграция: «Кто может писать» — единый механизм прав отправки для групп.
+// Значения write_policy:
+//   all         — любой участник группы;
+//   members     — только перечисленные поимённо (chat_group_writers);
+//   departments — только сотрудники указанных отделов (chat_group_writer_departments);
+//   admins      — только орг-администрация (users.role admin/moderator);
+//   nobody      — никто, чат заморожен на чтение.
+// Неявных исключений нет НИ ДЛЯ КОГО, включая владельца группы: в требованиях
+// «только администратор» — отдельный вариант, значит в остальных режимах
+// администратор не должен получать право молча. Владелец, которому нужно
+// писать, добавляет себя в список — это видно и предсказуемо.
+try {
+  db.exec(`ALTER TABLE chat_groups ADD COLUMN write_policy TEXT NOT NULL DEFAULT 'all'`);
+  // Перенос старого смысла флага: каналы-объявления продолжают работать
+  // ровно как раньше. Внутри try — выполняется единожды, при добавлении
+  // колонки, иначе затирало бы политику, выставленную вручную позже.
+  db.exec(`UPDATE chat_groups SET write_policy = 'admins' WHERE announcements_only = 1`);
+} catch (e) {
+  // Колонка уже есть
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_group_writers (
+    group_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (group_id, user_id),
+    FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS chat_group_writer_departments (
+    group_id INTEGER NOT NULL,
+    department_id INTEGER NOT NULL,
+    PRIMARY KEY (group_id, department_id),
+    FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+  );
+`);
 
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {

@@ -3,6 +3,9 @@ import api from '../api/client';
 import Avatar from './Avatar';
 import MemberPicker from './MemberPicker';
 import { nameFor } from '../utils/user';
+import {
+  WritePolicy, WRITE_POLICY_ORDER, WRITE_POLICY_LABELS, WRITE_BLOCKED_HINT,
+} from '../utils/writePolicy';
 
 export interface GroupDetail {
   id: number;
@@ -13,6 +16,9 @@ export interface GroupDetail {
   member_count: number;
   members: { id: number; display_name: string | null; username: string; avatar_path: string | null; role: string }[];
   announcements_only: boolean;
+  write_policy: WritePolicy;
+  write_user_ids: number[];
+  write_department_ids: number[];
 }
 
 interface GroupInfoModalProps {
@@ -64,6 +70,40 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId,
     if (!group) return;
     try {
       const { data } = await api.put(`/groups/${group.id}`, { name: group.name, announcements_only: !group.announcements_only });
+      setGroup(data);
+      onUpdated(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Списки отделов нужны только владельцу и только для режима «выбранные
+  // отделы», но справочник маленький — тянем один раз вместе с карточкой,
+  // чтобы переключение режима не подвешивало интерфейс запросом.
+  const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    api.get('/departments')
+      .then(({ data }) => setDepartments(data))
+      .catch(() => { /* без справочника режим отделов просто покажет пустой список */ });
+  }, []);
+
+  /**
+   * Сохранение политики. Списки передаются целиком, а не патчем: сервер
+   * переписывает их полностью, и отправлять надо то состояние, которое должно
+   * получиться, — иначе снятая галочка не удалялась бы.
+   */
+  const saveWritePolicy = async (
+    policy: WritePolicy,
+    lists?: { users?: number[]; departments?: number[] },
+  ) => {
+    if (!group) return;
+    try {
+      const { data } = await api.put(`/groups/${group.id}`, {
+        name: group.name,
+        write_policy: policy,
+        write_user_ids: lists?.users ?? (policy === group.write_policy ? group.write_user_ids : []),
+        write_department_ids: lists?.departments ?? (policy === group.write_policy ? group.write_department_ids : []),
+      });
       setGroup(data);
       onUpdated(data);
     } catch (e) {
@@ -189,15 +229,71 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId,
             )}
 
             {isOwner ? (
-              <div className="create-group-announce group-info-announce">
-                <span className="label">Канал-объявление — писать смогут только администраторы и модераторы</span>
-                <label className="switch">
-                  <input type="checkbox" checked={group.announcements_only} onChange={toggleAnnouncementsOnly} />
-                  <span className="switch-track"><span className="switch-thumb" /></span>
-                </label>
+              <div className="group-info-write">
+                <div className="settings-section-title">Кто может писать</div>
+                <select
+                  value={group.write_policy}
+                  onChange={(e) => saveWritePolicy(e.target.value as WritePolicy)}
+                >
+                  {WRITE_POLICY_ORDER.map((p) => (
+                    <option key={p} value={p}>{WRITE_POLICY_LABELS[p]}</option>
+                  ))}
+                </select>
+
+                {/* Списки правятся сразу под выбором режима — отдельного окна
+                    не заводим: без них режим не имеет смысла и человек всё
+                    равно пойдёт их заполнять следующим действием. */}
+                {group.write_policy === 'members' && (
+                  <div className="group-info-write-list">
+                    {group.members.map((m) => (
+                      <label key={m.id} className="group-info-write-item">
+                        <input
+                          type="checkbox"
+                          checked={group.write_user_ids.includes(m.id)}
+                          onChange={(e) => saveWritePolicy('members', {
+                            users: e.target.checked
+                              ? [...group.write_user_ids, m.id]
+                              : group.write_user_ids.filter((id) => id !== m.id),
+                          })}
+                        />
+                        <span>{nameFor(m)}{m.id === currentUserId ? ' (вы)' : ''}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {group.write_policy === 'departments' && (
+                  <div className="group-info-write-list">
+                    {departments.length === 0 && <div className="group-info-write-empty">Отделы не заведены</div>}
+                    {departments.map((d) => (
+                      <label key={d.id} className="group-info-write-item">
+                        <input
+                          type="checkbox"
+                          checked={group.write_department_ids.includes(d.id)}
+                          onChange={(e) => saveWritePolicy('departments', {
+                            departments: e.target.checked
+                              ? [...group.write_department_ids, d.id]
+                              : group.write_department_ids.filter((id) => id !== d.id),
+                          })}
+                        />
+                        <span>{d.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {/* Счётчик просмотров к правам не относится — он про то, как
+                    выглядят сообщения, и работает при любой политике. */}
+                <div className="create-group-announce group-info-announce">
+                  <span className="label">Показывать счётчик просмотров</span>
+                  <label className="switch">
+                    <input type="checkbox" checked={group.announcements_only} onChange={toggleAnnouncementsOnly} />
+                    <span className="switch-track"><span className="switch-thumb" /></span>
+                  </label>
+                </div>
               </div>
-            ) : group.announcements_only && (
-              <div className="group-info-announce-note">Писать могут только администраторы и модераторы</div>
+            ) : group.write_policy !== 'all' && (
+              <div className="group-info-announce-note">{WRITE_BLOCKED_HINT[group.write_policy]}</div>
             )}
 
             <div className="directory-list group-info-members">

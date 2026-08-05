@@ -29,6 +29,7 @@ const { participantsForChatId, isParticipant } = require('./services/chatPartici
 const { isSharedChat, markRead, readCountsFor } = require('./services/readReceipts');
 const { isValidEmoji, reactionsFor, setReaction, removeReaction } = require('./services/reactions');
 const { notifyNewMessage } = require('./services/push');
+const { canPostToGroup } = require('./services/chatPermissions');
 const { isValidChatImagePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
 const calendarScheduler = require('./services/calendarScheduler');
@@ -312,15 +313,13 @@ io.on('connection', (socket) => {
     // пользователей, просто зная их id.
     if (!isParticipant(data.chatId, senderId)) return;
 
-    // Канал-объявление: писать может только администрация/модерация
-    // организации (users.role), остальные участники только читают.
+    // «Кто может писать» — единый механизм прав (services/chatPermissions.js).
+    // Проверка обязательна здесь: дизейбл композера на клиенте только для
+    // удобства, обойти его тривиально.
     const groupMatch = String(data.chatId).match(/^group_(\d+)$/);
-    if (groupMatch) {
-      const group = db.prepare('SELECT announcements_only FROM chat_groups WHERE id = ?').get(Number(groupMatch[1]));
-      if (group && group.announcements_only && !canPostAnnouncement(senderId)) {
-        socket.emit('message_blocked', { reason: 'announcement_only', chatId: data.chatId });
-        return;
-      }
+    if (groupMatch && !canPostToGroup(Number(groupMatch[1]), senderId)) {
+      socket.emit('message_blocked', { reason: 'write_not_allowed', chatId: data.chatId });
+      return;
     }
 
     // Текст раньше уходил в БД как есть, что бы клиент ни прислал: пустая
