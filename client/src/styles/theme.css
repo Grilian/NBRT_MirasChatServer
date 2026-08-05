@@ -781,6 +781,32 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .msg-menu-info + .msg-menu-info { border-top: none; margin-top: 0; padding-top: 0; }
 
+/* Управление картиночными смайликами в панели супер-админа */
+.sa-emoji-custom { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: flex-start; }
+.sa-emoji-custom-item {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--paper-sunken); border-radius: var(--radius-md);
+  padding: 6px 8px; font-size: 11px; color: var(--ink-muted); max-width: 92px;
+}
+.sa-emoji-custom-item img { width: 32px; height: 32px; object-fit: contain; }
+.sa-emoji-custom-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.sa-emoji-custom-item:hover { border-color: var(--unread); color: var(--unread); }
+.sa-emoji-custom-add {
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border: 1px dashed var(--line); border-radius: var(--radius-md);
+  padding: 0 12px; min-height: 60px; font-size: 12px; color: var(--ink-muted);
+}
+.sa-emoji-custom-add:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Кастомный смайлик в тексте: по высоте строки и с выравниванием по базовой
+   линии, иначе он растаскивает межстрочный интервал в абзаце. */
+.custom-emoji {
+  display: inline-block; width: 1.35em; height: 1.35em; object-fit: contain;
+  vertical-align: -0.3em; margin: 0 1px;
+}
+/* В панели выбора и в подписи вкладки — по размеру ячейки, а не строки. */
+.emoji-cell .custom-emoji, .emoji-tab-icon .custom-emoji { width: 24px; height: 24px; vertical-align: middle; }
+
 /* Свой аватар со статусом в шапке списка чатов. Значок статуса — накладкой на
    аватар, а не отдельной строкой: шапка низкая, и второй строки там нет. */
 .roster-self { position: relative; border: none; background: none; padding: 0; margin: 0; cursor: pointer; flex: none; border-radius: 50%; }

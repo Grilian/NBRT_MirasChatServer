@@ -4,6 +4,7 @@ import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKe
 import { isNativeMobile } from '../utils/mobileNotify';
 import { onKeyboardShow } from '../utils/mobileKeyboard';
 import { resolveUploadUrl } from '../utils/uploads';
+import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
@@ -61,6 +62,8 @@ interface ChatWindowProps {
   onForward?: (ids: number[]) => void;
   /** Набор базовых реакций из панели управления. */
   reactionEmoji?: string[];
+  /** Каталог кастомных смайликов: :name: → путь к картинке. */
+  customEmoji?: CustomEmojiMap;
   /** Поставить/снять свою реакцию (повторная та же — снимает). */
   onToggleReaction?: (messageId: number, emoji: string) => void;
   /** Снять реакцию конкретного человека (своя — всегда, чужая — под своим). */
@@ -157,7 +160,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
-  onStartReply, onForward, reactionEmoji, onToggleReaction, onRemoveReaction,
+  onStartReply, onForward, reactionEmoji, customEmoji = {}, onToggleReaction, onRemoveReaction,
   onForwardToSelf, selfChatName
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
@@ -780,7 +783,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         <span className="bubble-reply-text">
                           {msg.reply_to_deleted
                             ? 'сообщение удалено'
-                            : (msg.reply_to_text || (msg.reply_to_file ? '📷 Фото' : ''))}
+                            : (renderTextWithEmoji(msg.reply_to_text || '', customEmoji, `r${msg.id}`)
+                              || (msg.reply_to_file ? '📷 Фото' : ''))}
                         </span>
                       </button>
                     )}
@@ -798,7 +802,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         <img src={resolveUploadUrl(msg.file_path) || ''} alt="" />
                       </button>
                     )}
-                    {msg.text && <span className="bubble-text">{msg.text}</span>}
+                    {msg.text && (
+                      <span className="bubble-text">{renderTextWithEmoji(msg.text, customEmoji, `m${msg.id}`)}</span>
+                    )}
                     {/* Время и галочки — внутри пузыря, как в Telegram:
                         обтекаются текстом и не занимают отдельную строку. */}
                     <span className="bubble-meta">

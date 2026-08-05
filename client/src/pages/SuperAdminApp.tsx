@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import superAdminApi from '../api/superAdminClient';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 import { formatMoscowDateTime, fromMoscowInputValue, toMoscowInputValue } from '../utils/time';
+import { resolveUploadUrl } from '../utils/uploads';
 
 interface Group {
   id: number;
@@ -841,6 +842,7 @@ interface EmojiPack {
   name: string;
   enabled: boolean;
   emoji: string[];
+  custom?: { id: number; name: string; file_path: string }[];
 }
 
 // Смайлики хранятся текстом (юникод), а не картинками, поэтому пак правится
@@ -898,6 +900,39 @@ function EmojiPacksPanel() {
     }
   };
 
+  // Загрузка картинки. Имя спрашиваем сразу и больше не меняем: оно уже
+  // уехало в тексты отправленных сообщений, и переименование превратило бы их
+  // в мёртвые ссылки.
+  const uploadCustom = async (packId: number, file: File) => {
+    const suggested = file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 32);
+    const name = window.prompt('Имя смайлика (латиница, цифры, подчёркивание). Его будут писать как :имя:', suggested);
+    if (!name) return;
+
+    const form = new FormData();
+    form.append('image', file);
+    form.append('name', name);
+    setSavingId(packId);
+    try {
+      const { data } = await superAdminApi.post(`/emoji/admin/${packId}/custom`, form);
+      apply(data);
+      setError('');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось загрузить смайлик');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeCustom = async (itemId: number, name: string) => {
+    if (!window.confirm(`Убрать смайлик :${name}: из пака?\n\nВ уже отправленных сообщениях он останется как текст :${name}:`)) return;
+    try {
+      const { data } = await superAdminApi.delete(`/emoji/admin/custom/${itemId}`);
+      apply(data);
+    } catch {
+      setError('Не удалось удалить смайлик');
+    }
+  };
+
   const remove = async (pack: EmojiPack) => {
     if (!window.confirm(`Удалить пак «${pack.name}» со всеми смайликами?`)) return;
     try {
@@ -940,8 +975,42 @@ function EmojiPacksPanel() {
             onChange={(e) => setDrafts((prev) => ({ ...prev, [pack.id]: e.target.value }))}
             placeholder="😀 😃 😄 …"
           />
+          {/* Картиночные смайлики пака: сетка превью с удалением и кнопкой
+              загрузки. Юникодные правятся полем выше — это два разных вида
+              содержимого, и смешивать их в одном поле нечем. */}
+          <div className="sa-emoji-custom">
+            {pack.custom?.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="sa-emoji-custom-item"
+                title={`:${item.name}: — нажмите, чтобы убрать`}
+                onClick={() => removeCustom(item.id, item.name)}
+              >
+                <img src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
+                <span>:{item.name}:</span>
+              </button>
+            ))}
+            <label className="sa-emoji-custom-add">
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                disabled={savingId === pack.id}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) uploadCustom(pack.id, file);
+                }}
+              />
+              {savingId === pack.id ? 'Загрузка…' : '+ Картинкой'}
+            </label>
+          </div>
+
           <div className="sa-emoji-pack-foot">
-            <span className="sa-hint">{pack.emoji.length} шт.</span>
+            <span className="sa-hint">
+              {pack.emoji.length} шт.{pack.custom?.length ? ` + ${pack.custom.length} картинкой` : ''}
+            </span>
             <button
               type="button"
               className="sa-btn-ghost"

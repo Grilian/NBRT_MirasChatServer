@@ -1,10 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import { resolveUploadUrl } from '../utils/uploads';
+import { CustomEmoji } from '../utils/customEmoji';
 
 export interface EmojiPack {
   id: number;
   name: string;
   emoji: string[];
+  /** Кастомные смайлики-картинки; в текст уходит их :name:. */
+  custom?: CustomEmoji[];
 }
 
 interface EmojiPickerProps {
@@ -65,7 +69,11 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
             >
               {/* Вкладку подписываем первым смайликом пака — так она читается
                   с одного взгляда; полное название остаётся в подсказке. */}
-              <span className="emoji-tab-icon">{pack.emoji[0] || '🙂'}</span>
+              <span className="emoji-tab-icon">
+                {pack.emoji[0] || (pack.custom?.[0]
+                  ? <img className="custom-emoji" src={resolveUploadUrl(pack.custom[0].file_path) || ''} alt="" />
+                  : '🙂')}
+              </span>
               <span className="emoji-tab-name">{pack.name}</span>
             </button>
           ))}
@@ -74,9 +82,25 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
 
       <div className="emoji-grid">
         {loading && <div className="emoji-empty">Загрузка…</div>}
-        {!loading && (!current || current.emoji.length === 0) && (
+        {!loading && (!current || (current.emoji.length === 0 && !current.custom?.length)) && (
           <div className="emoji-empty">Смайлики пока не добавлены</div>
         )}
+        {/* Кастомные идут первыми: их добавляли осознанно под этот коллектив,
+            а юникодных всегда много и они одинаковы везде. */}
+        {current?.custom?.map((item) => (
+          <button
+            key={`c${item.id}`}
+            type="button"
+            className="emoji-cell"
+            title={`:${item.name}:`}
+            onMouseDown={(e) => e.preventDefault()}
+            // В сообщение уходит код, а не картинка: текст сообщения остаётся
+            // текстом, формат хранения переписки не меняется.
+            onClick={() => onPick(`:${item.name}:`)}
+          >
+            <img className="custom-emoji" src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
+          </button>
+        ))}
         {current?.emoji.map((emoji, index) => (
           <button
             key={`${emoji}-${index}`}

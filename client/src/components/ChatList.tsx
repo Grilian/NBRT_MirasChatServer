@@ -2,6 +2,7 @@ import React from 'react';
 import Avatar from './Avatar';
 import { formatChatListTime } from '../utils/time';
 import { describeStatus } from '../utils/statusMeta';
+import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 
 export type ChatSection = 'general' | 'staff' | 'group' | 'self';
 
@@ -35,6 +36,8 @@ interface ChatListProps {
   statusPreset: string | null;
   statusCustom: string | null;
   onOpenStatus: () => void;
+  /** Каталог кастомных смайликов — превью тоже показывает текст сообщения. */
+  customEmoji?: CustomEmojiMap;
   chats: Chat[];
   activeChat: string | null;
   onSelectChat: (chatId: string) => void;
@@ -90,7 +93,7 @@ const ChatList: React.FC<ChatListProps> = ({
   lastMessages, unreadCounts, favorites, onToggleFavorite,
   onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings,
   resizeHandle,
-  selfName, selfAvatarPath, statusPreset, statusCustom, onOpenStatus,
+  selfName, selfAvatarPath, statusPreset, statusCustom, onOpenStatus, customEmoji = {},
 }) => {
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
   const ownStatus = describeStatus(statusPreset, statusCustom);
@@ -209,7 +212,12 @@ const ChatList: React.FC<ChatListProps> = ({
                   </div>
                   {chat.comment && <div className="row-comment">{chat.comment}</div>}
                   <div className="row-bottom">
-                    <div className="row-preview">{last ? (last.text || (last.file_path ? '📷 Фото' : '')) : ''}</div>
+                    <div className="row-preview">
+                      {last
+                        ? (renderTextWithEmoji(last.text || '', customEmoji, `p${chat.id}`)
+                          || (last.file_path ? '📷 Фото' : ''))
+                        : ''}
+                    </div>
                     <div className="row-actions">
                       {unreadCount > 0 && <span className="row-unread">{unreadCount}</span>}
                       <button

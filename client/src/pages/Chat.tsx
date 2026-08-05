@@ -26,6 +26,7 @@ import { renderUnreadBadge } from '../utils/badgeIcon';
 import { describeStatus } from '../utils/statusMeta';
 import { WritePolicy, WRITE_BLOCKED_HINT } from '../utils/writePolicy';
 import StatusSheet from '../components/StatusSheet';
+import { CustomEmojiMap, buildEmojiMap, stripCustomEmoji } from '../utils/customEmoji';
 import {
   ensureMobileNotificationPermission,
   showMobileNotification,
@@ -101,8 +102,15 @@ interface LastMessage {
 }
 
 /** Превью текста сообщения там, где картинка без подписи не даёт ничего показать. */
-function previewText(text: string, filePath?: string | null): string {
-  return text || (filePath ? '📷 Фото' : '');
+// Текст для уведомлений — и всплывающих, и системных. Картинку там не
+// показать, поэтому коды кастомных смайликов вырезаются: в шторке ОС `:cat:`
+// читался бы как мусор. Если кроме смайликов в сообщении ничего не было,
+// подставляем подпись — пустое уведомление хуже неточного.
+function previewText(text: string, filePath?: string | null, emojiMap: CustomEmojiMap = {}): string {
+  const stripped = stripCustomEmoji(text || '', emojiMap);
+  if (stripped) return stripped;
+  if (text && text !== stripped) return 'Смайлик';
+  return filePath ? '📷 Фото' : '';
 }
 interface ChatGroupSummary {
   id: number;
@@ -358,6 +366,9 @@ const Chat: React.FC = () => {
     windowFocused: true,
     conversationVisible: false,
     prefs: notificationPrefs,
+    // Каталог смайликов нужен обработчику входящих, а он живёт с рендера,
+    // на котором подписался, — читаем актуальный через ref, как и остальное.
+    customEmoji: {} as CustomEmojiMap,
   });
 
   // id сообщений, уже учтённых в счётчике непрочитанного — защита от повторного
@@ -409,6 +420,15 @@ const Chat: React.FC = () => {
   const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Избранное');
   // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
   const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
+
+  // Каталог кастомных смайликов тянем один раз на приложение: он нужен всюду,
+  // где показывается текст сообщения, а не только в панели выбора.
+  const [customEmoji, setCustomEmoji] = useState<CustomEmojiMap>({});
+  useEffect(() => {
+    api.get('/emoji')
+      .then(({ data }) => setCustomEmoji(buildEmojiMap(data)))
+      .catch(() => { /* без каталога коды останутся текстом — не фатально */ });
+  }, []);
   const [statusSheetOpen, setStatusSheetOpen] = useState(false);
   const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
   const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
@@ -1037,7 +1057,7 @@ const Chat: React.FC = () => {
 
       // В общем чате и в группах важно, кто именно написал — иначе все
       // уведомления выглядят одинаково и по ним не понять, стоит ли отвлекаться.
-      const preview = previewText(message.text, message.file_path);
+      const preview = previewText(message.text, message.file_path, liveRef.current.customEmoji);
       const body = (isGeneral || group) ? `${nameFor(message)}: ${preview}` : preview;
 
       // На мобильном в фоне звук играет сама ОС по каналу уведомления —
@@ -1287,7 +1307,7 @@ const Chat: React.FC = () => {
 
   // Обновляем снимок для обработчика сокета на каждом рендере — присваивание
   // должно идти после объявления allUsers, иначе получим TDZ.
-  liveRef.current = { activeChat, allUsers, chatGroups, windowFocused, conversationVisible, prefs: notificationPrefs };
+  liveRef.current = { activeChat, allUsers, chatGroups, windowFocused, conversationVisible, prefs: notificationPrefs, customEmoji };
 
   const handleSelectChat = (chatId: string) => {
     // Сначала выясняем, знаем ли мы вообще такой чат. Раньше проверка стояла
@@ -1813,6 +1833,7 @@ const Chat: React.FC = () => {
         statusPreset={currentStatusPreset}
         statusCustom={currentStatusCustom}
         onOpenStatus={() => setStatusSheetOpen(true)}
+        customEmoji={customEmoji}
         chats={chats}
         activeChat={activeChat}
         onSelectChat={handleSelectChat}
@@ -2108,6 +2129,7 @@ const Chat: React.FC = () => {
             onStartReply={setReplyingMessage}
             onForward={(ids) => setForwardIds(ids)}
             reactionEmoji={reactionEmoji}
+            customEmoji={customEmoji}
             onToggleReaction={handleToggleReaction}
             onRemoveReaction={handleRemoveReaction}
             onForwardToSelf={selfChatId ? (ids) => forwardTo(ids, selfChatId, false) : undefined}

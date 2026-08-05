@@ -368,6 +368,28 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_emoji_items_pack ON emoji_items(pack_id);
 `);
 
+// Миграция: кастомные смайлики картинками. Пак теперь бывает двух видов —
+// юникодный (как раньше, `emoji` заполнен) и картиночный (`file_path` + `name`).
+// Разделение по items, а не по паку: колонка `kind` на паке потребовала бы
+// запрещать смешивание, а запрещать нечего — вид элемента виден по нему самому.
+//
+// `name` — короткое имя вида :cat:, ИМЕННО ОНО уезжает в текст сообщения.
+// Картинку в `messages.text` не положить, а менять формат хранения сообщений
+// ради смайликов нельзя: там лежит трёхлетний архив, который трогать запрещено.
+try {
+  db.exec(`ALTER TABLE emoji_items ADD COLUMN name TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE emoji_items ADD COLUMN file_path TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+// Имя уникально глобально, а не внутри пака: в тексте сообщения пака нет —
+// там только :name:, и по нему нужно однозначно найти картинку.
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_emoji_items_name ON emoji_items(name) WHERE name IS NOT NULL`);
+
 // Миграция: добавляем колонку status, если БД старая
 try {
   db.exec(`ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'sent'`);
