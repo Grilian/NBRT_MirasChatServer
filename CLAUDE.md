@@ -40,7 +40,7 @@
 - `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only` → `messages.sender_ip` → `users.status_expires_at` → `messages.reply_to_id`/`forwarded_from_name`/`forwarded_from_chat` → `message_hidden` → `messages.read_at` → `message_reactions`. Все идемпотентны, накатаны на проде.
 
 **Текущая версия и деплой**
-- Прод сейчас: 1.5.13 на всех платформах (сервер/веб/Windows/Android) — versionCode 30 для Android.
+- Прод сейчас: Android 1.5.14 (versionCode 31), сервер/веб/Windows — 1.5.13. Версии разъехались намеренно: исправления синтетического click касались в первую очередь тача, и по просьбе пользователя выкатывался только Android. На вебе и Windows эти баги ещё живут — при следующей выкладке подтянуть их к общей версии.
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
