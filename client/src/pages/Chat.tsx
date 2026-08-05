@@ -2134,10 +2134,12 @@ const Chat: React.FC = () => {
                   ? WRITE_BLOCKED_HINT[activeChatMeta.writePolicy || 'nobody']
                 // Статус собеседника прямо в поле ввода: видно ровно в тот
                 // момент, когда собираешься писать, — не нужно вспоминать,
-                // что человек в отпуске, уже отправив сообщение. Имя тут не
-                // повторяем: оно и так в шапке прямо над полем.
+                // что человек в отпуске, уже отправив сообщение. Имя здесь
+                // намеренно повторяется, хотя оно есть и в шапке: формат
+                // «Сообщение {Имя} {статус}» выбран пользователем и сейчас
+                // проверяется на живых людях — не «чинить» обратно.
                 : activeChatMeta?.status
-                  ? `${activeChatMeta.status.emoji} ${activeChatMeta.status.label}`
+                  ? `Сообщение ${activeChatMeta.name} ${activeChatMeta.status.emoji} ${activeChatMeta.status.label}`
                   : undefined
             }
             editing={editingMessage}
