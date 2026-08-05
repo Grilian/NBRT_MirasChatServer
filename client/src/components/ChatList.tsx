@@ -1,6 +1,7 @@
 import React from 'react';
 import Avatar from './Avatar';
 import { formatChatListTime } from '../utils/time';
+import { describeStatus } from '../utils/statusMeta';
 
 export type ChatSection = 'general' | 'staff' | 'group' | 'self';
 
@@ -28,6 +29,12 @@ interface LastMessage {
 }
 
 interface ChatListProps {
+  /** Свой аватар и статус в шапке — вход в выбор статуса одним тапом. */
+  selfName: string;
+  selfAvatarPath: string | null;
+  statusPreset: string | null;
+  statusCustom: string | null;
+  onOpenStatus: () => void;
   chats: Chat[];
   activeChat: string | null;
   onSelectChat: (chatId: string) => void;
@@ -82,9 +89,11 @@ const ChatList: React.FC<ChatListProps> = ({
   chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite,
   onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings,
-  resizeHandle
+  resizeHandle,
+  selfName, selfAvatarPath, statusPreset, statusCustom, onOpenStatus,
 }) => {
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+  const ownStatus = describeStatus(statusPreset, statusCustom);
   // Ищем и по комментарию к имени — он больше не часть name (см. row-comment).
   const needle = searchQuery.toLowerCase();
   const filtered = chats.filter(c => (
@@ -100,10 +109,21 @@ const ChatList: React.FC<ChatListProps> = ({
     <aside className="roster">
       {resizeHandle}
       <div className="roster-head">
-        {/* Аватар и настройки живут на рельсе слева — здесь остаётся только
-            заголовок колонки, счётчик и «прочитать всё», иначе на экране было
-            бы два своих аватара подряд. */}
+        {/* Свой аватар со статусом. На телефоне блок «себя» с рельса скрыт
+            (там шесть вкладок), и до статуса приходилось идти через настройки
+            и правку профиля — три уровня, до которых догадывался не каждый.
+            Тап открывает только выбор статуса, не весь профиль. */}
         <div className="roster-account">
+          <button
+            type="button"
+            className="roster-self"
+            onClick={onOpenStatus}
+            title={ownStatus ? ownStatus.label : 'Поставить статус'}
+            aria-label={ownStatus ? `Статус: ${ownStatus.label}` : 'Поставить статус'}
+          >
+            <Avatar name={selfName} avatarPath={selfAvatarPath} size="sm" online />
+            {ownStatus && <span className="roster-self-status">{ownStatus.emoji}</span>}
+          </button>
           <div className="roster-heading">Чаты</div>
           {totalUnread > 0 && (
             <>

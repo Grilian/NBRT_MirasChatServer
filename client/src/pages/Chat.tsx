@@ -25,6 +25,7 @@ import { nameFor } from '../utils/user';
 import { renderUnreadBadge } from '../utils/badgeIcon';
 import { describeStatus } from '../utils/statusMeta';
 import { WritePolicy, WRITE_BLOCKED_HINT } from '../utils/writePolicy';
+import StatusSheet from '../components/StatusSheet';
 import {
   ensureMobileNotificationPermission,
   showMobileNotification,
@@ -408,6 +409,7 @@ const Chat: React.FC = () => {
   const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Избранное');
   // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
   const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
+  const [statusSheetOpen, setStatusSheetOpen] = useState(false);
   const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
   const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
@@ -1806,6 +1808,11 @@ const Chat: React.FC = () => {
 
       {showRoster && (
       <ChatList
+        selfName={currentDisplayName}
+        selfAvatarPath={currentAvatarPath}
+        statusPreset={currentStatusPreset}
+        statusCustom={currentStatusCustom}
+        onOpenStatus={() => setStatusSheetOpen(true)}
         chats={chats}
         activeChat={activeChat}
         onSelectChat={handleSelectChat}
@@ -1974,6 +1981,20 @@ const Chat: React.FC = () => {
           }))}
           onClose={() => setForwardIds(null)}
           onConfirm={handleForward}
+        />
+      )}
+
+      {statusSheetOpen && (
+        <StatusSheet
+          statusPreset={currentStatusPreset}
+          statusCustom={currentStatusCustom}
+          onStatusChanged={(preset, custom) => {
+            setCurrentStatusPreset(preset);
+            setCurrentStatusCustom(custom);
+            localStorage.setItem('statusPreset', preset || '');
+            localStorage.setItem('statusCustom', custom || '');
+          }}
+          onClose={() => setStatusSheetOpen(false)}
         />
       )}
 
