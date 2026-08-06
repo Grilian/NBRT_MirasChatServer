@@ -61,7 +61,19 @@ router.post('/upload-image', verifyToken, (req, res) => {
     }
 
     try {
-      const filename = `msg_${req.userId}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.webp`;
+      // Прозрачность нужна клиенту, чтобы не подкладывать под наклейку плашку
+      // и не обводить её рамкой. Метку кладём В ИМЯ ФАЙЛА (суффикс `_a`), а не
+      // отдельной колонкой: иначе флаг пришлось бы протаскивать через сокет,
+      // вставку сообщения и все три выдачи истории ради одного бита, который
+      // и так однозначно определяется самим файлом. Старые картинки суффикса
+      // не имеют и считаются непрозрачными — это верно, они такими и были.
+      // ВАЖНО: спрашиваем не про наличие альфа-канала, а про то, есть ли в нём
+      // хоть один прозрачный пиксель. Скриншоты и любой PNG из canvas почти
+      // всегда идут с альфа-каналом, будучи полностью непрозрачными, — по
+      // hasAlpha рамку потеряли бы почти все картинки.
+      const { isOpaque } = await sharp(req.file.buffer).stats();
+      const suffix = isOpaque ? '' : '_a';
+      const filename = `msg_${req.userId}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${suffix}.webp`;
       const outputPath = path.join(CHAT_IMAGES_DIR, filename);
 
       const image = sharp(req.file.buffer).rotate();

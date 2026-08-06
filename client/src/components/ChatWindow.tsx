@@ -198,17 +198,43 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // подробности в useLayoutEffect ниже.
   const pendingRestoreRef = useRef<{ height: number; top: number } | null>(null);
 
+  // Читается внутри эффектов вместо state — по значению из замыкания.
+  // Обновляется в теле рендера, а не в отдельном эффекте, поэтому к моменту,
+  // когда эффекты ниже выполняются, всегда содержит актуальное значение.
+  const shouldScrollRef = useRef(shouldScrollToBottom);
+  shouldScrollRef.current = shouldScrollToBottom;
+
+  // Смена чата не обязана совпадать по кадру с эффектом ниже (порядок эффектов
+  // в компоненте фиксирован объявлением, а не тем, что изменилось раньше), а
+  // shouldScrollToBottom в этот момент мог ещё хранить значение от ПРЕЖНЕГО
+  // чата — например, false, если там читали историю выше. Эффект срабатывал
+  // с этим устаревшим флагом, прокрутки не было, а prevMessagesLengthRef при
+  // этом уже обновлялся до длины нового чата — и повторный запуск того же
+  // эффекта (после того как флаг наконец переставили в true) видел
+  // messages.length, равный уже записанному, и снова не прокручивал. Чат
+  // открывался неизвестно где — ровно то, что было замечено на Android.
+  // Читаем свежее значение флага через ref, а не как зависимость эффекта:
+  // так эффект реагирует только на реальную смену сообщений/чата, а не на
+  // побочный проброс того же флага через другой эффект.
+  const prevChatIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (messages.length === 0) return;
 
-    if (messages.length > prevMessagesLengthRef.current) {
-      if (shouldScrollToBottom) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-      }
+    const chatJustOpened = prevChatIdRef.current !== chatId;
+    const grew = messages.length > prevMessagesLengthRef.current;
+    // Последнее добавленное — моё собственное: после отправки своего
+    // сообщения лента уходит вниз всегда, даже если до этого читали историю
+    // выше, — как и ожидается от «отправил и увидел, что ушло».
+    const lastIsMine = grew && messages[messages.length - 1]?.sender_id === currentUserId;
+
+    if (chatJustOpened || lastIsMine || (grew && shouldScrollRef.current)) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
 
     prevMessagesLengthRef.current = messages.length;
-  }, [messages, shouldScrollToBottom]);
+    prevChatIdRef.current = chatId;
+  }, [messages, chatId, currentUserId]);
 
   // Появление экранной клавиатуры на Android физически уменьшает высоту
   // WebView (adjustResize) — flex-раскладка тут же сжимает conv-body под
@@ -218,8 +244,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // только ручной прокруткой. Довозвращаем прокрутку к концу сами — и только
   // если человек и так были внизу: если он читает историю выше, набор
   // сообщения не должен выдёргивать его обратно к последним репликам.
-  const shouldScrollRef = useRef(shouldScrollToBottom);
-  shouldScrollRef.current = shouldScrollToBottom;
 
   useEffect(() => {
     return onKeyboardShow(() => {
@@ -806,7 +830,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     {msg.file_path && (
                       <button
                         type="button"
-                        className="bubble-image"
+                        // Суффикс `_a` в имени ставит сервер, когда в картинке
+                        // есть прозрачность (см. routes/messages.js).
+                        className={'bubble-image' + (/_a\.webp$/.test(msg.file_path) ? ' has-alpha' : '')}
                         style={msg.file_width && msg.file_height ? { aspectRatio: `${msg.file_width} / ${msg.file_height}` } : undefined}
                         onClick={(e) => {
                           e.stopPropagation();

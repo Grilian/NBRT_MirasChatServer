@@ -638,11 +638,24 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    а не сидит внутри с рамкой вокруг, как отдельная плашка. Соотношение сторон
    задаётся инлайн-стилем из file_width/file_height — резервирует место под
    картинку ещё до её загрузки, вёрстка не прыгает. */
+/* max-height задан КОНТЕЙНЕРУ, а не картинке внутри. Раньше ограничение висело
+   на <img>: контейнер держал пропорции оригинала и вырастал высоким, картинку
+   же обрезало до 320px, и при object-fit: cover у высоких снимков пропадали
+   верх и низ — в полноэкранном просмотре при этом всё было цело.
+   Теперь пропорция и предел высоты живут на одном элементе: браузер сам сужает
+   ширину, и кадр виден целиком. */
 .bubble-image {
-  display: block; width: calc(100% + 22px); max-width: 320px; margin: -6px -11px 4px;
+  display: block; width: calc(100% + 22px); max-width: 320px; max-height: 320px;
+  margin: -6px -11px 4px;
   border: none; padding: 0; cursor: zoom-in; background: var(--paper-sunken);
   border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
 }
+/* У картинки с прозрачностью подложки быть не должно — она видна сквозь
+   прозрачные места и превращает наклейку в плашку. Непрозрачным, наоборот,
+   рисуем тонкую рамку: на скриншоте приложения край снимка иначе сливается
+   с фоном переписки. Прозрачность помечает сервер при загрузке. */
+.bubble-image.has-alpha { background: none; }
+.bubble-image:not(.has-alpha) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent); }
 .bubble-image:only-child { margin-bottom: -7px; border-radius: var(--radius-md); }
 /* Отрицательный верхний отступ затягивает картинку под верхний край пузыря —
    это верно, только когда над ней ничего нет. Стоит появиться строке выше
@@ -651,7 +664,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    конкретному соседу: на имени автора этот баг уже ловили один раз, на
    пересылке — второй, и следующий элемент над картинкой поймал бы третий. */
 .bubble-image:not(:first-child) { margin-top: 4px; border-radius: var(--radius-md); }
-.bubble-image img { width: 100%; height: 100%; object-fit: cover; display: block; max-height: 320px; }
+.bubble-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .lightbox-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 60;
@@ -826,9 +839,11 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 /* Кастомный смайлик в тексте: по высоте строки и с выравниванием по базовой
    линии, иначе он растаскивает межстрочный интервал в абзаце. */
+/* 2× размера шрифта. Прежние правки считали проценты от уже применённого
+   значения («+10%», «+75%») и раздули размер до 3.27× текста. */
 .custom-emoji {
-  display: inline-block; width: 1.87em; height: 1.87em; object-fit: contain;
-  vertical-align: -0.52em; margin: 0 1px;
+  display: inline-block; width: 2em; height: 2em; object-fit: contain;
+  vertical-align: -0.55em; margin: 0 1px;
 }
 /* В панели выбора — по размеру ячейки, а не строки текста. */
 .emoji-cell .custom-emoji { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
