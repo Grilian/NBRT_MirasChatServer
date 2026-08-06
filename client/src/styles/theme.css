@@ -603,8 +603,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .msg.mine { align-self: flex-end; align-items: flex-end; }
 .msg.theirs { align-self: flex-start; align-items: flex-start; }
 
+/* min-width: 0 обязателен: пузырь — флекс-элемент .msg, а у флекс-элемента
+   минимальная ширина по умолчанию равна содержимому. В CSS min-width сильнее
+   max-width, поэтому длинная неразрывная строка внутри (цитата с nowrap,
+   ссылка) раздувала пузырь ЗА пределы max-width, и текст вылезал за край. */
 .bubble {
-  position: relative; max-width: 100%;
+  position: relative; max-width: 100%; min-width: 0;
   padding: 6px 11px 7px; border-radius: var(--radius-md);
   font-size: 14.5px; line-height: 1.35;
 }
@@ -695,20 +699,34 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 /* Цитата внутри пузыря — полоска слева, как в Telegram. Кнопка, а не div:
    по ней уходят к исходному сообщению. */
+/* min-width: 0 обязателен и на самой цитате, и на её строках: у флекс-элемента
+   минимальная ширина по умолчанию равна содержимому, поэтому длинная строка с
+   nowrap распирала блок изнутри и вылезала за край пузыря, а многоточие не
+   появлялось — обрезать было нечего, ширина «подстраивалась» под текст. */
 .bubble-reply {
-  display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left;
+  display: flex; flex-direction: column; gap: 1px; width: 100%; min-width: 0; text-align: left;
   border: none; border-left: 2px solid currentColor; background: color-mix(in srgb, currentColor 8%, transparent);
   border-radius: 0 6px 6px 0; padding: 4px 8px; margin-bottom: 4px; cursor: pointer;
-  font: inherit; color: inherit; opacity: .85;
+  font: inherit; color: inherit; opacity: .85; overflow: hidden;
 }
 .bubble-reply:hover { opacity: 1; }
-.bubble-reply-author { font-size: 12px; font-weight: 600; }
-.bubble-reply-text { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bubble-reply-author {
+  font-size: 12px; font-weight: 600;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bubble-reply-text {
+  font-size: 12.5px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
+/* Имя отправителя может быть длинным — строку тоже обрезаем, а не растягиваем
+   ею пузырь. */
 .bubble-forwarded {
   display: flex; align-items: center; gap: 4px; font-size: 12px; font-style: italic;
-  opacity: .75; margin-bottom: 3px;
+  opacity: .75; margin-bottom: 3px; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.bubble-forwarded svg { flex: none; }
 
 /* Прыжок к исходному сообщению — короткая вспышка, иначе непонятно, куда
    именно уехал экран. */
@@ -1345,6 +1363,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    кто сверху, а не то, какое окно открыли позже. */
 .modal-overlay-nested { z-index: 55; }
 .modal-card {
+  position: relative; /* якорь для плашек внутри окна (например «в разработке») */
   width: 100%; max-width: 420px; max-height: 80vh; background: var(--paper-raised);
   border-radius: var(--radius-lg); display: flex; flex-direction: column; overflow: hidden;
   box-shadow: var(--shadow-lg);
@@ -1519,15 +1538,64 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   display: flex; flex-direction: column; align-items: center; text-align: center;
   padding: 0 20px 26px; gap: 6px; flex: 1; min-height: 0; overflow-y: auto;
 }
-.user-info-hero {
-  display: flex; flex-direction: column; align-items: center; gap: 6px; width: calc(100% + 40px); margin: 0 -20px 18px;
-  padding: 30px 20px 24px; background: linear-gradient(160deg, var(--accent), #7a5fd0); border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+/* Шапка-фотография во всю ширину окна. Снизу снимок уходит в размытие с
+   затемнением: имя и статус лежат поверх него, и без этой подложки они
+   пропадали бы на светлой или пёстрой фотографии. */
+/* flex: none обязателен — тело профиля это колонка с прокруткой, и без него
+   шапку сжимало по высоте до нуля вместе с остальным содержимым. */
+.user-info-cover {
+  position: relative; flex: none; width: calc(100% + 40px); margin: 0 -20px 14px;
+  aspect-ratio: 1 / 1; max-height: 340px; overflow: hidden;
+  background: linear-gradient(160deg, var(--accent), #7a5fd0);
 }
-.user-info-hero .avatar { width: 92px; height: 92px; font-size: 30px; border: 3px solid color-mix(in srgb, #fff 70%, transparent); box-shadow: var(--shadow-md); }
-.user-info-hero .avatar .dot { border-color: color-mix(in srgb, #7a5fd0 60%, var(--accent)); }
-.user-info-name { font-weight: 600; font-size: 17px; color: #fff; }
-.user-info-status { font-size: 12.5px; color: color-mix(in srgb, #fff 80%, transparent); }
+.user-info-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.user-info-cover-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.user-info-cover-fallback .avatar { width: 120px; height: 120px; font-size: 40px; }
+/* Само размытие: полоса снизу, где картинка растворяется в темноте. */
+.user-info-cover-fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 55%;
+  backdrop-filter: blur(14px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 60%);
+  mask-image: linear-gradient(to bottom, transparent, #000 60%);
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, .62));
+  pointer-events: none;
+}
+.user-info-cover-text {
+  position: absolute; left: 0; right: 0; bottom: 14px; padding: 0 20px; text-align: center;
+}
+.user-info-name { font-weight: 600; font-size: 20px; color: #fff; text-shadow: 0 1px 8px rgba(0,0,0,.4); }
+.user-info-status { font-size: 13px; color: color-mix(in srgb, #fff 80%, transparent); }
 .user-info-status.is-online { color: #fff; font-weight: 600; }
+
+/* Ряд круглых кнопок под шапкой — заложен под звонки, уведомления и поиск. */
+.user-info-actions { display: flex; flex: none; justify-content: center; gap: 14px; width: 100%; margin-bottom: 18px; }
+.user-info-action {
+  width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--paper-sunken); color: var(--ink);
+  display: flex; align-items: center; justify-content: center; transition: background var(--ease);
+}
+.user-info-action:hover { background: var(--row-hover); color: var(--accent); }
+
+/* Заглушка под вложения переписки */
+.user-info-files { width: 100%; margin-top: 4px; }
+.user-info-files-tabs {
+  display: flex; gap: 2px; padding: 3px; background: var(--paper-sunken);
+  border-radius: var(--radius-pill); margin-bottom: 12px;
+}
+.user-info-files-tab {
+  flex: 1; border: none; background: none; cursor: pointer; padding: 8px 4px;
+  border-radius: var(--radius-pill); font-size: 13px; color: var(--ink-muted); font-weight: 500;
+}
+.user-info-files-tab.is-active { background: var(--paper-raised); color: var(--ink); box-shadow: var(--shadow-sm); }
+.user-info-files-empty { padding: 26px 10px; text-align: center; font-size: 13px; color: var(--ink-faint); }
+
+/* «В разработке» — короткая плашка внизу окна, гаснет сама. */
+.user-info-soon {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  background: color-mix(in srgb, var(--ink) 82%, transparent); color: var(--paper-raised);
+  padding: 9px 16px; border-radius: var(--radius-pill); font-size: 13px; font-weight: 500;
+  box-shadow: var(--shadow-lg); pointer-events: none; white-space: nowrap; z-index: 2;
+}
 .user-info-fields {
   width: 100%; margin: 0 0 20px; background: var(--paper-raised); border-radius: var(--radius-lg);
   padding: 4px 14px; box-shadow: var(--shadow-sm);

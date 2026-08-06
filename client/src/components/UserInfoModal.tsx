@@ -4,6 +4,7 @@ import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
 import { formatDate } from '../utils/time';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
+import { resolveUploadUrl } from '../utils/uploads';
 
 interface UserInfoModalProps {
   user: {
@@ -36,8 +37,33 @@ interface ModerationInfo {
   department_id: number | null;
 }
 
+const icon = (...paths: string[]) => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    {paths.map((d, i) => <path key={i} d={d} />)}
+  </svg>
+);
+
+// Заложены под будущее, ни одна пока не подключена — см. setSoonNote.
+const PLANNED_ACTIONS = [
+  { key: 'call', label: 'Звонок', icon: icon('M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.6a2 2 0 0 1-.4 2.1L8.1 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.8.3 1.7.6 2.6.7a2 2 0 0 1 1.7 2Z') },
+  { key: 'mute', label: 'Уведомления', icon: icon('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9', 'M13.7 21a2 2 0 0 1-3.4 0') },
+  { key: 'search', label: 'Поиск по переписке', icon: icon('M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z', 'm21 21-4.3-4.3') },
+  { key: 'more', label: 'Ещё', icon: icon('M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2', 'M19 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2', 'M5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2') },
+];
+
+const FILE_TABS = ['Медиа', 'Файлы', 'Ссылки', 'Голосовые'];
+
 const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate, groups = [], comment, onUpdateComment, onClose }) => {
   const name = nameFor(user);
+  const coverUrl = resolveUploadUrl(user.avatarPath);
+
+  // Подсказка о неготовом разделе гаснет сама через пару секунд.
+  const [soonNote, setSoonNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!soonNote) return;
+    const t = setTimeout(() => setSoonNote(null), 2200);
+    return () => clearTimeout(t);
+  }, [soonNote]);
   const [moderation, setModeration] = useState<ModerationInfo | null>(null);
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
   const [modError, setModError] = useState('');
@@ -103,10 +129,36 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
         </div>
 
         <div className="user-info-body">
-          <div className="user-info-hero">
-            <Avatar name={name} avatarPath={user.avatarPath} size="md" />
-            <div className="user-info-name">{name}</div>
-            <div className={'user-info-status' + (online ? ' is-online' : '')}>{online ? 'в сети' : 'не в сети'}</div>
+          {/* Шапка-фотография во всю ширину. Снимок уходит в размытие книзу,
+              чтобы имя поверх него читалось при любой картинке — светлой,
+              пёстрой или тёмной, — а не только на удачной. */}
+          <div className="user-info-cover">
+            {coverUrl
+              ? <img className="user-info-cover-img" src={coverUrl} alt="" />
+              : <div className="user-info-cover-fallback"><Avatar name={name} avatarPath={null} size="md" /></div>}
+            <div className="user-info-cover-fade" />
+            <div className="user-info-cover-text">
+              <div className="user-info-name">{name}</div>
+              <div className={'user-info-status' + (online ? ' is-online' : '')}>{online ? 'в сети' : 'не в сети'}</div>
+            </div>
+          </div>
+
+          {/* Кнопки действий заложены под будущее — звонки, уведомления,
+              поиск по переписке. Пока ни одна не подключена, поэтому каждая
+              честно говорит об этом, а не молчит в ответ на нажатие. */}
+          <div className="user-info-actions">
+            {PLANNED_ACTIONS.map((action) => (
+              <button
+                key={action.key}
+                type="button"
+                className="user-info-action"
+                title={action.label}
+                aria-label={action.label}
+                onClick={() => setSoonNote(action.label)}
+              >
+                {action.icon}
+              </button>
+            ))}
           </div>
 
           <div className="user-info-fields">
@@ -244,7 +296,30 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
               )}
             </div>
           )}
+
+          {/* Место под вложения переписки. Вкладки нарисованы, но пусты:
+              механики ещё нет, и показывать пустую сетку без объяснения
+              хуже, чем честно сказать, что раздел в работе. */}
+          <div className="user-info-files">
+            <div className="user-info-files-tabs">
+              {FILE_TABS.map((tab, i) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={'user-info-files-tab' + (i === 0 ? ' is-active' : '')}
+                  onClick={() => setSoonNote(tab)}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            <div className="user-info-files-empty">Здесь появятся вложения из переписки</div>
+          </div>
         </div>
+
+        {/* Ответ на нажатие того, что ещё не сделано. Само пропадает — просить
+            закрыть подсказку, которая ничего не сообщила, незачем. */}
+        {soonNote && <div className="user-info-soon" role="status">{soonNote} — в разработке</div>}
       </div>
     </div>
   );
