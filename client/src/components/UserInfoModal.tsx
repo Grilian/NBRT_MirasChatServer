@@ -129,39 +129,40 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
         </div>
 
         <div className="user-info-body">
-          {/* Шапка-фотография во всю ширину. Снимок уходит в размытие книзу,
-              чтобы имя поверх него читалось при любой картинке — светлой,
-              пёстрой или тёмной, — а не только на удачной. */}
-          <div className="user-info-cover">
-            {coverUrl
-              ? <img className="user-info-cover-img" src={coverUrl} alt="" />
-              : <div className="user-info-cover-fallback"><Avatar name={name} avatarPath={null} size="md" /></div>}
+          {/* Верх профиля целиком лежит НА фотографии: сверху она резкая, ниже
+              уходит в размытие, и уже по размытому снимку идут имя, кнопки и
+              плашка с данными. Цвет фона под ними берётся из самой фотографии —
+              поэтому у каждого человека профиль своего оттенка. */}
+          <div className={'user-info-top' + (coverUrl ? '' : ' has-no-photo')}>
+            {coverUrl && <img className="user-info-cover-img" src={coverUrl} alt="" />}
             <div className="user-info-cover-fade" />
-            <div className="user-info-cover-text">
+
+            <div className="user-info-top-content">
+              {!coverUrl && (
+                <div className="user-info-cover-fallback"><Avatar name={name} avatarPath={null} size="md" /></div>
+              )}
               <div className="user-info-name">{name}</div>
               <div className={'user-info-status' + (online ? ' is-online' : '')}>{online ? 'в сети' : 'не в сети'}</div>
-            </div>
-          </div>
 
-          {/* Кнопки действий заложены под будущее — звонки, уведомления,
-              поиск по переписке. Пока ни одна не подключена, поэтому каждая
-              честно говорит об этом, а не молчит в ответ на нажатие. */}
-          <div className="user-info-actions">
-            {PLANNED_ACTIONS.map((action) => (
-              <button
-                key={action.key}
-                type="button"
-                className="user-info-action"
-                title={action.label}
-                aria-label={action.label}
-                onClick={() => setSoonNote(action.label)}
-              >
-                {action.icon}
-              </button>
-            ))}
-          </div>
+              {/* Кнопки заложены под будущее — звонки, уведомления, поиск.
+                  Ни одна не подключена, поэтому каждая честно об этом
+                  сообщает, а не молчит в ответ на нажатие. */}
+              <div className="user-info-actions">
+                {PLANNED_ACTIONS.map((action) => (
+                  <button
+                    key={action.key}
+                    type="button"
+                    className="user-info-action"
+                    title={action.label}
+                    aria-label={action.label}
+                    onClick={() => setSoonNote(action.label)}
+                  >
+                    {action.icon}
+                  </button>
+                ))}
+              </div>
 
-          <div className="user-info-fields">
+              <div className="user-info-fields">
             {user.groupName && (
               <div className="user-info-field">
                 <span className="user-info-label">Группа</span>
@@ -226,6 +227,8 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
                 )}
               </div>
             )}
+              </div>
+            </div>
           </div>
 
           {canModerate && (

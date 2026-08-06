@@ -1541,40 +1541,52 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Шапка-фотография во всю ширину окна. Снизу снимок уходит в размытие с
    затемнением: имя и статус лежат поверх него, и без этой подложки они
    пропадали бы на светлой или пёстрой фотографии. */
-/* flex: none обязателен — тело профиля это колонка с прокруткой, и без него
-   шапку сжимало по высоте до нуля вместе с остальным содержимым. */
-.user-info-cover {
-  position: relative; flex: none; width: calc(100% + 40px); margin: 0 -20px 14px;
-  aspect-ratio: 1 / 1; max-height: 340px; overflow: hidden;
+/* Верх профиля — фотография как подложка ПОД всем содержимым: имя, кнопки и
+   плашка с данными лежат на ней. Сверху снимок резкий, ниже уходит в
+   размытие, и цвет под элементами берётся из самого снимка — поэтому у
+   каждого человека профиль своего оттенка.
+   flex: none обязателен: тело профиля это колонка с прокруткой, без него
+   блок сжимало по высоте вместе с остальным содержимым. */
+.user-info-top {
+  position: relative; flex: none; width: calc(100% + 40px); margin: 0 -20px 16px;
+  overflow: hidden; isolation: isolate;
   background: linear-gradient(160deg, var(--accent), #7a5fd0);
 }
-.user-info-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.user-info-cover-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-.user-info-cover-fallback .avatar { width: 120px; height: 120px; font-size: 40px; }
-/* Само размытие: полоса снизу, где картинка растворяется в темноте. */
+.user-info-cover-img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;
+}
+/* Размытие идёт снизу вверх и не доходит до верха — там снимок остаётся
+   чётким. Маска задаёт саму границу перехода, затемнение под ней нужно,
+   чтобы белый текст читался и на светлой фотографии. */
 .user-info-cover-fade {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 55%;
-  backdrop-filter: blur(14px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 60%);
-  mask-image: linear-gradient(to bottom, transparent, #000 60%);
-  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, .62));
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  backdrop-filter: blur(22px) saturate(120%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 26%, #000 52%);
+  mask-image: linear-gradient(to bottom, transparent 26%, #000 52%);
+  background: linear-gradient(to bottom, transparent 24%, rgba(0, 0, 0, .30) 46%, rgba(0, 0, 0, .55));
   pointer-events: none;
 }
-.user-info-cover-text {
-  position: absolute; left: 0; right: 0; bottom: 14px; padding: 0 20px; text-align: center;
+/* Содержимое поверх снимка. Верхний отступ и есть та резкая часть фотографии,
+   которую видно до начала размытия. */
+.user-info-top-content {
+  position: relative; z-index: 1; padding: 210px 18px 18px; text-align: center;
 }
-.user-info-name { font-weight: 600; font-size: 20px; color: #fff; text-shadow: 0 1px 8px rgba(0,0,0,.4); }
-.user-info-status { font-size: 13px; color: color-mix(in srgb, #fff 80%, transparent); }
+.user-info-top.has-no-photo .user-info-top-content { padding-top: 24px; }
+.user-info-cover-fallback { display: flex; justify-content: center; margin-bottom: 10px; }
+.user-info-cover-fallback .avatar { width: 104px; height: 104px; font-size: 34px; }
+.user-info-name { font-weight: 600; font-size: 21px; color: #fff; text-shadow: 0 1px 10px rgba(0,0,0,.45); }
+.user-info-status { font-size: 13px; color: color-mix(in srgb, #fff 78%, transparent); }
 .user-info-status.is-online { color: #fff; font-weight: 600; }
 
-/* Ряд круглых кнопок под шапкой — заложен под звонки, уведомления и поиск. */
-.user-info-actions { display: flex; flex: none; justify-content: center; gap: 14px; width: 100%; margin-bottom: 18px; }
+/* Кнопки на снимке — стеклянные, чтобы фотография просвечивала. */
+.user-info-actions { display: flex; flex: none; justify-content: center; gap: 14px; width: 100%; margin: 16px 0 18px; }
 .user-info-action {
-  width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer;
-  background: var(--paper-sunken); color: var(--ink);
+  width: 52px; height: 52px; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .13); backdrop-filter: blur(8px); color: #fff;
   display: flex; align-items: center; justify-content: center; transition: background var(--ease);
 }
-.user-info-action:hover { background: var(--row-hover); color: var(--accent); }
+.user-info-action:hover { background: rgba(255, 255, 255, .24); }
 
 /* Заглушка под вложения переписки */
 .user-info-files { width: 100%; margin-top: 4px; }
@@ -1600,6 +1612,23 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   width: 100%; margin: 0 0 20px; background: var(--paper-raised); border-radius: var(--radius-lg);
   padding: 4px 14px; box-shadow: var(--shadow-sm);
 }
+/* Плашка на фотографии — стеклянная, снимок должен просвечивать сквозь неё.
+   Текст здесь всегда светлый: под ним не тема приложения, а чужое фото. */
+.user-info-top .user-info-fields {
+  margin: 0; text-align: left; box-shadow: none;
+  background: rgba(255, 255, 255, .12); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, .12);
+}
+.user-info-top .user-info-field { border-bottom-color: rgba(255, 255, 255, .14); color: #fff; }
+.user-info-top .user-info-label { color: rgba(255, 255, 255, .62); }
+.user-info-top .user-info-comment-value { color: #fff; }
+.user-info-top .user-info-comment-value svg,
+.user-info-top .user-info-comment-placeholder { color: rgba(255, 255, 255, .62); }
+.user-info-top .user-info-comment-edit input {
+  background: rgba(0, 0, 0, .25); border-color: rgba(255, 255, 255, .2); color: #fff;
+}
+.user-info-top .icon-btn-ghost { color: rgba(255, 255, 255, .75); }
+.user-info-top .icon-btn-ghost:hover { background: rgba(255, 255, 255, .18); color: #fff; }
 .user-info-field { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .user-info-field:last-child { border-bottom: none; }
 .user-info-label { color: var(--ink-faint); flex: none; }
