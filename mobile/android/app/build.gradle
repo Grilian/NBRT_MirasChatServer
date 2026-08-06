@@ -10,8 +10,8 @@ android {
         // Поднимать вручную перед каждой сборкой APK (см. README, раздел
         // «Сборка Android-приложения»): versionCode должен строго расти,
         // иначе Android откажется ставить сборку поверх установленной.
-        versionCode 38
-        versionName "1.6.5"
+        versionCode 39
+        versionName "1.6.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
