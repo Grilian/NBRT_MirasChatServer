@@ -66,15 +66,17 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
               type="button"
               className={'emoji-tab' + (index === activePack ? ' is-active' : '')}
               onClick={() => setActivePack(index)}
+              title={pack.name}
+              aria-label={pack.name}
             >
-              {/* Вкладку подписываем первым смайликом пака — так она читается
-                  с одного взгляда; полное название остаётся в подсказке. */}
+              {/* Только значок: названия паков занимали всю ширину шапки, а на
+                  телефоне вкладки от них не помещались. Название осталось в
+                  подсказке и в aria-label — для мыши и для читалки. */}
               <span className="emoji-tab-icon">
                 {pack.emoji[0] || (pack.custom?.[0]
                   ? <img className="custom-emoji" src={resolveUploadUrl(pack.custom[0].file_path) || ''} alt="" />
                   : '🙂')}
               </span>
-              <span className="emoji-tab-name">{pack.name}</span>
             </button>
           ))}
         </div>

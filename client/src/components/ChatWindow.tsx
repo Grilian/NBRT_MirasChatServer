@@ -79,6 +79,11 @@ const LONG_PRESS_MS = 450;
 // Сколько лиц показываем в чипе реакции, прежде чем перейти на число.
 const REACTION_FACES_MAX = 3;
 
+// Сколько реакций помещается в один ряд плашки над меню; остальные прячутся
+// за стрелку. Не «сколько влезет по ширине» — число фиксировано, чтобы ряд
+// не перестраивался от длины набора и не прыгал при открытии меню.
+const REACTIONS_IN_ROW = 6;
+
 /**
  * Одинаковые реакции складываем в один чип. Порядок групп — по первому
  * поставившему, чтобы чипы не прыгали местами при каждой новой реакции.
@@ -175,6 +180,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const prevMessagesLengthRef = useRef(0);
 
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
+  // Развёрнутый ряд реакций живёт только пока открыто меню: следующее
+  // открытие должно начинаться с компактного вида, а не помнить прошлый.
+  const [reactionsExpanded, setReactionsExpanded] = useState(false);
   // Сообщение, чьи реакции сейчас разбирают в детальном списке.
   const [reactionsFor, setReactionsFor] = useState<number | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -346,6 +354,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // мере сравнения sender_id с currentUserId.
   const openMenuAt = (msg: Message, x: number, y: number) => {
     if (selectMode) return;
+    setReactionsExpanded(false);
     setMenuFor({ id: msg.id, x, y });
   };
 
@@ -903,8 +912,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             style={{ left: menuFor.x, top: menuFor.y }}
           >
             {!!reactionEmoji?.length && onToggleReaction && (
-              <div className="msg-menu-reactions">
-                {reactionEmoji.map((emoji) => {
+              <div className={'msg-menu-reactions' + (reactionsExpanded ? ' is-expanded' : '')}>
+                {(reactionsExpanded ? reactionEmoji : reactionEmoji.slice(0, REACTIONS_IN_ROW)).map((emoji) => {
                   const isCurrent = menuMsg.reactions?.some(
                     (r) => r.user.id === currentUserId && r.emoji === emoji
                   );
@@ -919,6 +928,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     </button>
                   );
                 })}
+
+                {/* Плашка узкая, а набор реакций задаётся в панели и бывает
+                    длиннее. Горизонтальная прокрутка тут не годится: колесом
+                    мыши её не провернуть, и на ПК ряд выглядел обрезанным.
+                    Стрелка разворачивает остальные в несколько рядов. */}
+                {reactionEmoji.length > REACTIONS_IN_ROW && (
+                  <button
+                    type="button"
+                    className={'msg-menu-reaction msg-menu-reaction-more' + (reactionsExpanded ? ' is-open' : '')}
+                    onClick={() => setReactionsExpanded((v) => !v)}
+                    aria-label={reactionsExpanded ? 'Свернуть реакции' : 'Показать все реакции'}
+                    title={reactionsExpanded ? 'Свернуть' : 'Показать все'}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                )}
               </div>
             )}
 
