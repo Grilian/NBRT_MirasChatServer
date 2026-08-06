@@ -827,8 +827,8 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Кастомный смайлик в тексте: по высоте строки и с выравниванием по базовой
    линии, иначе он растаскивает межстрочный интервал в абзаце. */
 .custom-emoji {
-  display: inline-block; width: 1.7em; height: 1.7em; object-fit: contain;
-  vertical-align: -0.45em; margin: 0 1px;
+  display: inline-block; width: 1.87em; height: 1.87em; object-fit: contain;
+  vertical-align: -0.52em; margin: 0 1px;
 }
 /* В панели выбора — по размеру ячейки, а не строки текста. */
 .emoji-cell .custom-emoji { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
