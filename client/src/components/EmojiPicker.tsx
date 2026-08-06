@@ -16,9 +16,15 @@ interface EmojiPickerProps {
   onClose: () => void;
 }
 
-// Паки грузятся один раз на всё приложение: набор меняется редко (правит
-// супер-админ в панели), а панель открывают часто — перезапрашивать список на
-// каждое открытие незачем.
+// Кэш только чтобы не мигать пустой панелью на каждое открытие (компонент
+// размонтируется при закрытии — см. MessageInput, `{emojiOpen && <EmojiPicker
+// .../>}`). Раньше на нём стояла ранняя остановка «если кэш уже есть —
+// не перезапрашивать вовсе», и пак, добавленный супер-админом уже ПОСЛЕ
+// первого открытия панели у конкретного человека, не появлялся до
+// перезапуска приложения — тот же баг, что чинили для отрисовки кастомных
+// смайликов в сообщениях (Chat.tsx, обновление на реконнекте), просто в
+// другом месте. Показываем старые данные мгновенно, а свежие подтягиваем
+// на каждое открытие панели — запрос лёгкий, лишним не будет.
 let cachedPacks: EmojiPack[] | null = null;
 
 const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
@@ -28,10 +34,9 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (cachedPacks) return;
     api.get('/emoji')
       .then(({ data }) => { cachedPacks = data; setPacks(data); })
-      .catch(() => setPacks([]))
+      .catch(() => { if (!cachedPacks) setPacks([]); })
       .finally(() => setLoading(false));
   }, []);
 
