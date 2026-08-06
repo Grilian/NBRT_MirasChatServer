@@ -549,9 +549,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // своего/чужого сообщения. Собираем списком, а не гирляндой из && прямо в
   // разметке: порядок пунктов там разный, и уследить за ним по месту нельзя.
   const buildMenuItems = (msg: Message, mine: boolean): MenuItem[] => {
-    const icon = (d: string, extra?: string) => (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d={d} />{extra && <path d={extra} />}
+    // Принимает сколько угодно контуров: раньше их было два, и иконки из трёх
+    // частей молча теряли лишнее — «Копировать» рисовалась одним уголком.
+    const icon = (...paths: string[]) => (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        {paths.map((d, i) => <path key={i} d={d} />)}
       </svg>
     );
 
@@ -573,13 +575,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     // У картинки без подписи копировать нечего — текста в сообщении нет.
     const copy: MenuItem | null = msg.text ? {
       kind: 'action', key: 'copy', label: 'Копировать',
-      icon: icon('M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'),
+      icon: icon(
+        'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+        'M9 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z',
+      ),
       onClick: () => copyMessageText(msg),
     } : null;
 
     const task: MenuItem | null = msg.text && onCreateTask ? {
       kind: 'action', key: 'task', label: 'Создать задачу',
-      icon: icon('m8.5 12.2 2.4 2.4 4.6-5'),
+      // Список с пунктами — как в референсе; галочка читалась как «готово».
+      icon: icon('M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01'),
       onClick: () => { setMenuFor(null); onCreateTask(msg.text); },
     } : null;
 

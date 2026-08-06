@@ -769,10 +769,16 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
   transform: translate(-8px, 4px);
   max-height: calc(100vh - 16px);
+  /* Слой шире карточки (его ширину задаёт плашка реакций), и пустой промежуток
+     справа от пунктов принадлежал ему же — клик туда считался кликом ВНУТРЬ
+     меню, и закрыть его там было нельзя. Сам слой кликов не принимает,
+     принимают только плашка и карточка. */
+  pointer-events: none;
 }
+.msg-menu-layer > * { pointer-events: auto; }
 .msg-context-menu {
   background: var(--paper-raised); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg); min-width: 232px; padding: 6px 0;
+  box-shadow: var(--shadow-lg); min-width: 250px; padding: 6px 0;
   /* Пунктов много (пересылка в «Избранное», отметки), и на невысоком окне
      карточка перестаёт помещаться — тогда прокручиваем её внутри, а не
      пытаемся сдвинуть выше края экрана. Плашка реакций в прокрутку не
@@ -781,16 +787,18 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .msg-context-menu button {
   width: 100%; text-align: left; border: none; background: none; cursor: pointer;
-  display: flex; align-items: center; gap: 18px;
-  padding: 12px 18px; font-size: 15px; color: var(--ink);
+  display: flex; align-items: center; gap: 22px;
+  padding: 14px 20px; font-size: 16px; color: var(--ink);
 }
 /* Иконка не должна ужиматься под длинной подписью — ряд выравнивается по
    одной вертикали во всех пунктах, как в референсе. */
-.msg-context-menu button > svg { flex: none; width: 20px; height: 20px; opacity: .85; }
+.msg-context-menu button > svg { flex: none; width: 22px; height: 22px; }
 .msg-menu-label { flex: 1; min-width: 0; }
 .msg-context-menu button:hover { background: var(--paper-sunken); }
-.msg-context-menu button.danger { color: var(--unread); }
-.msg-context-menu button.danger:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
+/* «Удалить» в референсе такого же цвета, что и остальные пункты — красным
+   оно было нашим добавлением. Подсветка при наведении остаётся красной:
+   предупредить о разрушающем действии всё-таки стоит. */
+.msg-context-menu button.danger:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); color: var(--unread); }
 /* «Прочитано в …» / «Изменено в …» — отметки, а не действия: не кликаются и
    не подсвечиваются при наведении. */
 .msg-menu-info {
