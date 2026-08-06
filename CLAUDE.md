@@ -44,7 +44,7 @@
 - `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only` → `messages.sender_ip` → `users.status_expires_at` → `messages.reply_to_id`/`forwarded_from_name`/`forwarded_from_chat` → `message_hidden` → `messages.read_at` → `message_reactions` → `chat_groups.write_policy` + `chat_group_writers` + `chat_group_writer_departments` (при добавлении колонки каналам-объявлениям разово проставляется `write_policy = 'admins'`). Все идемпотентны.
 
 **Текущая версия и деплой**
-- Прод сейчас: 1.6.3 на всех платформах (сервер/веб/Windows/Android) — versionCode 36 для Android.
+- Прод сейчас: 1.6.4 на всех платформах (сервер/веб/Windows/Android) — versionCode 37 для Android.
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
