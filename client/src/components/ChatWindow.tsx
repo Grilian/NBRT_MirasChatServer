@@ -763,6 +763,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const selectable = true;
 
           const isSelected = selectedIds.has(msg.id);
+          // Картинка без подписи, у которой прозрачность реальная (не просто
+          // альфа-канал — см. isOpaque на сервере): прозрачные места должны
+          // сливаться с фоном переписки, а не с цветным пузырём сообщения.
+          // Пузырь при "снятой" подложке (has-alpha) иначе просвечивал бы
+          // сквозь картинку своим акцентным цветом — получалась не чистая
+          // прозрачность, а цветная заливка вместо нейтральной.
+          const bareTransparentImage = !!msg.file_path && !msg.text && /_a\.webp$/.test(msg.file_path);
           const className = [
             'msg',
             mine ? 'mine' : 'theirs',
@@ -792,7 +799,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 {selectMode && selectable && (
                   <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
                 )}
-                <div className="bubble">
+                <div className={'bubble' + (bareTransparentImage ? ' bubble-alpha-only' : '')}>
                     {/* Имя автора — только в общем чате и только над первым
                         сообщением блока: в переписке один на один оно
                         повторяло бы имя из шапки на каждой реплике. */}

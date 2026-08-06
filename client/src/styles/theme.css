@@ -614,6 +614,17 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .msg.theirs .bubble { background: var(--bubble-in); color: var(--bubble-in-ink); }
 .msg.mine .bubble { background: var(--bubble-out); color: var(--bubble-out-ink); }
+/* Прозрачная картинка без подписи — без цветного пузыря вовсе, иначе
+   прозрачные места «просвечивали» бы акцентным цветом сообщения (синим у
+   своих) вместо нейтрального фона переписки: заливка другого цвета — тоже
+   подложка, просто другая, а не её отсутствие. Хвостик рисовать не из чего —
+   у прозрачного пузыря нет своего цвета, поэтому скрываем и его.
+   Селектор продублирован под .mine/.theirs: специфичность правил цвета выше
+   («.msg.mine .bubble» — три класса против двух здесь), просто «.bubble.
+   bubble-alpha-only» их не перебивало, и фон оставался синим/серым. */
+.msg.mine .bubble.bubble-alpha-only,
+.msg.theirs .bubble.bubble-alpha-only { background: none; }
+.msg.ends-group .bubble.bubble-alpha-only::after { display: none; }
 
 /* Хвостик — только у последнего пузыря в блоке одного автора, как в Telegram */
 .msg.ends-group.theirs .bubble { border-bottom-left-radius: 3px; }
