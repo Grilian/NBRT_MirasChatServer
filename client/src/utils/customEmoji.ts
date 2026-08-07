@@ -37,7 +37,7 @@ const SHORTCODE = /:([a-z0-9_]{2,32}):/g;
  * Хвост оборванного кода в конце строки. Обрезка текста по длине не должна
  * оставлять на виду огрызок вида ":cat" — он уже не станет картинкой.
  */
-export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_]{0,32}$/, '');
+export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_]{1,32}$/, '');
 
 /** Есть ли в тексте хоть один ИЗВЕСТНЫЙ код — чтобы зря не резать строку. */
 export const hasCustomEmoji = (text: string, map: CustomEmojiMap): boolean => {

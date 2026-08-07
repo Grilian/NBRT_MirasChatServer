@@ -331,7 +331,7 @@ io.on('connection', (socket) => {
     // не станет картинкой и остался бы в БД навсегда техническим текстом.
     // Клиент режет текст сам, но его обрезку можно обойти — это последняя линия.
     const finalText = text.length > MAX_MESSAGE_LENGTH
-      ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{0,32}$/, '')
+      ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '')
       : text;
 
     // Картинка приходит уже загруженной отдельным REST-запросом (см.
