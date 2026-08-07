@@ -842,7 +842,7 @@ interface EmojiPack {
   name: string;
   enabled: boolean;
   emoji: string[];
-  custom?: { id: number; name: string; file_path: string }[];
+  custom?: { id: number; name: string; file_path: string; fallback: string }[];
 }
 
 // Смайлики хранятся текстом (юникод), а не картинками, поэтому пак правится
@@ -900,36 +900,94 @@ function EmojiPacksPanel() {
     }
   };
 
-  // Загрузка картинки. Имя спрашиваем сразу и больше не меняем: оно уже
-  // уехало в тексты отправленных сообщений, и переименование превратило бы их
-  // в мёртвые ссылки.
-  const uploadCustom = async (packId: number, file: File) => {
-    const suggested = file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 32);
-    const name = window.prompt('Имя смайлика (латиница, цифры, подчёркивание). Его будут писать как :имя:', suggested);
-    if (!name) return;
+  // Загрузка набором: имя выводится из имени файла, без вопроса на каждый —
+  // набор из полусотни картинок иначе превращается в полсотни диалогов. Имя,
+  // однажды выданное, больше не меняется: оно уезжает в тексты сообщений, и
+  // переименование превратило бы их в мёртвые ссылки.
+  const uploadCustom = async (packId: number, files: File[]) => {
+    setSavingId(packId);
+    const failed: string[] = [];
+    let latest: EmojiPack[] | null = null;
+    // Последовательно, а не пачкой: имена проверяются на уникальность в БД, и
+    // параллельные загрузки одинаково названных файлов гонялись бы за именем.
+    for (const file of files) {
+      const name = file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 32);
+      const form = new FormData();
+      form.append('image', file);
+      form.append('name', name);
+      try {
+        const { data } = await superAdminApi.post(`/emoji/admin/${packId}/custom`, form);
+        latest = data;
+      } catch (err: any) {
+        // Один занятый или негодный файл не должен ронять всю пачку.
+        failed.push(`${file.name}: ${err.response?.data?.error || 'ошибка загрузки'}`);
+      }
+    }
+    if (latest) apply(latest);
+    setError(failed.length ? `Не загружено (${failed.length}): ${failed.join('; ')}` : '');
+    setSavingId(null);
+  };
 
+  const setFallback = async (itemId: number, fallback: string) => {
+    try {
+      const { data } = await superAdminApi.put(`/emoji/admin/custom/${itemId}`, { fallback });
+      apply(data);
+    } catch {
+      setError('Не удалось сохранить базовый эмодзи');
+    }
+  };
+
+  // Замена картинки под тем же :name: — код и старые сообщения не трогает,
+  // меняется только то, что за кодом показывается.
+  const replaceImage = async (itemId: number, file: File) => {
     const form = new FormData();
     form.append('image', file);
-    form.append('name', name);
-    setSavingId(packId);
+    setSavingId(itemId);
     try {
-      const { data } = await superAdminApi.post(`/emoji/admin/${packId}/custom`, form);
+      const { data } = await superAdminApi.post(`/emoji/admin/custom/${itemId}/image`, form);
       apply(data);
       setError('');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Не удалось загрузить смайлик');
+      setError(err.response?.data?.error || 'Не удалось заменить картинку');
     } finally {
       setSavingId(null);
     }
   };
 
+  // Порядок внутри пака — кнопками, а не перетаскиванием: список открывается
+  // и на телефоне, а drag-and-drop там надёжно не ловится (см. заметки про
+  // синтетический click после touchend в переписке). Меняем локально сразу,
+  // для отклика, и следом отправляем весь порядок на сервер.
+  const moveCustom = async (packId: number, itemId: number, direction: -1 | 1) => {
+    const pack = packs.find((p) => p.id === packId);
+    const list = pack?.custom;
+    if (!list) return;
+    const from = list.findIndex((i) => i.id === itemId);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= list.length) return;
+
+    const reordered = list.slice();
+    [reordered[from], reordered[to]] = [reordered[to], reordered[from]];
+    setPacks((prev) => prev.map((p) => (p.id === packId ? { ...p, custom: reordered } : p)));
+
+    try {
+      const { data } = await superAdminApi.put(`/emoji/admin/${packId}/custom/reorder`, {
+        order: reordered.map((i) => i.id),
+      });
+      apply(data);
+    } catch {
+      setError('Не удалось сохранить порядок');
+      setPacks((prev) => prev.map((p) => (p.id === packId ? { ...p, custom: list } : p)));
+    }
+  };
+
   const removeCustom = async (itemId: number, name: string) => {
-    if (!window.confirm(`Убрать смайлик :${name}: из пака?\n\nВ уже отправленных сообщениях он останется как текст :${name}:`)) return;
+    if (!window.confirm(`Убрать смайлик :${name}: из панели выбора?\n\nВ уже отправленных сообщениях он останется картинкой — вставить его в новые сообщения будет нельзя.`)) return;
     try {
       const { data } = await superAdminApi.delete(`/emoji/admin/custom/${itemId}`);
       apply(data);
     } catch {
-      setError('Не удалось удалить смайлик');
+      setError('Не удалось убрать смайлик');
     }
   };
 
@@ -949,6 +1007,8 @@ function EmojiPacksPanel() {
       <p className="sa-hint">
         Пак — это вкладка в панели смайликов у сотрудников. Смайлики вводятся
         подряд, через пробел; выключенный пак в приложении не показывается.
+        Картинки грузятся набором, имя берётся из имени файла. Убранный смайлик
+        пропадает из панели выбора, но в уже отправленных сообщениях остаётся.
       </p>
       {error && <p className="form-error">{error}</p>}
 
@@ -979,31 +1039,74 @@ function EmojiPacksPanel() {
               загрузки. Юникодные правятся полем выше — это два разных вида
               содержимого, и смешивать их в одном поле нечем. */}
           <div className="sa-emoji-custom">
-            {pack.custom?.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className="sa-emoji-custom-item"
-                title={`:${item.name}: — нажмите, чтобы убрать`}
-                onClick={() => removeCustom(item.id, item.name)}
-              >
-                <img src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
+            {pack.custom?.map((item, index) => (
+              <div key={item.id} className="sa-emoji-custom-item" title={`:${item.name}:`}>
+                <div className="sa-emoji-custom-order">
+                  <button
+                    type="button"
+                    disabled={index === 0}
+                    aria-label={`Сдвинуть :${item.name}: раньше`}
+                    onClick={() => moveCustom(pack.id, item.id, -1)}
+                  >‹</button>
+                  <button
+                    type="button"
+                    disabled={index === (pack.custom?.length ?? 0) - 1}
+                    aria-label={`Сдвинуть :${item.name}: позже`}
+                    onClick={() => moveCustom(pack.id, item.id, 1)}
+                  >›</button>
+                </div>
+                {/* Клик по картинке — замена файла под тем же :name:, а не
+                    уборка смайлика: код и старые сообщения не меняются. */}
+                <label className="sa-emoji-custom-image" title={`Заменить картинку :${item.name}:`}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    disabled={savingId === item.id}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (file) replaceImage(item.id, file);
+                    }}
+                  />
+                  <img src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
+                  <span className="sa-emoji-custom-image-hint">{savingId === item.id ? '…' : 'заменить'}</span>
+                </label>
                 <span>:{item.name}:</span>
-              </button>
+                {/* Базовый эмодзи — для мест, где картинку показать нечем:
+                    уведомления ОС, буфер обмена, пропавший файл. */}
+                <input
+                  className="sa-emoji-fallback"
+                  defaultValue={item.fallback}
+                  placeholder="🙂"
+                  maxLength={16}
+                  title="Базовый эмодзи: подставляется в уведомлениях и при копировании"
+                  onBlur={(e) => { if (e.target.value !== item.fallback) setFallback(item.id, e.target.value); }}
+                />
+                {/* Кнопка, а не клик по всей плитке: раньше попытка поправить
+                    что-либо в плитке означала уборку смайлика. */}
+                <button
+                  type="button"
+                  className="sa-emoji-custom-remove"
+                  aria-label={`Убрать :${item.name}:`}
+                  onClick={() => removeCustom(item.id, item.name)}
+                >×</button>
+              </div>
             ))}
             <label className="sa-emoji-custom-add">
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 style={{ display: 'none' }}
                 disabled={savingId === pack.id}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
+                  const files = Array.from(e.target.files || []);
                   e.target.value = '';
-                  if (file) uploadCustom(pack.id, file);
+                  if (files.length) uploadCustom(pack.id, files);
                 }}
               />
-              {savingId === pack.id ? 'Загрузка…' : '+ Картинкой'}
+              {savingId === pack.id ? 'Загрузка…' : '+ Картинками'}
             </label>
           </div>
 

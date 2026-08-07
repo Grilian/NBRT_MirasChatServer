@@ -6,15 +6,24 @@ export interface CustomEmoji {
   id: number;
   name: string;
   file_path: string;
+  /** Базовый юникодный эмодзи — для мест, где картинку не показать. */
+  fallback?: string | null;
 }
 
-/** name → путь к картинке. Плоская карта: в тексте пака нет, только :name:. */
-export type CustomEmojiMap = Record<string, string>;
+/** name → чем его показывать. Плоская карта: в тексте пака нет, только :name:. */
+export type CustomEmojiMap = Record<string, { filePath: string; fallback: string }>;
 
-export const buildEmojiMap = (packs: { custom?: CustomEmoji[] }[]): CustomEmojiMap => {
+// Подставляется, когда базовый эмодзи у смайлика не задан. Одно место на весь
+// клиент — старые записи в БД бэкфиллить не нужно.
+export const DEFAULT_EMOJI_FALLBACK = '🙂';
+
+export const buildEmojiMap = (
+  items: { name: string; file_path: string; fallback?: string | null }[],
+): CustomEmojiMap => {
   const map: CustomEmojiMap = {};
-  for (const pack of packs) {
-    for (const item of pack.custom || []) map[item.name] = item.file_path;
+  for (const item of items) {
+    if (!item?.name || !item.file_path) continue;
+    map[item.name] = { filePath: item.file_path, fallback: item.fallback || DEFAULT_EMOJI_FALLBACK };
   }
   return map;
 };
@@ -23,6 +32,12 @@ export const buildEmojiMap = (packs: { custom?: CustomEmoji[] }[]): CustomEmojiM
 // регистра, цифры и подчёркивание, от двух символов. Специально узкий, чтобы
 // не цеплять ни смайлики-двоеточия (":D"), ни порты в ссылках ("host:8080").
 const SHORTCODE = /:([a-z0-9_]{2,32}):/g;
+
+/**
+ * Хвост оборванного кода в конце строки. Обрезка текста по длине не должна
+ * оставлять на виду огрызок вида ":cat" — он уже не станет картинкой.
+ */
+export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_]{0,32}$/, '');
 
 /** Есть ли в тексте хоть один ИЗВЕСТНЫЙ код — чтобы зря не резать строку. */
 export const hasCustomEmoji = (text: string, map: CustomEmojiMap): boolean => {
@@ -41,9 +56,10 @@ export const hasCustomEmoji = (text: string, map: CustomEmojiMap): boolean => {
  * вставлять разметку строкой в сообщение нельзя — это прямая дорога к
  * инъекции чужого кода в чужой браузер.
  *
- * Неизвестные коды остаются текстом как есть. Так и задумано: пак могли
- * выключить или смайлик удалить, и подменять их пустотой значило бы менять
- * содержимое чужого сообщения.
+ * Неизвестные коды остаются текстом как есть. Так и задумано: подменять их
+ * пустотой значило бы менять содержимое чужого сообщения. В норме сюда они не
+ * попадают вовсе — каталог отрисовки (GET /emoji/catalog) отдаёт все смайлики,
+ * которые когда-либо существовали, включая убранные и из выключенных паков.
  */
 export function renderTextWithEmoji(
   text: string,
@@ -59,16 +75,13 @@ export function renderTextWithEmoji(
 
   let match = SHORTCODE.exec(text);
   while (match) {
-    const filePath = map[match[1]];
-    if (filePath) {
+    const item = map[match[1]];
+    if (item) {
       if (match.index > last) nodes.push(text.slice(last, match.index));
-      nodes.push(React.createElement('img', {
+      nodes.push(React.createElement(CustomEmojiImage, {
         key: `${keyPrefix}-${index}`,
-        className: 'custom-emoji',
-        src: resolveUploadUrl(filePath) || '',
-        alt: `:${match[1]}:`,
-        title: `:${match[1]}:`,
-        draggable: false,
+        filePath: item.filePath,
+        fallback: item.fallback,
       }));
       index += 1;
       last = match.index + match[0].length;
@@ -81,12 +94,27 @@ export function renderTextWithEmoji(
 }
 
 /**
- * Для мест, где картинку не показать вовсе — системные уведомления ОС.
- * Коды вырезаются, а не остаются как `:cat:`: человек в шторке увидел бы
- * непонятный текст с двоеточиями. Если от сообщения ничего не осталось,
- * вызывающий подставит свою подпись.
+ * Картинка с подстановкой базового эмодзи, если файла на диске уже нет. Без
+ * этого пропавший файл давал иконку «сломанное изображение» посреди фразы.
  */
-export function stripCustomEmoji(text: string, map: CustomEmojiMap): string {
+const CustomEmojiImage: React.FC<{ filePath: string; fallback: string }> = ({ filePath, fallback }) => {
+  const [broken, setBroken] = React.useState(false);
+  if (broken) return React.createElement('span', { className: 'custom-emoji-fallback' }, fallback);
+  return React.createElement('img', {
+    className: 'custom-emoji',
+    src: resolveUploadUrl(filePath) || '',
+    alt: fallback,
+    draggable: false,
+    onError: () => setBroken(true),
+  });
+};
+
+/**
+ * Для мест, где картинку не показать вовсе: уведомления ОС и буфер обмена.
+ * Код заменяется базовым юникодным эмодзи, а не вырезается — в шторке ОС и в
+ * чужом редакторе `:cat:` читался бы как мусор, а пустота теряла бы смысл фразы.
+ */
+export function toPlainText(text: string, map: CustomEmojiMap): string {
   if (!text) return text;
-  return text.replace(SHORTCODE, (whole, name) => (map[name] ? '' : whole)).replace(/\s{2,}/g, ' ').trim();
+  return text.replace(SHORTCODE, (whole, name) => (map[name] ? map[name].fallback : whole));
 }

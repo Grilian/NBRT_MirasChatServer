@@ -834,13 +834,38 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Управление картиночными смайликами в панели супер-админа */
 .sa-emoji-custom { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: flex-start; }
 .sa-emoji-custom-item {
-  display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer;
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
   border: 1px solid var(--line); background: var(--paper-sunken); border-radius: var(--radius-md);
   padding: 6px 8px; font-size: 11px; color: var(--ink-muted); max-width: 92px;
 }
-.sa-emoji-custom-item img { width: 32px; height: 32px; object-fit: contain; }
 .sa-emoji-custom-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.sa-emoji-custom-item:hover { border-color: var(--unread); color: var(--unread); }
+.sa-emoji-custom-order { display: flex; gap: 2px; }
+.sa-emoji-custom-order button {
+  width: 18px; height: 16px; line-height: 1; padding: 0; font-size: 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper);
+  color: var(--ink-muted); cursor: pointer;
+}
+.sa-emoji-custom-order button:disabled { opacity: 0.35; cursor: default; }
+.sa-emoji-custom-order button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+.sa-emoji-custom-image { position: relative; display: block; cursor: pointer; }
+.sa-emoji-custom-image img { width: 32px; height: 32px; object-fit: contain; display: block; }
+.sa-emoji-custom-image-hint {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 9px; text-align: center; line-height: 1.1;
+  opacity: 0; border-radius: var(--radius-sm);
+}
+.sa-emoji-custom-image:hover .sa-emoji-custom-image-hint { opacity: 1; }
+.sa-emoji-fallback {
+  width: 100%; text-align: center; font-size: 14px; padding: 2px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper);
+}
+.sa-emoji-custom-remove {
+  position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; line-height: 1;
+  border: 1px solid var(--line); border-radius: 50%; background: var(--paper);
+  color: var(--ink-muted); cursor: pointer; font-size: 13px; padding: 0;
+}
+.sa-emoji-custom-remove:hover { border-color: var(--danger, #d9534f); color: var(--danger, #d9534f); }
 .sa-emoji-custom-add {
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   border: 1px dashed var(--line); border-radius: var(--radius-md);
@@ -856,6 +881,9 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   display: inline-block; width: 2em; height: 2em; object-fit: contain;
   vertical-align: -0.55em; margin: 0 1px;
 }
+/* Базовый эмодзи вместо пропавшего файла — на месте картинки, а не мельче:
+   иначе подмена бросалась бы в глаза сильнее самой пропажи. */
+.custom-emoji-fallback { display: inline-block; font-size: 1.5em; line-height: 1; vertical-align: -0.2em; margin: 0 1px; }
 /* В панели выбора — по размеру ячейки, а не строки текста. */
 .emoji-cell .custom-emoji { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
 

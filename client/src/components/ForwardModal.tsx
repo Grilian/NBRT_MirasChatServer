@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import Avatar from './Avatar';
 import { ChatSection } from './ChatList';
 import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
+import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 
 export interface ForwardTarget {
   id: string;
@@ -25,9 +26,10 @@ interface ForwardModalProps {
   targets: ForwardTarget[];
   onClose: () => void;
   onConfirm: (chatId: string) => void;
+  customEmoji?: CustomEmojiMap;
 }
 
-const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, onConfirm }) => {
+const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, onConfirm, customEmoji = {} }) => {
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
@@ -57,7 +59,9 @@ const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, on
             <div key={item.id} className="forward-preview-item">
               <span className="forward-preview-author">{item.author}</span>
               <span className="forward-preview-text">
-                {item.text || (item.hasImage ? '📷 Фото' : '')}
+                {item.text
+                  ? renderTextWithEmoji(item.text, customEmoji, `fw${item.id}`)
+                  : (item.hasImage ? '📷 Фото' : '')}
               </span>
             </div>
           ))}

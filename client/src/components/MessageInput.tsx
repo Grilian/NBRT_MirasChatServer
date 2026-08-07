@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import api from '../api/client';
 import EmojiPicker from './EmojiPicker';
+import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
 
 export interface PendingImage {
   file_path: string;
@@ -35,6 +36,8 @@ interface MessageInputProps {
   /** Отвечаем на сообщение — такая же панель над полем, как при правке. */
   replying?: ReplyingMessage | null;
   onCancelReply?: () => void;
+  /** Каталог кастомных смайликов — для цитат в панелях правки и ответа. */
+  customEmoji?: CustomEmojiMap;
 }
 
 // Ограничение совпадает с серверным (MAX_MESSAGE_LENGTH в server/index.js):
@@ -60,7 +63,7 @@ let stagedSeq = 0;
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend, onTyping, disabled, placeholder,
   editing, onSubmitEdit, onCancelEdit, onRequestEditLast,
-  replying, onCancelReply,
+  replying, onCancelReply, customEmoji = {},
 }) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage[]>([]);
@@ -113,7 +116,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
     setText((prev) => {
       const start = el?.selectionStart ?? prev.length;
       const end = el?.selectionEnd ?? prev.length;
-      const next = (prev.slice(0, start) + emoji + prev.slice(end)).slice(0, MAX_LENGTH);
+      // Обрезка по длине не должна оставить огрызок кода вида ":cat" — он уже
+      // не станет картинкой и будет виден техническим текстом.
+      const next = trimDanglingShortcode((prev.slice(0, start) + emoji + prev.slice(end)).slice(0, MAX_LENGTH));
       // Курсор ставим после вставленного, уже после того, как React
       // перерисует значение поля.
       requestAnimationFrame(() => {
@@ -306,7 +311,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <svg className="composer-editing-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
           <div className="composer-editing-body">
             <div className="composer-editing-title">Редактирование</div>
-            <div className="composer-editing-text">{editing.text}</div>
+            <div className="composer-editing-text">{renderTextWithEmoji(editing.text, customEmoji, `ce${editing.id}`)}</div>
           </div>
           <button type="button" className="composer-editing-cancel" onClick={cancelEdit} aria-label="Отменить редактирование">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
@@ -322,7 +327,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <div className="composer-editing-body">
             <div className="composer-editing-title">Ответ · {replying.author}</div>
             <div className="composer-editing-text">
-              {replying.text || (replying.hasImage ? '📷 Фото' : '')}
+              {replying.text
+                ? renderTextWithEmoji(replying.text, customEmoji, `cr${replying.id}`)
+                : (replying.hasImage ? '📷 Фото' : '')}
             </div>
           </div>
           <button type="button" className="composer-editing-cancel" onClick={() => onCancelReply?.()} aria-label="Отменить ответ">

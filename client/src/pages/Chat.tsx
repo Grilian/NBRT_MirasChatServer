@@ -26,7 +26,8 @@ import { renderUnreadBadge } from '../utils/badgeIcon';
 import { describeStatus } from '../utils/statusMeta';
 import { WritePolicy, WRITE_BLOCKED_HINT } from '../utils/writePolicy';
 import StatusSheet from '../components/StatusSheet';
-import { CustomEmojiMap, buildEmojiMap, stripCustomEmoji } from '../utils/customEmoji';
+import { CustomEmojiMap, buildEmojiMap, toPlainText } from '../utils/customEmoji';
+import { invalidateEmojiPackCache } from '../components/EmojiPicker';
 import {
   ensureMobileNotificationPermission,
   showMobileNotification,
@@ -103,13 +104,11 @@ interface LastMessage {
 
 /** Превью текста сообщения там, где картинка без подписи не даёт ничего показать. */
 // Текст для уведомлений — и всплывающих, и системных. Картинку там не
-// показать, поэтому коды кастомных смайликов вырезаются: в шторке ОС `:cat:`
-// читался бы как мусор. Если кроме смайликов в сообщении ничего не было,
-// подставляем подпись — пустое уведомление хуже неточного.
+// показать, поэтому вместо кода подставляется базовый юникодный эмодзи
+// смайлика: в шторке ОС `:cat:` читался бы как мусор.
 function previewText(text: string, filePath?: string | null, emojiMap: CustomEmojiMap = {}): string {
-  const stripped = stripCustomEmoji(text || '', emojiMap);
-  if (stripped) return stripped;
-  if (text && text !== stripped) return 'Смайлик';
+  const plain = toPlainText(text || '', emojiMap);
+  if (plain) return plain;
   return filePath ? '📷 Фото' : '';
 }
 interface ChatGroupSummary {
@@ -421,14 +420,18 @@ const Chat: React.FC = () => {
   // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
   const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
 
-  // Каталог кастомных смайликов тянем один раз на приложение: он нужен всюду,
-  // где показывается текст сообщения, а не только в панели выбора.
+  // Каталог кастомных смайликов нужен всюду, где показывается текст сообщения,
+  // а не только в панели выбора. И это НЕ то же самое, что содержимое панели:
+  // /emoji отдаёт «что можно вставить сейчас», а /emoji/catalog — всё, что
+  // когда-либо существовало, включая убранное и выключенное. Иначе уборка
+  // смайлика переводила бы всю старую переписку обратно в текст :name:.
   const [customEmoji, setCustomEmoji] = useState<CustomEmojiMap>({});
-  useEffect(() => {
-    api.get('/emoji')
+  const reloadEmojiCatalog = useCallback(() => {
+    api.get('/emoji/catalog')
       .then(({ data }) => setCustomEmoji(buildEmojiMap(data)))
       .catch(() => { /* без каталога коды останутся текстом — не фатально */ });
   }, []);
+  useEffect(() => { reloadEmojiCatalog(); }, [reloadEmojiCatalog]);
   const [statusSheetOpen, setStatusSheetOpen] = useState(false);
   const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
   const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
@@ -716,7 +719,17 @@ const Chat: React.FC = () => {
       // полное монтирование запрашивало каталог заново. Реконнект случается
       // регулярно и без участия человека (сворачивание на Android,
       // кратковременный обрыв сети) — обновляем заодно с остальным.
-      api.get('/emoji').then(({ data }) => setCustomEmoji(buildEmojiMap(data))).catch(console.error);
+      reloadEmojiCatalog();
+      invalidateEmojiPackCache();
+    });
+
+    // Правка смайликов в панели управления доходит до всех сразу, а не на
+    // следующем реконнекте: каталог общий, персонализации в нём нет.
+    newSocket.on('emoji_changed', () => {
+      reloadEmojiCatalog();
+      // Панель выбора держит свой кэш и перечитывает его при открытии — без
+      // сброса она показала бы старый состав, пока её не откроют дважды.
+      invalidateEmojiPackCache();
     });
 
     // Список контактов не приходит по сокету целиком (только точечное событие
@@ -940,7 +953,7 @@ const Chat: React.FC = () => {
       clearInterval(rosterRefreshInterval);
       newSocket.disconnect();
     };
-  }, [currentUserId, refetchUnread, pushToast]);
+  }, [currentUserId, refetchUnread, pushToast, reloadEmojiCatalog]);
 
   // Возврат приложения из фона на Android — пока оно свёрнуто, ОС может
   // оборвать сеть (Doze/App Standby), и сокет повиснет отключённым: его
@@ -1987,6 +2000,7 @@ const Chat: React.FC = () => {
 
       {forwardIds && (
         <ForwardModal
+          customEmoji={customEmoji}
           items={messages
             .filter((m) => forwardIds.includes(m.id) && !m.deleted)
             .sort((a, b) => a.id - b.id)
@@ -2132,8 +2146,11 @@ const Chat: React.FC = () => {
             onDeleteMessage={(id) => requestDelete([id])}
             // Аккаунтам «Интернет» раздел «Задачи» не положен — пункт меню им
             // не показываем вовсе, иначе он молча возвращал бы в чаты.
+            // Коды смайликов в описание задачи не уезжают: задача — не
+            // переписка, её описание правят в обычном поле и читают в списках,
+            // где картинку показать нечем. Подставляем базовый эмодзи сразу.
             onCreateTask={isSectionAllowedFor(currentAccountType, 'tasks')
-              ? (text) => { setTaskDraftText(text); goToSection('tasks'); }
+              ? (text) => { setTaskDraftText(toPlainText(text, customEmoji)); goToSection('tasks'); }
               : undefined}
             onStartReply={setReplyingMessage}
             onForward={(ids) => setForwardIds(ids)}
@@ -2173,6 +2190,7 @@ const Chat: React.FC = () => {
                   ? `Сообщение ${activeChatMeta.name} ${activeChatMeta.status.emoji} ${activeChatMeta.status.label}`
                   : undefined
             }
+            customEmoji={customEmoji}
             editing={editingMessage}
             onSubmitEdit={handleEditMessage}
             onCancelEdit={() => setEditingMessage(null)}

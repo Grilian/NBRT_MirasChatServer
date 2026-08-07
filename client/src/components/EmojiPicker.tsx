@@ -27,6 +27,13 @@ interface EmojiPickerProps {
 // на каждое открытие панели — запрос лёгкий, лишним не будет.
 let cachedPacks: EmojiPack[] | null = null;
 
+/**
+ * Сбросить кэш — по событию `emoji_changed` от сервера. Без этого панель после
+ * правки состава в панели управления показала бы старые данные до тех пор, пока
+ * её не откроют дважды: первое открытие отдаёт кэш и только запускает запрос.
+ */
+export const invalidateEmojiPackCache = () => { cachedPacks = null; };
+
 const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
   const [packs, setPacks] = useState<EmojiPack[]>(cachedPacks || []);
   const [activePack, setActivePack] = useState(0);

@@ -4,7 +4,7 @@ import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKe
 import { isNativeMobile } from '../utils/mobileNotify';
 import { onKeyboardShow } from '../utils/mobileKeyboard';
 import { resolveUploadUrl } from '../utils/uploads';
-import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
+import { CustomEmojiMap, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
@@ -685,7 +685,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const copyMessageText = (msg: Message) => {
     setMenuFor(null);
-    navigator.clipboard?.writeText(msg.text).catch((e) => console.error('Не удалось скопировать:', e));
+    // В буфер уходит текст с базовыми юникодными эмодзи вместо кодов: вставка
+    // `:cat:` в почту или документ выглядела бы как мусор.
+    navigator.clipboard?.writeText(toPlainText(msg.text, customEmoji))
+      .catch((e) => console.error('Не удалось скопировать:', e));
   };
 
   const toggleSelected = (id: number) => {
@@ -896,7 +899,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReactionsFor(msg.id); }
                           }}
                         >
-                          <span className="reaction-chip-emoji">{emoji}</span>
+                          {/* Реакции ставятся из фиксированного юникодного
+                              набора, но значение приходит от клиента, а сервер
+                              ограничивает его только длиной — разбор кодов тут
+                              страховка, чтобы `:cat:` не оказался на виду. */}
+                          <span className="reaction-chip-emoji">{renderTextWithEmoji(emoji, customEmoji, `rc${msg.id}`)}</span>
                           {/* До трёх — лица внахлёст, дальше их не разобрать, и
                               число читается быстрее любой стопки аватаров. */}
                           {list.length <= REACTION_FACES_MAX ? (

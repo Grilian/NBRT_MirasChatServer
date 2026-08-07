@@ -327,7 +327,12 @@ io.on('connection', (socket) => {
     // сообщения замусоривали превью в списке чатов, а длинные — разъезжались
     // по вёрстке у всех участников.
     const text = typeof data.text === 'string' ? data.text.trim() : '';
-    const finalText = text.length > MAX_MESSAGE_LENGTH ? text.slice(0, MAX_MESSAGE_LENGTH) : text;
+    // Обрезка не должна разрубить код кастомного смайлика: огрызок ":cat" уже
+    // не станет картинкой и остался бы в БД навсегда техническим текстом.
+    // Клиент режет текст сам, но его обрезку можно обойти — это последняя линия.
+    const finalText = text.length > MAX_MESSAGE_LENGTH
+      ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{0,32}$/, '')
+      : text;
 
     // Картинка приходит уже загруженной отдельным REST-запросом (см.
     // POST /api/messages/upload-image) — сюда попадает только путь к ней.
