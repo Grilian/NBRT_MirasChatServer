@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import api from '../api/client';
 import EmojiPicker from './EmojiPicker';
+import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
 import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
+import { isNativeMobile } from '../utils/mobileNotify';
 
 export interface PendingImage {
   file_path: string;
@@ -70,7 +72,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // На телефоне поле остаётся прежней textarea. contentEditable в Android
+  // WebView ведёт себя заметно капризнее (курсор, автозамена, системная
+  // клавиатура), а чинить это вслепую, без устройства под рукой, нельзя —
+  // сначала обкатываем на вебе и десктопе.
+  const rich = !isNativeMobile;
 
   // Поле ввода было однострочным <input>: длинное сообщение уезжало за
   // границу видимой области, а перенести строку было нельзя вовсе. Теперь
@@ -82,6 +91,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, MAX_FIELD_HEIGHT)}px`;
   }, [text]);
+  // Растущий div считает высоту сам — CSS max-height хватает.
 
   // Локальный URL превью живёт, пока картинка не отправлена или не убрана —
   // без явного revoke он утёк бы памятью браузера при частой вставке фото.
@@ -93,25 +103,43 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const editingId = editing?.id ?? null;
   useEffect(() => {
     if (editingId === null) return;
-    setText(editing?.text || '');
+    const value = editing?.text || '';
+    setText(value);
+    if (rich) {
+      // Коды в правке тоже показываем картинками — иначе человек правил бы
+      // текст, который сам никогда не набирал.
+      richRef.current?.hydrate(value);
+      return;
+    }
     const el = textareaRef.current;
     if (el) {
       el.focus();
-      const end = (editing?.text || '').length;
-      requestAnimationFrame(() => el.setSelectionRange(end, end));
+      requestAnimationFrame(() => el.setSelectionRange(value.length, value.length));
     }
     // editing?.text намеренно не в зависимостях — см. комментарий выше.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
-  const cancelEdit = () => {
+  const clearField = () => {
     setText('');
+    richRef.current?.clear();
+  };
+
+  const cancelEdit = () => {
+    clearField();
     onCancelEdit?.();
   };
 
   // Вставка смайлика — в позицию курсора, а не в конец: иначе смайлик,
   // выбранный посреди набранной фразы, уезжал бы в её хвост.
-  const insertEmoji = (emoji: string) => {
+  const insertEmoji = (picked: string | PickedCustomEmoji) => {
+    if (rich) {
+      richRef.current?.insertPicked(picked);
+      onTyping?.();
+      return;
+    }
+    // В textarea картинку не показать — туда уходит код, как и раньше.
+    const emoji = typeof picked === 'string' ? picked : `:${picked.name}:`;
     const el = textareaRef.current;
     setText((prev) => {
       const start = el?.selectionStart ?? prev.length;
@@ -181,7 +209,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     // В режиме правки поле сохраняет сообщение, а не отправляет новое.
     if (editing) {
       if (trimmed) onSubmitEdit?.(editing.id, trimmed);
-      setText('');
+      clearField();
       onCancelEdit?.();
       return;
     }
@@ -202,7 +230,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       });
     }
 
-    setText('');
+    clearField();
     // Всё, что не влезло в лимит, остаётся прикреплённым — человек отправит
     // следующей пачкой, а не обнаружит, что часть картинок молча пропала.
     const sentIds = new Set(
@@ -257,6 +285,20 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }
   };
 
+  // Rich-поле само себя не ограничивает по длине: перебор — редкий случай, и
+  // резать DOM на каждое нажатие ради него незачем. Здесь поле пересобирается
+  // целиком из обрезанного текста, чтобы не остался огрызок кода вида ":cat".
+  const handleRichChange = (value: string) => {
+    if (value.length > MAX_LENGTH) {
+      const cut = trimDanglingShortcode(value.slice(0, MAX_LENGTH));
+      setText(cut);
+      richRef.current?.hydrate(cut);
+      return;
+    }
+    setText(value);
+    if (onTyping && value.trim()) onTyping();
+  };
+
   // Вставка изображения из буфера (скриншот, скопированная картинка) — та же
   // механика, что в любом нормальном мессенджере: Ctrl+V прямо в поле ввода,
   // без отдельной кнопки. Текст из буфера вставляется как обычно, браузер
@@ -283,6 +325,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   };
 
   const remaining = MAX_LENGTH - text.length;
+  const fieldPlaceholder = placeholder || (disabled ? 'Выберите чат…' : 'Написать сообщение…');
 
   return (
     <form
@@ -387,16 +430,30 @@ const MessageInput: React.FC<MessageInputProps> = ({
       </button>
 
         <div className="composer-field">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={text}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder={placeholder || (disabled ? 'Выберите чат…' : 'Написать сообщение…')}
-            disabled={disabled}
-          />
+          {rich ? (
+            <EmojiComposerField
+              ref={richRef}
+              customEmoji={customEmoji}
+              placeholder={fieldPlaceholder}
+              disabled={disabled}
+              onChangeText={handleRichChange}
+              onSubmit={submit}
+              onEscape={editing ? cancelEdit : (replying ? onCancelReply : undefined)}
+              onArrowUpEmpty={!editing ? onRequestEditLast : undefined}
+              onPasteImageFile={(file) => stageFiles([file])}
+            />
+          ) : (
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={text}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={fieldPlaceholder}
+              disabled={disabled}
+            />
+          )}
           {remaining < 200 && <span className="composer-counter">{remaining}</span>}
         </div>
 

@@ -110,6 +110,102 @@ const CustomEmojiImage: React.FC<{ filePath: string; fallback: string }> = ({ fi
 };
 
 /**
+ * Готовый DOM-узел смайлика для поля ввода. В отличие от React-версии выше,
+ * тут нужен настоящий элемент: поле ввода — contentEditable, React его
+ * содержимое не рисует (иначе курсор прыгал бы на каждое нажатие).
+ *
+ * `contentEditable=false` делает смайлик неделимым: курсор не заходит внутрь,
+ * а браузер удаляет его одним движением, а не по символу.
+ */
+export function createEmojiNode(name: string, filePath: string, fallback: string): HTMLElement {
+  const img = document.createElement('img');
+  img.className = 'custom-emoji';
+  img.src = resolveUploadUrl(filePath) || '';
+  img.alt = fallback;
+  img.draggable = false;
+  img.contentEditable = 'false';
+  // Имя ищется при обратной сборке текста — путь к файлу для этого не годится,
+  // он может смениться при замене картинки под тем же кодом.
+  img.dataset.emojiName = name;
+  img.dataset.emojiFallback = fallback;
+  img.onerror = () => {
+    const span = document.createElement('span');
+    span.className = 'custom-emoji-fallback';
+    span.contentEditable = 'false';
+    span.dataset.emojiName = name;
+    span.dataset.emojiFallback = fallback;
+    span.textContent = fallback;
+    img.replaceWith(span);
+  };
+  return img;
+}
+
+/** Узнаётся по data-атрибуту, а не по классу: класс — дело оформления. */
+export const isEmojiNode = (node: Node | null | undefined): node is HTMLElement =>
+  !!node && node.nodeType === Node.ELEMENT_NODE && !!(node as HTMLElement).dataset?.emojiName;
+
+/**
+ * Текст с кодами → готовые узлы для вставки в поле ввода. Тот же разбор, что и
+ * в renderTextWithEmoji, но на выходе DOM: используется при открытии правки
+ * сообщения и при вставке из буфера.
+ */
+export function textToFragment(text: string, map: CustomEmojiMap): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  if (!text) return fragment;
+
+  let last = 0;
+  SHORTCODE.lastIndex = 0;
+
+  let match = SHORTCODE.exec(text);
+  while (match) {
+    const item = map[match[1]];
+    if (item) {
+      if (match.index > last) fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+      fragment.appendChild(createEmojiNode(match[1], item.filePath, item.fallback));
+      last = match.index + match[0].length;
+    }
+    match = SHORTCODE.exec(text);
+  }
+
+  if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
+  return fragment;
+}
+
+/**
+ * Поле ввода → текст для отправки. Обход рекурсивный, хотя своей разметки мы не
+ * создаём (перенос строки вставляется literal '\n', а не <br>/<div>): браузеры
+ * всё равно норовят завернуть содержимое в свои узлы при вставке и автозамене,
+ * и плоский проход молча потерял бы такой текст.
+ */
+export function domToText(root: HTMLElement): string {
+  let out = '';
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += (node as Text).data;
+      return;
+    }
+    if (isEmojiNode(node)) {
+      out += `:${node.dataset.emojiName}:`;
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      if (el.tagName === 'BR') {
+        out += '\n';
+        return;
+      }
+      // Блочный узел, пришедший из вставки, — это начало новой строки.
+      if (out && !out.endsWith('\n') && BLOCK_TAGS.has(el.tagName)) out += '\n';
+      el.childNodes.forEach(walk);
+    }
+  };
+  root.childNodes.forEach(walk);
+  return out;
+}
+
+const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'TR', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+
+/**
  * Для мест, где картинку не показать вовсе: уведомления ОС и буфер обмена.
  * Код заменяется базовым юникодным эмодзи, а не вырезается — в шторке ОС и в
  * чужом редакторе `:cat:` читался бы как мусор, а пустота теряла бы смысл фразы.

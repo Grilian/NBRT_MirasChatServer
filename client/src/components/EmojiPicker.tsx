@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
 import { resolveUploadUrl } from '../utils/uploads';
-import { CustomEmoji } from '../utils/customEmoji';
+import { CustomEmoji, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
+import { PickedCustomEmoji } from './EmojiComposerField';
 
 export interface EmojiPack {
   id: number;
@@ -12,7 +13,12 @@ export interface EmojiPack {
 }
 
 interface EmojiPickerProps {
-  onPick: (emoji: string) => void;
+  /**
+   * Юникодный смайлик отдаётся строкой, картиночный — объектом: поле ввода
+   * показывает его картинкой и строит узел прямо из этих данных, а искать их
+   * заново по имени незачем — здесь они уже под рукой.
+   */
+  onPick: (emoji: string | PickedCustomEmoji) => void;
   onClose: () => void;
 }
 
@@ -108,9 +114,14 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
             className="emoji-cell"
             title={`:${item.name}:`}
             onMouseDown={(e) => e.preventDefault()}
-            // В сообщение уходит код, а не картинка: текст сообщения остаётся
-            // текстом, формат хранения переписки не меняется.
-            onClick={() => onPick(`:${item.name}:`)}
+            // В сообщение всё равно уходит код, а не картинка — формат хранения
+            // переписки не меняется. Картинка нужна только полю ввода, чтобы
+            // показать человеку смайлик вместо технического :name:.
+            onClick={() => onPick({
+              name: item.name,
+              filePath: item.file_path,
+              fallback: item.fallback || DEFAULT_EMOJI_FALLBACK,
+            })}
           >
             <img className="custom-emoji" src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
           </button>

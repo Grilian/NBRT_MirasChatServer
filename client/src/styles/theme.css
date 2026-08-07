@@ -1032,6 +1032,24 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .composer textarea:focus { outline: none; }
 .composer textarea:disabled { opacity: .6; }
 .composer textarea::placeholder { color: var(--ink-faint); }
+/* Поле ввода со смайликами-картинками (веб и десктоп; на телефоне — textarea
+   выше). Размеры и отступы совпадают с ней намеренно: это одно и то же поле
+   для человека, различается только тем, что внутри может лежать картинка. */
+.composer-input {
+  width: 100%; color: var(--ink); padding: 9px 4px; font-size: 15px; line-height: 1.35;
+  max-height: 180px; overflow-y: auto; outline: none;
+  /* Перенос строки вставляется литеральным '\A' вместо <br>, показать его
+     может только pre-wrap. Длинное слово без пробелов не должно распирать
+     полосу ввода — отсюда break-word. */
+  white-space: pre-wrap; overflow-wrap: break-word;
+}
+/* У contentEditable нет своего placeholder — рисуем сами. :empty срабатывает,
+   только когда внутри нет ВООБЩЕ ничего, поэтому пустых узлов после очистки
+   поля оставлять нельзя. */
+.composer-input:empty::before {
+  content: attr(data-placeholder); color: var(--ink-faint); pointer-events: none;
+}
+.composer-input[contenteditable='false'] { opacity: .6; }
 .composer-counter {
   position: absolute; right: 12px; bottom: 4px; font-size: 11px; color: var(--ink-faint);
   font-variant-numeric: tabular-nums; pointer-events: none;
