@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { nameFor } from '../utils/user';
 import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKey } from '../utils/time';
 import { isNativeMobile } from '../utils/mobileNotify';
-import { onKeyboardShow } from '../utils/mobileKeyboard';
 import { resolveUploadUrl } from '../utils/uploads';
 import { CustomEmojiMap, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
 import Avatar from './Avatar';
@@ -301,28 +300,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     prevChatIdRef.current = chatId;
   }, [messages, chatId, currentUserId, scrollContainerToBottom, startInitialPin]);
 
-  // Появление экранной клавиатуры на Android физически уменьшает высоту
-  // WebView (adjustResize) — flex-раскладка тут же сжимает conv-body под
-  // новый размер, но её scrollTop остаётся прежним числом. Раньше «дно»
-  // ленты просто уезжало под новый нижний край: последние сообщения
-  // оказывались за пределами видимой области, и добраться до них можно было
-  // только ручной прокруткой. Довозвращаем прокрутку к концу сами — и только
-  // если человек и так были внизу: если он читает историю выше, набор
-  // сообщения не должен выдёргивать его обратно к последним репликам.
-
-  useEffect(() => {
-    return onKeyboardShow(() => {
-      if (!shouldScrollRef.current) return;
-      // Двойной rAF: колбэк плагина срабатывает раньше, чем WebView
-      // фактически перестроился под новую высоту (scrollHeight ещё старый) —
-      // один кадр на применение резайза, второй на коммит разметки.
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-        });
-      });
-    });
-  }, []);
+  // На Android клавиатура теперь работает поверх WebView (adjustNothing).
+  // Геометрию ленты меняет только постоянная нижняя поверхность composer,
+  // поэтому отдельная реакция на keyboardDidShow больше не нужна.
 
   // Системная клавиатура — не единственное, что меняет доступную высоту ленты:
   // мобильная панель смайликов теперь занимает её место внутри composer. При

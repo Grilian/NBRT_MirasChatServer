@@ -15,7 +15,7 @@ export interface EmojiComposerHandle {
   hydrate: (text: string) => void;
   clear: () => void;
   focus: () => void;
-  insertPicked: (value: string | PickedCustomEmoji) => void;
+  insertPicked: (value: string | PickedCustomEmoji, options?: { focus?: boolean }) => void;
 }
 
 interface Props {
@@ -28,6 +28,8 @@ interface Props {
   /** Стрелка вверх в пустом поле — правка последнего своего сообщения. */
   onArrowUpEmpty?: () => void;
   onPasteImageFile?: (file: File) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }
 
 // Код, только что дописанный перед курсором. В отличие от общего SHORTCODE
@@ -51,7 +53,7 @@ const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
  */
 const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
   customEmoji, placeholder, disabled,
-  onChangeText, onSubmit, onEscape, onArrowUpEmpty, onPasteImageFile,
+  onChangeText, onSubmit, onEscape, onArrowUpEmpty, onPasteImageFile, onFocus, onBlur,
 }, ref) => {
   const boxRef = useRef<HTMLDivElement>(null);
   // Свежая карта нужна обработчикам, которые читают её в момент нажатия.
@@ -74,7 +76,7 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
     selection.addRange(range);
   };
 
-  const insertNode = useCallback((node: Node) => {
+  const insertNode = useCallback((node: Node, focusAfter = true) => {
     const box = boxRef.current;
     if (!box) return;
     const selection = window.getSelection();
@@ -92,7 +94,7 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
       box.appendChild(node);
     }
     if (last) caretAfter(last);
-    box.focus();
+    if (focusAfter) box.focus();
     emitChange();
   }, [emitChange]);
 
@@ -113,13 +115,22 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
       box.textContent = '';
       emitChange();
     },
-    focus: () => boxRef.current?.focus(),
-    insertPicked: (value) => {
+    focus: () => {
+      const box = boxRef.current;
+      if (!box) return;
+      box.focus();
+      const selection = window.getSelection();
+      const inside = selection && selection.rangeCount > 0
+        && box.contains(selection.getRangeAt(0).commonAncestorContainer);
+      if (!inside && box.lastChild) caretAfter(box.lastChild);
+    },
+    insertPicked: (value, options) => {
+      const focusAfter = options?.focus !== false;
       if (typeof value === 'string') {
-        insertNode(document.createTextNode(value));
+        insertNode(document.createTextNode(value), focusAfter);
         return;
       }
-      insertNode(createEmojiNode(value.name, value.filePath, value.fallback));
+      insertNode(createEmojiNode(value.name, value.filePath, value.fallback), focusAfter);
     },
   }), [emitChange, insertNode]);
 
@@ -262,6 +273,8 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
       onInput={handleInput}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
+      onFocus={onFocus}
+      onBlur={onBlur}
       // Перетаскивание файла обрабатывает форма целиком (composer), а сюда drop
       // приводил бы к вставке чужой разметки мимо onPaste.
       onDrop={(e) => e.preventDefault()}

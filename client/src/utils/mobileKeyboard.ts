@@ -1,4 +1,4 @@
-import { Keyboard } from '@capacitor/keyboard';
+import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { isNativeMobile } from './mobileNotify';
 
 // Открыта ли сейчас экранная клавиатура. Держим здесь, а не в состоянии React:
@@ -12,6 +12,28 @@ import { isNativeMobile } from './mobileNotify';
 let keyboardOpen = false;
 let lastKeyboardHeight = 300;
 
+// Высота layout viewport в CSS-пикселях, когда клавиатура закрыта.
+// Для emoji-панели это надёжнее нативного keyboardHeight: на Android
+// встречаются устройства/клавиатуры, где плагин сообщает неполную высоту.
+let expandedViewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
+
+function currentViewportHeight(): number {
+  if (typeof window === 'undefined') return 0;
+  // Панель живёт в CSS-layout WebView, поэтому измеряем именно ту высоту,
+  // которой реально располагает страница после adjustResize.
+  return document.documentElement?.clientHeight || window.innerHeight || 0;
+}
+
+function rememberKeyboardHeight(nativeHeight = 0) {
+  const now = currentViewportHeight();
+  const viewportDelta = expandedViewportHeight > now ? expandedViewportHeight - now : 0;
+
+  // Разница viewport совпадает с реальным количеством CSS-пикселей, которое
+  // Android отнял у приложения. Нативное значение оставляем только fallback.
+  const measured = viewportDelta >= 120 ? viewportDelta : nativeHeight;
+  if (measured >= 120) lastKeyboardHeight = measured;
+}
+
 /** Следить за состоянием клавиатуры. Возвращает функцию отписки. */
 export function watchMobileKeyboard(): () => void {
   if (!isNativeMobile) return () => {};
@@ -19,14 +41,21 @@ export function watchMobileKeyboard(): () => void {
   const handles = [
     Keyboard.addListener('keyboardWillShow', (info) => {
       keyboardOpen = true;
-      if (info.keyboardHeight > 0) lastKeyboardHeight = info.keyboardHeight;
+      // На WILL viewport может быть ещё старого размера, поэтому это лишь fallback.
+      if (info.keyboardHeight >= 120) lastKeyboardHeight = info.keyboardHeight;
     }),
     Keyboard.addListener('keyboardDidShow', (info) => {
       keyboardOpen = true;
-      if (info.keyboardHeight > 0) lastKeyboardHeight = info.keyboardHeight;
+      rememberKeyboardHeight(info.keyboardHeight);
     }),
     Keyboard.addListener('keyboardWillHide', () => { keyboardOpen = false; }),
-    Keyboard.addListener('keyboardDidHide', () => { keyboardOpen = false; })
+    Keyboard.addListener('keyboardDidHide', () => {
+      keyboardOpen = false;
+      // После полного скрытия это новая эталонная высота WebView (в том числе
+      // после поворота экрана или изменения системных inset'ов).
+      const h = currentViewportHeight();
+      if (h > 0) expandedViewportHeight = h;
+    })
   ];
 
   return () => {
@@ -35,11 +64,33 @@ export function watchMobileKeyboard(): () => void {
 }
 
 
+
+/** Текущее синхронное состояние системной клавиатуры. */
+export function isMobileKeyboardOpen(): boolean {
+  return isNativeMobile && keyboardOpen;
+}
+
+/** Событие непосредственно перед изменением Android viewport при показе клавиатуры. */
+export function onKeyboardWillShow(callback: () => void): () => void {
+  if (!isNativeMobile) return () => {};
+  const listenerPromise = Keyboard.addListener('keyboardWillShow', () => callback());
+  return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
+}
+
+/** Событие непосредственно перед изменением Android viewport при скрытии клавиатуры. */
+export function onKeyboardWillHide(callback: () => void): () => void {
+  if (!isNativeMobile) return () => {};
+  const listenerPromise = Keyboard.addListener('keyboardWillHide', () => callback());
+  return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
+}
+
 /** Последняя известная высота системной клавиатуры в CSS-пикселях.
  * Нужна панели смайликов, чтобы занять примерно то же место и не дёргать
  * переписку при переключении «клавиатура ↔ смайлики». */
 export function getLastMobileKeyboardHeight(): number {
-  return Math.max(240, Math.min(lastKeyboardHeight || 300, 420));
+  // Не ограничиваем сверху: современные клавиатуры с рядом подсказок,
+  // панелью инструментов или крупным масштабом легко выше прежних 420px.
+  return Math.max(180, Math.round(lastKeyboardHeight || 300));
 }
 
 /**
@@ -99,4 +150,23 @@ export function hideMobileKeyboard(): boolean {
   }
 
   return true;
+}
+
+/**
+ * Включить/выключить нативный ресайз WebView под клавиатуру. Настройка на
+ * всё приложение целиком, а не на конкретный экран — поэтому дёргаем её
+ * точечно, только пока открыта переписка (см. MessageInput), и возвращаем
+ * обратно при выходе. На остальных экранах (логин, диалоги, панели) ресайз
+ * остаётся штатным — их поля по-прежнему сами уезжают от клавиатуры.
+ *
+ * Ничего не ждём и не бросаем — тот же принцип, что и в hideMobileKeyboard:
+ * нативный мост может быть недоступен, рендер от него зависеть не должен.
+ */
+export function setChatKeyboardResizeMode(active: boolean): void {
+  if (!isNativeMobile) return;
+  try {
+    Keyboard.setResizeMode({ mode: active ? KeyboardResize.None : KeyboardResize.Native }).catch(() => {});
+  } catch {
+    // Плагин недоступен — не наша забота, экран продолжает жить как есть.
+  }
 }

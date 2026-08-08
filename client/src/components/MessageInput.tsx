@@ -4,7 +4,7 @@ import EmojiPicker from './EmojiPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
 import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
 import { isNativeMobile } from '../utils/mobileNotify';
-import { getLastMobileKeyboardHeight, hideMobileKeyboard } from '../utils/mobileKeyboard';
+import { getLastMobileKeyboardHeight, hideMobileKeyboard, onKeyboardWillShow, setChatKeyboardResizeMode } from '../utils/mobileKeyboard';
 
 export interface PendingImage {
   file_path: string;
@@ -73,15 +73,54 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [emojiPanelHeight, setEmojiPanelHeight] = useState(300);
+  // В фокусе ли поле ввода — синхронный (не зависящий от нативного моста)
+  // сигнал того, что клавиатура вот-вот покажется/уже показана. Используем
+  // его, а не событие от плагина, именно чтобы резервируемое место никогда
+  // не схлопывалось между «убрали emojiOpen» и «пришло подтверждение от
+  // Android»: focus()/blur() синхронны, а keyboardWillShow — нет.
+  const [fieldFocused, setFieldFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // На телефоне поле остаётся прежней textarea. contentEditable в Android
-  // WebView ведёт себя заметно капризнее (курсор, автозамена, системная
-  // клавиатура), а чинить это вслепую, без устройства под рукой, нельзя —
-  // сначала обкатываем на вебе и десктопе.
-  const rich = !isNativeMobile;
+  // Один и тот же rich-композер на desktop и mobile: только contentEditable
+  // способен показывать кастомный смайлик картинкой прямо внутри набираемого
+  // текста. Наружу по-прежнему уходит обычный :shortcode:, поэтому серверный
+  // формат и история сообщений не меняются.
+  const rich = true;
+
+  // Место внизу резервируется, пока активен любой режим ввода — реальная
+  // клавиатура или наша панель. Оба делят одну и ту же высоту, поэтому
+  // переключение между ними не меняет зарезервированное место вообще.
+  const surfaceActive = isNativeMobile && (emojiOpen || fieldFocused);
+
+  // Резервируемое место меняется по CSS-transition, а не мгновенно — лента
+  // сообщений должна доскроллиться вслед за ним (тем же событием, каким
+  // раньше пользовалась старая swap-машина), иначе последнее сообщение
+  // на пару кадров окажется под наезжающей поверхностью.
+  useEffect(() => {
+    window.dispatchEvent(new Event('miras-composer-resize'));
+  }, [surfaceActive]);
+
+  // Пока открыта переписка — WebView не пересобирается под клавиатуру:
+  // экранная клавиатура рисуется поверх уже смонтированной emoji-панели
+  // отдельным нативным слоем, а не сдвигает вёрстку. Включаем только на
+  // время жизни этого компонента (= пока открыт конкретный чат) — на
+  // остальных экранах (логин, диалоги, панели) поля по-прежнему сами
+  // уезжают от клавиатуры на штатном ресайзе.
+  useEffect(() => {
+    if (!isNativeMobile) return undefined;
+    setChatKeyboardResizeMode(true);
+    return () => setChatKeyboardResizeMode(false);
+  }, []);
+
+  // Высоту зарезервированного места подтягиваем из последней реальной
+  // клавиатуры — тогда emoji-панель занимает ровно то же место, и взгляду
+  // не за что зацепиться при переключении между ними.
+  useEffect(() => {
+    if (!isNativeMobile) return undefined;
+    return onKeyboardWillShow(() => setEmojiPanelHeight(getLastMobileKeyboardHeight()));
+  }, []);
 
   // Поле ввода было однострочным <input>: длинное сообщение уезжало за
   // границу видимой области, а перенести строку было нельзя вовсе. Теперь
@@ -136,7 +175,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // выбранный посреди набранной фразы, уезжал бы в её хвост.
   const insertEmoji = (picked: string | PickedCustomEmoji) => {
     if (rich) {
-      richRef.current?.insertPicked(picked);
+      richRef.current?.insertPicked(picked, { focus: !(isNativeMobile && emojiOpen) });
       onTyping?.();
       return;
     }
@@ -161,18 +200,22 @@ const MessageInput: React.FC<MessageInputProps> = ({
     onTyping?.();
   };
 
+  // Синхронно, без кадра задержки: панель никуда не размонтируется, так что
+  // ждать перестройки layout под фокус больше незачем — а лишний кадр как
+  // раз и открыл бы окно, где ни клавиатура, ни панель ещё не отмечены
+  // активными, и зарезервированное место успело бы схлопнуться.
   const focusMobileTextarea = useCallback(() => {
     if (!isNativeMobile) return;
-    // После размонтирования нижней панели даём WebView один кадр на новый layout,
-    // затем возвращаем фокус — Android сам поднимет системную клавиатуру.
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      const end = el.selectionStart ?? text.length;
-      el.setSelectionRange(end, end);
-    });
-  }, [text.length]);
+    if (rich) {
+      richRef.current?.focus();
+      return;
+    }
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    const end = el.selectionStart ?? text.length;
+    el.setSelectionRange(end, end);
+  }, [text.length, rich]);
 
   const closeEmoji = useCallback((restoreKeyboard = false) => {
     setEmojiOpen(false);
@@ -185,20 +228,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
       setEmojiOpen((v) => !v);
       return;
     }
-
+    // Панель уже смонтирована и место под неё уже зарезервировано (см.
+    // surfaceActive в разметке) — переключение это просто «попросить
+    // клавиатуру появиться/уйти», без какой-либо координации с панелью.
     if (emojiOpen) {
-      closeEmoji(true);
-      return;
+      setEmojiOpen(false);
+      focusMobileTextarea();
+    } else {
+      setEmojiOpen(true);
+      hideMobileKeyboard();
     }
-
-    // Сначала резервируем место примерно той же высоты, что занимала системная
-    // клавиатура, и только потом просим Android её убрать. Визуально нижняя
-    // область меняет содержимое, а не исчезает и появляется заново.
-    setEmojiPanelHeight(getLastMobileKeyboardHeight());
-    setEmojiOpen(true);
-    hideMobileKeyboard();
-    requestAnimationFrame(() => window.dispatchEvent(new Event('miras-composer-resize')));
-  }, [closeEmoji, disabled, emojiOpen]);
+  }, [disabled, emojiOpen, focusMobileTextarea]);
 
   const uploadImage = async (file: File, id: number) => {
     const form = new FormData();
@@ -369,7 +409,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
   return (
     <form
       onSubmit={handleSubmit}
-      className={'composer' + (dragActive ? ' is-drag-over' : '')}
+      className={'composer' + (dragActive ? ' is-drag-over' : '') + (surfaceActive ? ' has-mobile-input-surface' : '')}
+      style={{ '--mobile-emoji-height': `${emojiPanelHeight}px` } as React.CSSProperties}
       onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragActive(true); }}
       onDragLeave={() => setDragActive(false)}
       onDrop={handleDrop}
@@ -487,6 +528,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onEscape={editing ? cancelEdit : (replying ? onCancelReply : undefined)}
               onArrowUpEmpty={!editing ? onRequestEditLast : undefined}
               onPasteImageFile={(file) => stageFiles([file])}
+              onFocus={() => { setFieldFocused(true); if (isNativeMobile && emojiOpen) setEmojiOpen(false); }}
+              onBlur={() => setFieldFocused(false)}
             />
           ) : (
             <textarea
@@ -496,7 +539,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onChange={handleChange}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              onFocus={() => { if (isNativeMobile && emojiOpen) setEmojiOpen(false); }}
+              onFocus={() => { setFieldFocused(true); if (isNativeMobile && emojiOpen) setEmojiOpen(false); }}
+              onBlur={() => setFieldFocused(false)}
               placeholder={fieldPlaceholder}
               disabled={disabled}
             />
@@ -535,13 +579,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
       </button>
       </div>
 
-      {emojiOpen && isNativeMobile && (
-        <EmojiPicker
-          onPick={insertEmoji}
-          onClose={() => closeEmoji(false)}
-          mobilePanel
-          mobileHeight={emojiPanelHeight}
-        />
+      {isNativeMobile && (
+        // Смонтирована всегда, пока открыта переписка — место под неё уже
+        // зарезервировано (surfaceActive), а системная клавиатура при показе
+        // просто рисуется поверх неё отдельным нативным слоем. Переключение
+        // клавиатура↔панель поэтому не требует ни монтирования, ни пересборки
+        // вёрстки — только сама поверхность целиком появляется/пропадает.
+        <div
+          className={'mobile-emoji-surface' + (surfaceActive ? ' is-surface-active' : '') + (emojiOpen ? ' is-emoji-mode' : '')}
+        >
+          <EmojiPicker onPick={insertEmoji} onClose={() => closeEmoji(false)} mobilePanel />
+        </div>
       )}
     </form>
   );

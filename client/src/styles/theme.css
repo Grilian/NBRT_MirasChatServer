@@ -1305,16 +1305,40 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   .conv-body { padding: 12px 10px 14px; }
   .msg { max-width: 86%; }
 
-  /* На телефоне picker — не popup над лентой, а нижняя панель ПОСЛЕ строки
-     ввода, то есть занимает то же место, где секунду назад была системная
-     клавиатура. Высоту задаёт JS по последней keyboardHeight от Capacitor. */
+  /* Telegram-подобная схема: нижняя emoji-поверхность живёт в WebView
+     постоянно. Android IME настроена как adjustNothing и просто накрывает её.
+     Composer резервирует эту высоту только пока активен любой режим ввода.
+     При keyboard <-> emoji флаг не меняется, поэтому layout остаётся ровно
+     тем же самым и чат не получает промежуточного resize-кадра. */
+  .composer { z-index: 31; }
+  .composer.has-mobile-input-surface {
+    margin-bottom: var(--mobile-emoji-height, 300px);
+  }
+  /* Плавно только само появление/исчезание зарезервированного места целиком
+     (0 ↔ высота клавиатуры) — единственный момент, где высота реально
+     меняется. Переключение клавиатура↔панель эту высоту не трогает вовсе,
+     поэтому там анимировать нечего. */
+  @media (prefers-reduced-motion: no-preference) {
+    .composer.has-mobile-input-surface, .composer:not(.has-mobile-input-surface) {
+      transition: margin-bottom var(--ease);
+    }
+  }
+  .mobile-emoji-surface {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: var(--mobile-emoji-height, 300px);
+    z-index: 30; overflow: hidden;
+    visibility: hidden; pointer-events: none;
+    background: var(--sidebar);
+  }
+  .mobile-emoji-surface.is-surface-active { visibility: visible; }
+  .mobile-emoji-surface.is-emoji-mode { pointer-events: auto; }
   .emoji-picker.is-mobile-panel {
-    position: relative; inset: auto; left: auto; right: auto; bottom: auto;
-    width: calc(100% + 20px); max-width: none; margin: 0 -10px -9px;
+    position: absolute; inset: 0;
+    width: 100%; max-width: none; height: 100%; margin: 0;
     border-left: none; border-right: none; border-bottom: none;
     border-radius: 0; box-shadow: none;
     background: var(--sidebar);
-    animation: emoji-panel-in 150ms cubic-bezier(.22, .61, .36, 1);
+    animation: none;
   }
   .emoji-picker.is-mobile-panel .emoji-tabs {
     flex: none; padding: 5px 8px 0; background: var(--sidebar);
@@ -1329,13 +1353,6 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   .emoji-picker.is-mobile-panel .emoji-cell { min-height: 42px; padding: 7px 0; font-size: 24px; }
   .emoji-picker.is-mobile-panel .emoji-cell .custom-emoji { width: 30px; height: 30px; }
   .emoji-tab-name { display: none; }
-  @keyframes emoji-panel-in {
-    from { transform: translateY(10px); opacity: .5; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .emoji-picker.is-mobile-panel { animation: none; }
-  }
 
   /* На узком экране — во всю ширину под шапкой */
   .toast-stack { top: 10px; left: 10px; right: 10px; width: auto; }
