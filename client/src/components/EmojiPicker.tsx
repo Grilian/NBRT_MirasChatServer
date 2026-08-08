@@ -20,6 +20,9 @@ interface EmojiPickerProps {
    */
   onPick: (emoji: string | PickedCustomEmoji) => void;
   onClose: () => void;
+  /** На телефоне панель является нижней частью composer, а не popup поверх чата. */
+  mobilePanel?: boolean;
+  mobileHeight?: number;
 }
 
 // Кэш только чтобы не мигать пустой панелью на каждое открытие (компонент
@@ -40,7 +43,7 @@ let cachedPacks: EmojiPack[] | null = null;
  */
 export const invalidateEmojiPackCache = () => { cachedPacks = null; };
 
-const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
+const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose, mobilePanel = false, mobileHeight }) => {
   const [packs, setPacks] = useState<EmojiPack[]>(cachedPacks || []);
   const [activePack, setActivePack] = useState(0);
   const [loading, setLoading] = useState(!cachedPacks);
@@ -57,6 +60,12 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
   // composer'е сюда не долетает — она останавливает всплытие и переключает
   // панель сама, иначе панель закрывалась бы и открывалась одним нажатием.
   useEffect(() => {
+    // На мобильном это не всплывашка, а постоянная нижняя панель вместо
+    // клавиатуры. Закрывать её по любому touchstart снаружи нельзя: сама
+    // кнопка-переключатель находится снаружи панели и иначе сначала закрывает,
+    // а затем тут же снова открывает её синтетическим mouse-событием Android.
+    if (mobilePanel) return;
+
     const onDocPointerDown = (e: MouseEvent | TouchEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) onClose();
     };
@@ -70,12 +79,16 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose }) => {
       document.removeEventListener('touchstart', onDocPointerDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [onClose]);
+  }, [onClose, mobilePanel]);
 
   const current = packs[activePack];
 
   return (
-    <div className="emoji-picker" ref={rootRef}>
+    <div
+      className={'emoji-picker' + (mobilePanel ? ' is-mobile-panel' : '')}
+      ref={rootRef}
+      style={mobilePanel && mobileHeight ? { height: `${mobileHeight}px` } : undefined}
+    >
       {packs.length > 1 && (
         <div className="emoji-tabs">
           {packs.map((pack, index) => (

@@ -10,14 +10,21 @@ import { isNativeMobile } from './mobileNotify';
 // "true". Поэтому слушаем ещё и keyboardWillHide, а главное — сбрасываем её
 // сами в hideMobileKeyboard, не дожидаясь подтверждения от нативной части.
 let keyboardOpen = false;
+let lastKeyboardHeight = 300;
 
 /** Следить за состоянием клавиатуры. Возвращает функцию отписки. */
 export function watchMobileKeyboard(): () => void {
   if (!isNativeMobile) return () => {};
 
   const handles = [
-    Keyboard.addListener('keyboardWillShow', () => { keyboardOpen = true; }),
-    Keyboard.addListener('keyboardDidShow', () => { keyboardOpen = true; }),
+    Keyboard.addListener('keyboardWillShow', (info) => {
+      keyboardOpen = true;
+      if (info.keyboardHeight > 0) lastKeyboardHeight = info.keyboardHeight;
+    }),
+    Keyboard.addListener('keyboardDidShow', (info) => {
+      keyboardOpen = true;
+      if (info.keyboardHeight > 0) lastKeyboardHeight = info.keyboardHeight;
+    }),
     Keyboard.addListener('keyboardWillHide', () => { keyboardOpen = false; }),
     Keyboard.addListener('keyboardDidHide', () => { keyboardOpen = false; })
   ];
@@ -25,6 +32,14 @@ export function watchMobileKeyboard(): () => void {
   return () => {
     handles.forEach((h) => h.then((handle) => handle.remove()).catch(() => {}));
   };
+}
+
+
+/** Последняя известная высота системной клавиатуры в CSS-пикселях.
+ * Нужна панели смайликов, чтобы занять примерно то же место и не дёргать
+ * переписку при переключении «клавиатура ↔ смайлики». */
+export function getLastMobileKeyboardHeight(): number {
+  return Math.max(240, Math.min(lastKeyboardHeight || 300, 420));
 }
 
 /**

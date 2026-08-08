@@ -569,6 +569,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 .conv-body {
   flex: 1; min-height: 0; overflow-y: auto; padding: 16px max(6%, 20px) 18px; display: flex; flex-direction: column;
+  /* Историю и новые сообщения позиционируем сами. Автоматический scroll
+     anchoring Chromium при позднем перерасчёте высоты мог удерживать старый
+     пузырь на экране и тем самым отодвигать фактическое дно после открытия. */
+  overflow-anchor: none;
   background-color: var(--chat-bg);
   /* Ненавязчивый узор вместо плоской заливки — как обои Telegram по умолчанию */
   background-image:
@@ -1301,12 +1305,37 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   .conv-body { padding: 12px 10px 14px; }
   .msg { max-width: 86%; }
 
-  /* Панель смайликов на телефоне встаёт на место клавиатуры: во всю ширину,
-     фиксированной высоты — иначе она либо занимала бы весь экран, либо
-     показывала два ряда. */
-  .emoji-picker { left: 8px; right: 8px; width: auto; max-width: none; bottom: calc(100% + 6px); }
-  .emoji-grid { max-height: 42vh; }
+  /* На телефоне picker — не popup над лентой, а нижняя панель ПОСЛЕ строки
+     ввода, то есть занимает то же место, где секунду назад была системная
+     клавиатура. Высоту задаёт JS по последней keyboardHeight от Capacitor. */
+  .emoji-picker.is-mobile-panel {
+    position: relative; inset: auto; left: auto; right: auto; bottom: auto;
+    width: calc(100% + 20px); max-width: none; margin: 0 -10px -9px;
+    border-left: none; border-right: none; border-bottom: none;
+    border-radius: 0; box-shadow: none;
+    background: var(--sidebar);
+    animation: emoji-panel-in 150ms cubic-bezier(.22, .61, .36, 1);
+  }
+  .emoji-picker.is-mobile-panel .emoji-tabs {
+    flex: none; padding: 5px 8px 0; background: var(--sidebar);
+  }
+  .emoji-picker.is-mobile-panel .emoji-grid {
+    flex: 1; min-height: 0; max-height: none; overflow-y: auto;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    align-content: start; padding: 8px 8px max(10px, env(safe-area-inset-bottom));
+    background: var(--paper-sunken);
+    overscroll-behavior: contain;
+  }
+  .emoji-picker.is-mobile-panel .emoji-cell { min-height: 42px; padding: 7px 0; font-size: 24px; }
+  .emoji-picker.is-mobile-panel .emoji-cell .custom-emoji { width: 30px; height: 30px; }
   .emoji-tab-name { display: none; }
+  @keyframes emoji-panel-in {
+    from { transform: translateY(10px); opacity: .5; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .emoji-picker.is-mobile-panel { animation: none; }
+  }
 
   /* На узком экране — во всю ширину под шапкой */
   .toast-stack { top: 10px; left: 10px; right: 10px; width: auto; }
@@ -1832,4 +1861,23 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .status-duration select {
   flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink);
   border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13.5px; font-family: inherit;
+}
+
+/* При переключении чата лента сначала позиционируется на последнем
+   сообщении невидимо. visibility сохраняет геометрию/layout, в отличие от
+   display:none, поэтому scrollHeight остаётся доступным для расчёта. */
+.conv-body.is-initial-positioning {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* После позиционирования содержимое появляется уже на правильном месте.
+   Короткий fade сглаживает сам момент подмены, не создавая ощущения загрузки. */
+.conv-body:not(.is-initial-positioning) {
+  animation: conv-body-reveal 90ms ease-out;
+}
+
+@keyframes conv-body-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

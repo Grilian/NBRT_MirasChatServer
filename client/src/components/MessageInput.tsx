@@ -4,6 +4,7 @@ import EmojiPicker from './EmojiPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
 import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
 import { isNativeMobile } from '../utils/mobileNotify';
+import { getLastMobileKeyboardHeight, hideMobileKeyboard } from '../utils/mobileKeyboard';
 
 export interface PendingImage {
   file_path: string;
@@ -71,6 +72,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [staged, setStaged] = useState<StagedImage[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [emojiPanelHeight, setEmojiPanelHeight] = useState(300);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,7 +153,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       // перерисует значение поля.
       requestAnimationFrame(() => {
         const caret = Math.min(start + emoji.length, next.length);
-        el?.focus();
+        if (!(isNativeMobile && emojiOpen)) el?.focus();
         el?.setSelectionRange(caret, caret);
       });
       return next;
@@ -159,7 +161,44 @@ const MessageInput: React.FC<MessageInputProps> = ({
     onTyping?.();
   };
 
-  const closeEmoji = useCallback(() => setEmojiOpen(false), []);
+  const focusMobileTextarea = useCallback(() => {
+    if (!isNativeMobile) return;
+    // После размонтирования нижней панели даём WebView один кадр на новый layout,
+    // затем возвращаем фокус — Android сам поднимет системную клавиатуру.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const end = el.selectionStart ?? text.length;
+      el.setSelectionRange(end, end);
+    });
+  }, [text.length]);
+
+  const closeEmoji = useCallback((restoreKeyboard = false) => {
+    setEmojiOpen(false);
+    if (restoreKeyboard) focusMobileTextarea();
+  }, [focusMobileTextarea]);
+
+  const toggleEmoji = useCallback(() => {
+    if (disabled) return;
+    if (!isNativeMobile) {
+      setEmojiOpen((v) => !v);
+      return;
+    }
+
+    if (emojiOpen) {
+      closeEmoji(true);
+      return;
+    }
+
+    // Сначала резервируем место примерно той же высоты, что занимала системная
+    // клавиатура, и только потом просим Android её убрать. Визуально нижняя
+    // область меняет содержимое, а не исчезает и появляется заново.
+    setEmojiPanelHeight(getLastMobileKeyboardHeight());
+    setEmojiOpen(true);
+    hideMobileKeyboard();
+    requestAnimationFrame(() => window.dispatchEvent(new Event('miras-composer-resize')));
+  }, [closeEmoji, disabled, emojiOpen]);
 
   const uploadImage = async (file: File, id: number) => {
     const form = new FormData();
@@ -344,7 +383,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         onChange={(e) => { stageFiles(e.target.files); e.target.value = ''; }}
       />
 
-      {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={closeEmoji} />}
+      {emojiOpen && !isNativeMobile && <EmojiPicker onPick={insertEmoji} onClose={() => closeEmoji(false)} />}
 
       {/* Правка, ответ и приложенная картинка — НАД полосой ввода и во всю её
           ширину, а не внутри: полоса скруглена под одну строку, и вложенная в
@@ -418,15 +457,22 @@ const MessageInput: React.FC<MessageInputProps> = ({
         // onMouseDown вместо onClick и с preventDefault: панель закрывается по
         // mousedown снаружи себя, и на обычном клике она успела бы закрыться
         // раньше, чем сюда дойдёт onClick, — кнопка не работала бы вовсе.
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!disabled) setEmojiOpen((v) => !v); }}
+        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleEmoji(); }}
         disabled={disabled}
-        aria-label="Смайлики"
-        title="Смайлики"
+        aria-label={isNativeMobile && emojiOpen ? 'Клавиатура' : 'Смайлики'}
+        title={isNativeMobile && emojiOpen ? 'Клавиатура' : 'Смайлики'}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
-          <circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
-          <path d="M9 9.5h.01M15 9.5h.01" strokeWidth="2.6" strokeLinecap="round" />
-        </svg>
+        {isNativeMobile && emojiOpen ? (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M7 9h.01M10.5 9h.01M14 9h.01M17.5 9h.01M7 12.5h.01M10.5 12.5h.01M14 12.5h.01M17.5 12.5h.01M8 16h8" strokeLinecap="round" strokeWidth="2" />
+          </svg>
+        ) : (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+            <circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
+            <path d="M9 9.5h.01M15 9.5h.01" strokeWidth="2.6" strokeLinecap="round" />
+          </svg>
+        )}
       </button>
 
         <div className="composer-field">
@@ -450,6 +496,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onChange={handleChange}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
+              onFocus={() => { if (isNativeMobile && emojiOpen) setEmojiOpen(false); }}
               placeholder={fieldPlaceholder}
               disabled={disabled}
             />
@@ -487,6 +534,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
         )}
       </button>
       </div>
+
+      {emojiOpen && isNativeMobile && (
+        <EmojiPicker
+          onPick={insertEmoji}
+          onClose={() => closeEmoji(false)}
+          mobilePanel
+          mobileHeight={emojiPanelHeight}
+        />
+      )}
     </form>
   );
 };

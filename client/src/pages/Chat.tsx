@@ -1351,6 +1351,14 @@ const Chat: React.FC = () => {
       return;
     }
 
+    // Не даём ChatWindow ни одного кадра рисовать историю предыдущего
+    // диалога уже с новым chatId. Иначе его initial-scroll может отработать
+    // по старой геометрии, а настоящая история приедет чуть позже.
+    if (chatId !== activeChat) {
+      setMessages([]);
+      setHasMore(true);
+      loadingMoreRef.current = false;
+    }
     setActiveChat(chatId);
     closeKeyboard();
     // Открытые Настройки/Профиль/другой раздел иначе продолжали закрывать собой

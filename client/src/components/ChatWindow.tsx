@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { nameFor } from '../utils/user';
 import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKey } from '../utils/time';
 import { isNativeMobile } from '../utils/mobileNotify';
@@ -177,7 +177,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
   const [showJumpButton, setShowJumpButton] = useState(false);
+  // При первом открытии нового чата не показываем пользователю промежуточное
+  // положение ленты (сначала сверху, затем несколько доводок вниз). Сам DOM
+  // при этом уже отрисован и участвует в layout, поэтому размеры можно
+  // измерить и выставить scrollTop до появления содержимого.
+  const [initialPositioning, setInitialPositioning] = useState(true);
   const prevMessagesLengthRef = useRef(0);
+  // Пока новый чат только позиционируется внизу, события scroll не должны
+  // запускать подгрузку истории. Иначе начальный scrollTop=0 может быть
+  // ошибочно принят за ручную прокрутку пользователя к старым сообщениям.
+  const initialPinRef = useRef(false);
+  const initialPinTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
   // Развёрнутый ряд реакций живёт только пока открыто меню: следующее
@@ -218,8 +228,57 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // побочный проброс того же флага через другой эффект.
   const prevChatIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (messages.length === 0) return;
+  // Скроллим сам контейнер, а не нижний div через scrollIntoView().
+  // scrollIntoView умеет прокручивать сразу несколько scroll-родителей и
+  // зависит от геометрии marker-элемента; при открытии чата layout ещё может
+  // измениться на следующем кадре (шрифты, реакции, картинки, ширина scrollbar).
+  // В результате браузер сохранял старый scrollTop, а настоящее дно уезжало
+  // на несколько сообщений ниже. На Windows и Android это проявлялось одинаково.
+  const scrollContainerToBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+  }, []);
+
+  const stopInitialPin = useCallback(() => {
+    initialPinRef.current = false;
+    initialPinTimersRef.current.forEach(clearTimeout);
+    initialPinTimersRef.current = [];
+  }, []);
+
+  const startInitialPin = useCallback(() => {
+    stopInitialPin();
+    initialPinRef.current = true;
+    setInitialPositioning(true);
+    scrollContainerToBottom();
+
+    // Первые доводки происходят пока лента ещё невидима. Уже через 140 мс
+    // показываем её в окончательном положении — пользователь не видит путь
+    // от scrollTop=0 до низа. Более поздние страховочные доводки оставляем
+    // для медиа, которые догружаются после первого layout.
+    [0, 40, 100, 140, 300, 700, 1200].forEach((delay, index, arr) => {
+      const timer = setTimeout(() => {
+        if (!initialPinRef.current) return;
+        scrollContainerToBottom();
+        if (delay === 140) setInitialPositioning(false);
+        if (index === arr.length - 1) initialPinRef.current = false;
+      }, delay);
+      initialPinTimersRef.current.push(timer);
+    });
+  }, [scrollContainerToBottom, stopInitialPin]);
+
+  // Скрываем именно ленту нового чата ещё до показа первого кадра.
+  // useLayoutEffect здесь принципиален: обычный useEffect успел бы показать
+  // один кадр со старой/верхней позицией и моргание осталось бы.
+  useLayoutEffect(() => {
+    setInitialPositioning(true);
+  }, [chatId]);
+
+  useLayoutEffect(() => {
+    if (messages.length === 0) {
+      setInitialPositioning(false);
+      return;
+    }
 
     const chatJustOpened = prevChatIdRef.current !== chatId;
     const grew = messages.length > prevMessagesLengthRef.current;
@@ -227,14 +286,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     // сообщения лента уходит вниз всегда, даже если до этого читали историю
     // выше, — как и ожидается от «отправил и увидел, что ушло».
     const lastIsMine = grew && messages[messages.length - 1]?.sender_id === currentUserId;
+    const mustStickToBottom = chatJustOpened || lastIsMine || (grew && shouldScrollRef.current);
 
-    if (chatJustOpened || lastIsMine || (grew && shouldScrollRef.current)) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    if (mustStickToBottom) {
+      // Первый проход — до показа кадра. При открытии чата делаем ещё две
+      // доводки: Chromium/WebView может закончить расчёт размеров только на
+      // следующих кадрах. Это не smooth-scroll, поэтому пользователь не видит
+      // промежуточного прыжка.
+      if (chatJustOpened) startInitialPin();
+      else scrollContainerToBottom();
     }
 
     prevMessagesLengthRef.current = messages.length;
     prevChatIdRef.current = chatId;
-  }, [messages, chatId, currentUserId]);
+  }, [messages, chatId, currentUserId, scrollContainerToBottom, startInitialPin]);
 
   // Появление экранной клавиатуры на Android физически уменьшает высоту
   // WebView (adjustResize) — flex-раскладка тут же сжимает conv-body под
@@ -258,6 +323,21 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       });
     });
   }, []);
+
+  // Системная клавиатура — не единственное, что меняет доступную высоту ленты:
+  // мобильная панель смайликов теперь занимает её место внутри composer. При
+  // переключении сохраняем «приклеенность» к последнему сообщению, но только
+  // если пользователь и до этого был внизу — чтение старой истории не рвём.
+  useEffect(() => {
+    const onComposerResize = () => {
+      if (!shouldScrollRef.current) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scrollContainerToBottom());
+      });
+    };
+    window.addEventListener('miras-composer-resize', onComposerResize);
+    return () => window.removeEventListener('miras-composer-resize', onComposerResize);
+  }, [scrollContainerToBottom]);
 
   // Подгрузка истории добавляет сообщения СВЕРХУ, из-за чего содержимое
   // уезжает вниз, а прокрутка остаётся на месте — визуально это выглядело
@@ -284,6 +364,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     setSelectMode(false);
     setSelectedIds(new Set());
   }, [chatId]);
+
+  // Таймеры первоначального позиционирования не должны пережить сам компонент.
+  useEffect(() => () => stopInitialPin(), [stopInitialPin]);
 
   // Сняли последнюю галочку — выходим из режима выделения сами, отдельной
   // кнопки «Отмена» для этого не требуют.
@@ -343,7 +426,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     // кнопка не появлялась вовсе. Хватает одного «экранчика» отступа от низа.
     setShowJumpButton(scrollHeight - scrollTop - clientHeight > 120);
 
-    if (scrollTop < 150 && onScrollTop && hasMore && !loadingMore) {
+    if (!initialPinRef.current && scrollTop < 150 && onScrollTop && hasMore && !loadingMore) {
       pendingRestoreRef.current = { height: scrollHeight, top: scrollTop };
       onScrollTop();
     }
@@ -747,8 +830,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
       <div
         ref={messagesContainerRef}
-        className={'conv-body' + (touchSelecting || selectMode ? ' is-touch-selecting' : '')}
+        className={'conv-body' + (touchSelecting || selectMode ? ' is-touch-selecting' : '') + (initialPositioning ? ' is-initial-positioning' : '')}
         onScroll={handleScroll}
+        onWheel={stopInitialPin}
+        onTouchStart={stopInitialPin}
+        onPointerDown={stopInitialPin}
       >
         {loadingMore && <div className="load-more-hint">Загрузка…</div>}
         {messages.length === 0 && !loadingMore && (
