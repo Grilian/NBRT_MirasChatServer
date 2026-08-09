@@ -3,6 +3,7 @@ import Avatar from './Avatar';
 import { formatChatListTime } from '../utils/time';
 import { describeStatus } from '../utils/statusMeta';
 import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
+import WebDownloadLinks from './WebDownloadLinks';
 
 export type ChatSection = 'general' | 'staff' | 'group' | 'self';
 
@@ -128,6 +129,7 @@ const ChatList: React.FC<ChatListProps> = ({
             {ownStatus && <span className="roster-self-status">{ownStatus.emoji}</span>}
           </button>
           <div className="roster-heading">Чаты</div>
+          <WebDownloadLinks />
           {totalUnread > 0 && (
             <>
               <span className="row-unread">{totalUnread}</span>

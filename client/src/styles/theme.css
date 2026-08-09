@@ -422,6 +422,22 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .roster-account { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-height: 30px; }
 .roster-heading { flex: 1; min-width: 0; font: 600 18px/1.2 var(--font-display); color: var(--ink); }
 
+.web-download-links { display: flex; flex: none; align-items: center; gap: 3px; }
+.web-download-links a {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 7px;
+  border-radius: var(--radius-pill); color: var(--ink-muted); background: var(--paper-sunken);
+  text-decoration: none; font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  transition: color var(--ease), background var(--ease);
+}
+.web-download-links a:hover { color: var(--accent); background: var(--row-hover); }
+.web-download-links a.is-disabled { opacity: .4; pointer-events: none; }
+.web-download-links svg { width: 13px; height: 13px; fill: currentColor; flex: none; }
+
+@media (max-width: 1180px) {
+  .web-download-links a { width: 26px; padding: 0; justify-content: center; }
+  .web-download-links span { display: none; }
+}
+
 .mark-all-read-btn {
   flex: none; width: 26px; height: 26px; border-radius: 50%; border: none; padding: 0; margin-left: 2px;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
