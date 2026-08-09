@@ -21,6 +21,7 @@
   "build": {
     "appId": "ru.miras.mirasChat",
     "productName": "MirasChat",
+    "compression": "store",
     "directories": {
       "output": "release",
       "buildResources": "assets"

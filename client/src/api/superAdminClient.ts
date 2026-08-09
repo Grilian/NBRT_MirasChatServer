@@ -12,6 +12,13 @@ superAdminApi.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Не допускаем условный GET с ответом 304: для Axios это не успешный ответ,
+  // поэтому один закэшированный справочник срывал загрузку всей панели.
+  if (config.method?.toLowerCase() === 'get') {
+    config.headers['Cache-Control'] = 'no-cache';
+    config.headers.Pragma = 'no-cache';
+    config.params = { ...config.params, _ts: Date.now() };
+  }
   return config;
 });
 

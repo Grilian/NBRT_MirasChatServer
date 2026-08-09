@@ -14,6 +14,14 @@ const {
 } = require('../services/appSettings');
 const router = express.Router();
 
+// Административные ответы содержат изменяемые и чувствительные данные. Браузер
+// не должен переиспользовать их через ETag: Axios считает HTTP 304 ошибкой, и
+// один закэшированный справочник роняет общий Promise.all загрузки панели.
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key';
 
 // 'ok' — обычный, рабочий пароль; 'pending' — админ нажал "Сменить", ждём,
