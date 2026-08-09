@@ -15,6 +15,8 @@ export interface EmojiComposerHandle {
   hydrate: (text: string) => void;
   clear: () => void;
   focus: () => void;
+  blur: () => void;
+  saveSelection: () => void;
   insertPicked: (value: string | PickedCustomEmoji, options?: { focus?: boolean }) => void;
 }
 
@@ -28,8 +30,38 @@ interface Props {
   /** Стрелка вверх в пустом поле — правка последнего своего сообщения. */
   onArrowUpEmpty?: () => void;
   onPasteImageFile?: (file: File) => void;
+  onPointerDown?: (event: React.PointerEvent<HTMLElement>) => void;
   onFocus?: () => void;
   onBlur?: () => void;
+}
+
+interface SavedDomSelection {
+  startContainer: Node;
+  startOffset: number;
+  endContainer: Node;
+  endOffset: number;
+}
+
+function snapshotRange(range: Range): SavedDomSelection {
+  return {
+    startContainer: range.startContainer,
+    startOffset: range.startOffset,
+    endContainer: range.endContainer,
+    endOffset: range.endOffset,
+  };
+}
+
+function restoreRange(box: HTMLDivElement, saved: SavedDomSelection | null): Range | null {
+  if (!saved || !box.contains(saved.startContainer) || !box.contains(saved.endContainer)) return null;
+  try {
+    const range = document.createRange();
+    range.setStart(saved.startContainer, saved.startOffset);
+    range.setEnd(saved.endContainer, saved.endOffset);
+    return range;
+  } catch {
+    // DOM мог измениться внешней гидратацией/очисткой — не вставляем по устаревшей позиции.
+    return null;
+  }
 }
 
 // Код, только что дописанный перед курсором. В отличие от общего SHORTCODE
@@ -53,9 +85,12 @@ const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
  */
 const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
   customEmoji, placeholder, disabled,
-  onChangeText, onSubmit, onEscape, onArrowUpEmpty, onPasteImageFile, onFocus, onBlur,
+  onChangeText, onSubmit, onEscape, onArrowUpEmpty, onPasteImageFile, onPointerDown, onFocus, onBlur,
 }, ref) => {
   const boxRef = useRef<HTMLDivElement>(null);
+  // Нельзя хранить сам Range: это «живой» объект, и браузер сдвигает его границы при insertNode.
+  // Храним неизменяемый снимок узлов/offset — иначе несколько emoji вставляются в обратном порядке.
+  const savedRangeRef = useRef<SavedDomSelection | null>(null);
   // Свежая карта нужна обработчикам, которые читают её в момент нажатия.
   const mapRef = useRef(customEmoji);
   mapRef.current = customEmoji;
@@ -65,16 +100,26 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
     if (box) onChangeText(domToText(box));
   }, [onChangeText]);
 
-  /** Курсор схлопывается сразу за узлом. */
-  const caretAfter = (node: Node) => {
+  const saveSelection = useCallback(() => {
+    const box = boxRef.current;
     const selection = window.getSelection();
-    if (!selection) return;
+    if (!box || !selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (box.contains(range.commonAncestorContainer)) savedRangeRef.current = snapshotRange(range);
+  }, []);
+
+  /** Запоминает курсор сразу за узлом; применять Selection необязательно. */
+  const caretAfter = useCallback((node: Node, expose = true) => {
     const range = document.createRange();
     range.setStartAfter(node);
     range.collapse(true);
+    savedRangeRef.current = snapshotRange(range);
+    if (!expose) return;
+    const selection = window.getSelection();
+    if (!selection) return;
     selection.removeAllRanges();
     selection.addRange(range);
-  };
+  }, []);
 
   const insertNode = useCallback((node: Node, focusAfter = true) => {
     const box = boxRef.current;
@@ -82,21 +127,27 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
     const selection = window.getSelection();
     // Курсор мог остаться в другом месте страницы (клик по панели смайликов) —
     // тогда вставляем в конец, а не в чужой узел.
-    const inside = selection && selection.rangeCount > 0
+    // После blur Android WebView часто оставляет Selection внутри contentEditable, но переносит
+    // его в начало. Такой Selection уже не является живым курсором: в emoji-режиме используем
+    // явно сохранённый Range, снятый до потери фокуса.
+    const inside = document.activeElement === box && selection && selection.rangeCount > 0
       && box.contains(selection.getRangeAt(0).commonAncestorContainer);
+    const saved = restoreRange(box, savedRangeRef.current);
+    const insertionRange = inside
+      ? selection!.getRangeAt(0).cloneRange()
+      : saved;
 
     const last = node.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? node.lastChild : node;
-    if (inside) {
-      const range = selection!.getRangeAt(0);
-      range.deleteContents();
-      range.insertNode(node);
+    if (insertionRange) {
+      insertionRange.deleteContents();
+      insertionRange.insertNode(node);
     } else {
       box.appendChild(node);
     }
-    if (last) caretAfter(last);
     if (focusAfter) box.focus();
+    if (last) caretAfter(last, focusAfter);
     emitChange();
-  }, [emitChange]);
+  }, [caretAfter, emitChange]);
 
   useImperativeHandle(ref, () => ({
     getText: () => (boxRef.current ? domToText(boxRef.current) : ''),
@@ -113,17 +164,27 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
       const box = boxRef.current;
       if (!box) return;
       box.textContent = '';
+      savedRangeRef.current = null;
       emitChange();
     },
     focus: () => {
       const box = boxRef.current;
       if (!box) return;
       box.focus();
+      const saved = restoreRange(box, savedRangeRef.current);
+      if (saved) {
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(saved);
+        return;
+      }
       const selection = window.getSelection();
       const inside = selection && selection.rangeCount > 0
         && box.contains(selection.getRangeAt(0).commonAncestorContainer);
       if (!inside && box.lastChild) caretAfter(box.lastChild);
     },
+    blur: () => boxRef.current?.blur(),
+    saveSelection,
     insertPicked: (value, options) => {
       const focusAfter = options?.focus !== false;
       if (typeof value === 'string') {
@@ -132,7 +193,7 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
       }
       insertNode(createEmojiNode(value.name, value.filePath, value.fallback), focusAfter);
     },
-  }), [emitChange, insertNode]);
+  }), [caretAfter, emitChange, insertNode, saveSelection]);
 
   // Живая замена кода картинкой: как только дописано закрывающее двоеточие и
   // имя известно — текст исчезает, на его месте узел смайлика. Человек не
@@ -167,6 +228,7 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
     // Во время набора через IME (иероглифы) трогать содержимое нельзя —
     // это сорвало бы незавершённый ввод.
     if (!(e.nativeEvent as InputEvent).isComposing) convertTypedShortcode();
+    saveSelection();
     emitChange();
   };
 
@@ -272,9 +334,15 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
       data-placeholder={placeholder}
       onInput={handleInput}
       onKeyDown={handleKeyDown}
+      onKeyUp={saveSelection}
       onPaste={handlePaste}
+      onPointerDown={onPointerDown}
+      onPointerUp={saveSelection}
       onFocus={onFocus}
-      onBlur={onBlur}
+      onBlur={() => {
+        saveSelection();
+        onBlur?.();
+      }}
       // Перетаскивание файла обрабатывает форма целиком (composer), а сюда drop
       // приводил бы к вставке чужой разметки мимо onPaste.
       onDrop={(e) => e.preventDefault()}

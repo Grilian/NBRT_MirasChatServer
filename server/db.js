@@ -40,6 +40,18 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 
+  -- Последние открытые переписки пользователя. Это серверное состояние, а
+  -- не localStorage: порядок должен совпадать в Windows и на телефоне.
+  -- Сам факт открытия храним даже до первого исходящего сообщения, однако
+  -- наружу такой чат попадёт только после отправки (см. recentChats.js).
+  CREATE TABLE IF NOT EXISTS chat_recent_openings (
+    user_id INTEGER NOT NULL,
+    chat_id TEXT NOT NULL,
+    last_opened_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, chat_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS user_comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -735,8 +747,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
   CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
   CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorites(user_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_recent_user_opened
+    ON chat_recent_openings(user_id, last_opened_at DESC);
   CREATE INDEX IF NOT EXISTS idx_user_comments_user_id ON user_comments(user_id);
   CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id);
+`);
+
+// До появления отдельной истории открытий точного времени не было. Для уже
+// существующих аккаунтов берём время последнего исходящего сообщения как
+// безопасное начальное приближение, чтобы после обновления блок «Недавние» не
+// оказался пустым. INSERT OR IGNORE не перезаписывает реальные открытия.
+db.exec(`
+  INSERT OR IGNORE INTO chat_recent_openings (user_id, chat_id, last_opened_at)
+  SELECT sender_id, chat_id,
+         CAST(strftime('%s', MAX(created_at)) AS INTEGER) * 1000
+  FROM messages
+  WHERE chat_id != 'general'
+  GROUP BY sender_id, chat_id;
 `);
 
 // Бэкфилл контактов: до появления подписок чат-лист был "все зарегистрированные",

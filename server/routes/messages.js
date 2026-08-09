@@ -8,7 +8,35 @@ const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { isParticipant } = require('../services/chatParticipants');
 const { reactionsForMessages } = require('../services/reactions');
+const { touchRecentChat, listRecentChats } = require('../services/recentChats');
 const router = express.Router();
+
+// Последние открытые переписки синхронизируются между платформами. В список
+// попадают только чаты, куда пользователь уже отправлял сообщения; личное
+// «Избранное» допускается как отдельный встроенный чат.
+router.get('/meta/recent', verifyToken, (req, res) => {
+  try {
+    res.json(listRecentChats(req.userId));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/meta/recent/:chatId', verifyToken, (req, res) => {
+  try {
+    const chatId = req.params.chatId;
+    if (!isParticipant(chatId, req.userId)) {
+      return res.status(403).json({ error: 'Нет доступа к этому чату' });
+    }
+
+    touchRecentChat(req.userId, chatId);
+    const recent = listRecentChats(req.userId);
+    req.app.get('io')?.to(`user:${req.userId}`).emit('recent_chats_changed', recent);
+    res.json(recent);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Канал-объявление: в нём считаем «просмотрено» (см. историю чата ниже).
 // Проверяем по chat_id, чтобы не тащить сюда весь routes/groups.js — нужен

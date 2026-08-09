@@ -33,6 +33,7 @@ const { canPostToGroup } = require('./services/chatPermissions');
 const { isValidChatImagePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
 const calendarScheduler = require('./services/calendarScheduler');
+const { listRecentChats } = require('./services/recentChats');
 
 const db = require('./db');
 
@@ -410,6 +411,12 @@ io.on('connection', (socket) => {
         data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
         finalReplyTo, forwardedFromName, forwardedFromChat
       );
+
+      // После первой успешной отправки ранее сохранённое открытие становится
+      // допустимым для «Недавних». Само время здесь не меняем: сортировка идёт
+      // именно по открытию, а пересылка в «Избранное» без перехода туда не
+      // должна поднимать его наверх. Событие получают все устройства аккаунта.
+      io.to(`user:${senderId}`).emit('recent_chats_changed', listRecentChats(senderId));
 
       const message = {
         id: result.lastInsertRowid,

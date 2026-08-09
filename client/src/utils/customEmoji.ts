@@ -93,6 +93,103 @@ export function renderTextWithEmoji(
   return nodes;
 }
 
+// URL распознаём только с явной схемой http(s) либо с www. — произвольные
+// доменные имена текстом не превращаем в ссылки. E-mail подсвечивается отдельно,
+// но намеренно остаётся span: приложение не должно открывать почтовый клиент.
+const MESSAGE_TOKEN = /((?:https?:\/\/|www\.)[^\s<]+|[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
+const SIMPLE_EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+
+function trimUrlTail(value: string): { value: string; tail: string } {
+  let end = value.length;
+  while (end > 0 && /[.,!?;:]/.test(value[end - 1])) end -= 1;
+
+  // Закрывающую скобку сохраняем, если внутри URL есть соответствующая
+  // открывающая. Иначе это пунктуация окружающего предложения.
+  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  while (end > 0 && pairs[value[end - 1]]) {
+    const close = value[end - 1];
+    const open = pairs[close];
+    const body = value.slice(0, end);
+    const opens = body.split(open).length - 1;
+    const closes = body.split(close).length - 1;
+    if (opens >= closes) break;
+    end -= 1;
+  }
+
+  return { value: value.slice(0, end), tail: value.slice(end) };
+}
+
+function renderMessagePlainText(text: string, keyPrefix: string, nextKey: () => number): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  MESSAGE_TOKEN.lastIndex = 0;
+  let match = MESSAGE_TOKEN.exec(text);
+
+  while (match) {
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    const token = match[0];
+    if (SIMPLE_EMAIL.test(token)) {
+      nodes.push(React.createElement('span', {
+        key: `${keyPrefix}-mail-${nextKey()}`,
+        className: 'message-email',
+      }, token));
+    } else {
+      const { value, tail } = trimUrlTail(token);
+      if (value) {
+        nodes.push(React.createElement('a', {
+          key: `${keyPrefix}-link-${nextKey()}`,
+          className: 'message-link',
+          href: /^www\./i.test(value) ? `https://${value}` : value,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          onClick: (event: React.MouseEvent) => event.stopPropagation(),
+        }, value));
+      }
+      if (tail) nodes.push(tail);
+    }
+    last = match.index + token.length;
+    match = MESSAGE_TOKEN.exec(text);
+  }
+
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+/** Текст сообщения с кастомными emoji, кликабельными URL и некликабельной почтой. */
+export function renderMessageText(
+  text: string,
+  map: CustomEmojiMap,
+  keyPrefix = 'm',
+): React.ReactNode {
+  if (!text) return text;
+
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  let keyIndex = 0;
+  const nextKey = () => keyIndex++;
+  SHORTCODE.lastIndex = 0;
+  let match = SHORTCODE.exec(text);
+
+  while (match) {
+    const item = map[match[1]];
+    if (item) {
+      if (match.index > last) {
+        nodes.push(...renderMessagePlainText(text.slice(last, match.index), keyPrefix, nextKey));
+      }
+      nodes.push(React.createElement(CustomEmojiImage, {
+        key: `${keyPrefix}-emoji-${nextKey()}`,
+        filePath: item.filePath,
+        fallback: item.fallback,
+      }));
+      last = match.index + match[0].length;
+    }
+    match = SHORTCODE.exec(text);
+  }
+
+  if (last < text.length) nodes.push(...renderMessagePlainText(text.slice(last), keyPrefix, nextKey));
+  return nodes;
+}
+
 /**
  * Картинка с подстановкой базового эмодзи, если файла на диске уже нет. Без
  * этого пропавший файл давал иконку «сломанное изображение» посреди фразы.

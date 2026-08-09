@@ -1,5 +1,15 @@
-import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
+import { registerPlugin } from '@capacitor/core';
+import { Keyboard } from '@capacitor/keyboard';
 import { isNativeMobile } from './mobileNotify';
+
+interface ChatKeyboardPlugin {
+  setOverlay(options: { active: boolean }): Promise<{ navigationBarHeight?: number }>;
+}
+
+// @capacitor/keyboard умеет менять resize mode только на iOS. На Android его
+// setResizeMode() возвращает unimplemented, поэтому режим окна переключает
+// небольшой локальный плагин из mobile/android.
+const ChatKeyboard = registerPlugin<ChatKeyboardPlugin>('ChatKeyboard');
 
 // Открыта ли сейчас экранная клавиатура. Держим здесь, а не в состоянии React:
 // значение нужно синхронно в момент навигации, до всякого рендера.
@@ -10,28 +20,36 @@ import { isNativeMobile } from './mobileNotify';
 // "true". Поэтому слушаем ещё и keyboardWillHide, а главное — сбрасываем её
 // сами в hideMobileKeyboard, не дожидаясь подтверждения от нативной части.
 let keyboardOpen = false;
-let lastKeyboardHeight = 300;
-
-// Высота layout viewport в CSS-пикселях, когда клавиатура закрыта.
-// Для emoji-панели это надёжнее нативного keyboardHeight: на Android
-// встречаются устройства/клавиатуры, где плагин сообщает неполную высоту.
-let expandedViewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
-
-function currentViewportHeight(): number {
+let navigationBarHeight = 0;
+// v2 хранит видимую высоту IME без системной navigation bar. Старое значение включало её
+// и как раз оставляло над Gboard лишнюю полосу высотой с нижнюю системную панель.
+const KEYBOARD_HEIGHT_STORAGE_KEY = 'miras-mobile-keyboard-height-v2';
+function readStoredKeyboardHeight(): number {
   if (typeof window === 'undefined') return 0;
-  // Панель живёт в CSS-layout WebView, поэтому измеряем именно ту высоту,
-  // которой реально располагает страница после adjustResize.
-  return document.documentElement?.clientHeight || window.innerHeight || 0;
+  try {
+    return Number(window.localStorage.getItem(KEYBOARD_HEIGHT_STORAGE_KEY));
+  } catch {
+    return 0;
+  }
+}
+const storedKeyboardHeight = readStoredKeyboardHeight();
+let lastKeyboardHeight = storedKeyboardHeight >= 120 ? storedKeyboardHeight : 300;
+let closeInputSurface: (() => boolean) | null = null;
+
+function visibleKeyboardHeight(nativeHeight = 0): number {
+  return Math.max(0, Math.round(nativeHeight - navigationBarHeight));
 }
 
 function rememberKeyboardHeight(nativeHeight = 0) {
-  const now = currentViewportHeight();
-  const viewportDelta = expandedViewportHeight > now ? expandedViewportHeight - now : 0;
-
-  // Разница viewport совпадает с реальным количеством CSS-пикселей, которое
-  // Android отнял у приложения. Нативное значение оставляем только fallback.
-  const measured = viewportDelta >= 120 ? viewportDelta : nativeHeight;
-  if (measured >= 120) lastKeyboardHeight = measured;
+  const height = visibleKeyboardHeight(nativeHeight);
+  if (height < 120) return;
+  lastKeyboardHeight = height;
+  try {
+    window.localStorage.setItem(KEYBOARD_HEIGHT_STORAGE_KEY, String(lastKeyboardHeight));
+  } catch {
+    // localStorage может быть недоступен в ограниченном WebView — текущее
+    // значение всё равно останется правильным до перезапуска приложения.
+  }
 }
 
 /** Следить за состоянием клавиатуры. Возвращает функцию отписки. */
@@ -41,8 +59,7 @@ export function watchMobileKeyboard(): () => void {
   const handles = [
     Keyboard.addListener('keyboardWillShow', (info) => {
       keyboardOpen = true;
-      // На WILL viewport может быть ещё старого размера, поэтому это лишь fallback.
-      if (info.keyboardHeight >= 120) lastKeyboardHeight = info.keyboardHeight;
+      rememberKeyboardHeight(info.keyboardHeight);
     }),
     Keyboard.addListener('keyboardDidShow', (info) => {
       keyboardOpen = true;
@@ -51,10 +68,6 @@ export function watchMobileKeyboard(): () => void {
     Keyboard.addListener('keyboardWillHide', () => { keyboardOpen = false; }),
     Keyboard.addListener('keyboardDidHide', () => {
       keyboardOpen = false;
-      // После полного скрытия это новая эталонная высота WebView (в том числе
-      // после поворота экрана или изменения системных inset'ов).
-      const h = currentViewportHeight();
-      if (h > 0) expandedViewportHeight = h;
     })
   ];
 
@@ -71,9 +84,12 @@ export function isMobileKeyboardOpen(): boolean {
 }
 
 /** Событие непосредственно перед изменением Android viewport при показе клавиатуры. */
-export function onKeyboardWillShow(callback: () => void): () => void {
+export function onKeyboardWillShow(callback: (height: number) => void): () => void {
   if (!isNativeMobile) return () => {};
-  const listenerPromise = Keyboard.addListener('keyboardWillShow', () => callback());
+  const listenerPromise = Keyboard.addListener('keyboardWillShow', (info) => {
+    rememberKeyboardHeight(info.keyboardHeight);
+    callback(visibleKeyboardHeight(info.keyboardHeight));
+  });
   return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
 }
 
@@ -103,11 +119,32 @@ export function getLastMobileKeyboardHeight(): number {
  * реагировать именно на сам момент появления — перепрокручивать ленту вниз,
  * которую перестроение WebView иначе оставляет упёртой в старый scrollTop.
  */
-export function onKeyboardShow(callback: () => void): () => void {
+export function onKeyboardShow(callback: (height: number) => void): () => void {
   if (!isNativeMobile) return () => {};
 
-  const listenerPromise = Keyboard.addListener('keyboardDidShow', () => callback());
+  const listenerPromise = Keyboard.addListener('keyboardDidShow', (info) => callback(visibleKeyboardHeight(info.keyboardHeight)));
   return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
+}
+
+/** Подписаться на полное скрытие Android IME. */
+export function onKeyboardHide(callback: () => void): () => void {
+  if (!isNativeMobile) return () => {};
+  const listenerPromise = Keyboard.addListener('keyboardDidHide', callback);
+  return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
+}
+
+/**
+ * MessageInput регистрирует здесь закрытие общей нижней поверхности. Это
+ * позволяет аппаратной кнопке «Назад» закрыть emoji-панель до навигации.
+ */
+export function registerMobileInputSurfaceCloser(closer: () => boolean): () => void {
+  closeInputSurface = closer;
+  return () => { if (closeInputSurface === closer) closeInputSurface = null; };
+}
+
+/** Закрыть нижнюю поверхность, если она сейчас открыта. */
+export function closeMobileInputSurface(): boolean {
+  return closeInputSurface?.() || false;
 }
 
 /**
@@ -136,7 +173,8 @@ export function hideMobileKeyboard(): boolean {
   const active = document.activeElement as HTMLElement | null;
   if (active && typeof active.blur === 'function') active.blur();
 
-  if (!isNativeMobile || !keyboardOpen) return false;
+  if (!isNativeMobile) return false;
+  const wasOpen = keyboardOpen;
 
   // Считаем клавиатуру закрытой сразу: подтверждения событием можно не
   // дождаться, а зависший в "true" флаг гнал бы сюда каждый следующий переход.
@@ -149,7 +187,17 @@ export function hideMobileKeyboard(): boolean {
     // навигация к этому моменту уже произошла.
   }
 
-  return true;
+  return wasOpen;
+}
+
+/** Гарантированно запросить Android IME для уже сфокусированного поля. */
+export function showMobileKeyboard(): void {
+  if (!isNativeMobile) return;
+  try {
+    Keyboard.show().catch(() => {});
+  } catch {
+    // Старый нативный слой без Keyboard.show: штатный focus всё ещё остаётся основным запросом.
+  }
 }
 
 /**
@@ -165,7 +213,11 @@ export function hideMobileKeyboard(): boolean {
 export function setChatKeyboardResizeMode(active: boolean): void {
   if (!isNativeMobile) return;
   try {
-    Keyboard.setResizeMode({ mode: active ? KeyboardResize.None : KeyboardResize.Native }).catch(() => {});
+    ChatKeyboard.setOverlay({ active }).then((result) => {
+      if (typeof result.navigationBarHeight === 'number') {
+        navigationBarHeight = Math.max(0, Math.round(result.navigationBarHeight));
+      }
+    }).catch(() => {});
   } catch {
     // Плагин недоступен — не наша забота, экран продолжает жить как есть.
   }

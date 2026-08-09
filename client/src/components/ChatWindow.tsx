@@ -3,7 +3,8 @@ import { nameFor } from '../utils/user';
 import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKey } from '../utils/time';
 import { isNativeMobile } from '../utils/mobileNotify';
 import { resolveUploadUrl } from '../utils/uploads';
-import { CustomEmojiMap, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
+import { closeMobileInputSurface } from '../utils/mobileKeyboard';
+import { CustomEmojiMap, renderMessageText, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
@@ -174,6 +175,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const messages = rawMessages.filter((m) => !m.deleted);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const composerPinFrameRef = useRef<number | null>(null);
+  const composerWasAtBottomRef = useRef(true);
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
   const [showJumpButton, setShowJumpButton] = useState(false);
   // При первом открытии нового чата не показываем пользователю промежуточное
@@ -188,7 +191,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const initialPinRef = useRef(false);
   const initialPinTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null);
+  const [menuFor, setMenuFor] = useState<{
+    id: number;
+    x: number;
+    y: number;
+    safeTop: number;
+    safeBottom: number;
+    maxHeight: number;
+  } | null>(null);
   // Развёрнутый ряд реакций живёт только пока открыто меню: следующее
   // открытие должно начинаться с компактного вида, а не помнить прошлый.
   const [reactionsExpanded, setReactionsExpanded] = useState(false);
@@ -197,6 +207,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const suppressOutsideActivationUntilRef = useRef(0);
 
   // Режим выбора доступен всем и на любых сообщениях. При уходе из чата гасим
   // его, а не оставляем висеть с id из прошлой переписки.
@@ -309,14 +320,37 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // переключении сохраняем «приклеенность» к последнему сообщению, но только
   // если пользователь и до этого был внизу — чтение старой истории не рвём.
   useEffect(() => {
-    const onComposerResize = () => {
-      if (!shouldScrollRef.current) return;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => scrollContainerToBottom());
-      });
+    const onComposerWillResize = () => {
+      // Снимаем состояние до того, как React изменит геометрию composer. Если пользователь
+      // читает историю выше, открытие панели не должно переносить его к последнему сообщению.
+      composerWasAtBottomRef.current = shouldScrollRef.current;
     };
+    const onComposerResize = (event: Event) => {
+      // Независимо от направления перехода приклеиваем ленту ко дну только тогда,
+      // когда она была у дна до изменения высоты. Иначе scrollTop остаётся прежним.
+      if (!composerWasAtBottomRef.current) return;
+
+      if (composerPinFrameRef.current !== null) cancelAnimationFrame(composerPinFrameRef.current);
+      const startedAt = performance.now();
+      const pinDuringTransition = () => {
+        scrollContainerToBottom();
+        // margin-bottom composer анимируется; держим дно ленты приклеенным на
+        // протяжении всей анимации, а не только в одном раннем кадре.
+        if (performance.now() - startedAt < 320) {
+          composerPinFrameRef.current = requestAnimationFrame(pinDuringTransition);
+        } else {
+          composerPinFrameRef.current = null;
+        }
+      };
+      composerPinFrameRef.current = requestAnimationFrame(pinDuringTransition);
+    };
+    window.addEventListener('miras-composer-will-resize', onComposerWillResize);
     window.addEventListener('miras-composer-resize', onComposerResize);
-    return () => window.removeEventListener('miras-composer-resize', onComposerResize);
+    return () => {
+      window.removeEventListener('miras-composer-will-resize', onComposerWillResize);
+      window.removeEventListener('miras-composer-resize', onComposerResize);
+      if (composerPinFrameRef.current !== null) cancelAnimationFrame(composerPinFrameRef.current);
+    };
   }, [scrollContainerToBottom]);
 
   // Подгрузка истории добавляет сообщения СВЕРХУ, из-за чего содержимое
@@ -354,21 +388,40 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (selectMode && selectedIds.size === 0) setSelectMode(false);
   }, [selectMode, selectedIds]);
 
-  // Закрытие контекстного меню по клику снаружи
+  // Первый тап снаружи только закрывает контекстное меню. Pointer-событие и
+  // следующий за ним click поглощаются, чтобы картинка/ссылка под меню не
+  // открылась тем же самым касанием.
   useEffect(() => {
     if (!menuFor) return;
-    const onDocClick = (e: Event) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuFor(null);
-      }
+    const onOutsidePointer = (e: Event) => {
+      if (!menuRef.current || menuRef.current.contains(e.target as Node)) return;
+      suppressOutsideActivationUntilRef.current = Date.now() + 700;
+      e.preventDefault();
+      e.stopPropagation();
+      if ('stopImmediatePropagation' in e) e.stopImmediatePropagation();
+      setMenuFor(null);
     };
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('touchstart', onDocClick);
+    document.addEventListener('pointerdown', onOutsidePointer, true);
+    document.addEventListener('mousedown', onOutsidePointer, true);
+    document.addEventListener('touchstart', onOutsidePointer, { capture: true, passive: false });
     return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('touchstart', onDocClick);
+      document.removeEventListener('pointerdown', onOutsidePointer, true);
+      document.removeEventListener('mousedown', onOutsidePointer, true);
+      document.removeEventListener('touchstart', onOutsidePointer, true);
     };
   }, [menuFor]);
+
+  useEffect(() => {
+    const swallowDismissClick = (e: MouseEvent) => {
+      if (Date.now() > suppressOutsideActivationUntilRef.current) return;
+      suppressOutsideActivationUntilRef.current = 0;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    };
+    document.addEventListener('click', swallowDismissClick, true);
+    return () => document.removeEventListener('click', swallowDismissClick, true);
+  }, []);
 
   // Меню открывается ровно в точке клика/долгого нажатия — у сообщения
   // близко к правому или нижнему краю экрана оно раньше вылезало за
@@ -378,12 +431,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   useLayoutEffect(() => {
     if (!menuFor || !menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();
-    const overflowX = rect.right - window.innerWidth;
-    const overflowY = rect.bottom - window.innerHeight;
-    if (overflowX <= 0 && overflowY <= 0) return;
+    const overflowLeft = 4 - rect.left;
+    const overflowX = rect.right - (window.innerWidth - 4);
+    const overflowY = rect.bottom - menuFor.safeBottom;
+    const overflowTop = menuFor.safeTop - rect.top;
+    if (overflowLeft <= 0 && overflowX <= 0 && overflowY <= 0 && overflowTop <= 0) return;
 
-    const nextX = overflowX > 0 ? Math.max(4, menuFor.x - overflowX) : menuFor.x;
-    const nextY = overflowY > 0 ? Math.max(4, menuFor.y - overflowY) : menuFor.y;
+    let nextX = overflowX > 0 ? menuFor.x - overflowX : menuFor.x;
+    if (overflowLeft > 0) nextX += overflowLeft;
+    let nextY = overflowY > 0 ? menuFor.y - overflowY : menuFor.y;
+    if (overflowTop > 0) nextY += overflowTop;
 
     // Сдвигать дальше некуда — меню просто выше окна (низкий экран, а пунктов
     // в нём прибавилось). Без этой проверки эффект бесконечно переставлял
@@ -394,7 +451,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (nextX === menuFor.x && nextY === menuFor.y) return;
 
     setMenuFor((prev) => prev && ({ ...prev, x: nextX, y: nextY }));
-  }, [menuFor]);
+    // Координаты, записанные этим эффектом, не должны запускать повторное
+    // измерение сами себя: на скрытом/нулевом layout (в том числе во время
+    // смены системной поверхности) DOM может ещё вернуть прежний rect. Новое
+    // измерение нужно только при новом меню либо изменении высоты реакций.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuFor?.id, reactionsExpanded]);
 
   const handleScroll = () => {
     if (!messagesContainerRef.current) return;
@@ -441,8 +503,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // мере сравнения sender_id с currentUserId.
   const openMenuAt = (msg: Message, x: number, y: number) => {
     if (selectMode) return;
+    const chatRect = messagesContainerRef.current?.getBoundingClientRect();
+    const safeTop = Math.max(4, (chatRect?.top ?? 0) + 4);
+    const safeBottom = Math.max(
+      safeTop + 80,
+      Math.min(window.innerHeight - 4, (chatRect?.bottom ?? window.innerHeight) - 4),
+    );
     setReactionsExpanded(false);
-    setMenuFor({ id: msg.id, x, y });
+    setMenuFor({ id: msg.id, x, y, safeTop, safeBottom, maxHeight: safeBottom - safeTop });
   };
 
   const handleContextMenu = (e: React.MouseEvent, msg: Message) => {
@@ -814,7 +882,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         onScroll={handleScroll}
         onWheel={stopInitialPin}
         onTouchStart={stopInitialPin}
-        onPointerDown={stopInitialPin}
+        onPointerDown={() => {
+          stopInitialPin();
+          closeMobileInputSurface();
+        }}
       >
         {loadingMore && <div className="load-more-hint">Загрузка…</div>}
         {messages.length === 0 && !loadingMore && (
@@ -920,7 +991,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       </button>
                     )}
                     {msg.text && (
-                      <span className="bubble-text">{renderTextWithEmoji(msg.text, customEmoji, `m${msg.id}`)}</span>
+                      <span className="bubble-text">{renderMessageText(msg.text, customEmoji, `m${msg.id}`)}</span>
                     )}
                     {/* Время и галочки — внутри пузыря, как в Telegram:
                         обтекаются текстом и не занимают отдельную строку. */}
@@ -1021,7 +1092,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           <div
             ref={menuRef}
             className="msg-menu-layer"
-            style={{ left: menuFor.x, top: menuFor.y }}
+            style={{ left: menuFor.x, top: menuFor.y, maxHeight: menuFor.maxHeight }}
           >
             {!!reactionEmoji?.length && onToggleReaction && (
               <div className={'msg-menu-reactions' + (reactionsExpanded ? ' is-expanded' : '')}>
