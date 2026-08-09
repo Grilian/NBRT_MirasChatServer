@@ -3,7 +3,12 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
 
-const db = new Database(path.join(__dirname, 'messenger.db'));
+// В тестах сервисов используем отдельную временную БД. В обычном запуске
+// путь остаётся прежним, поэтому это не меняет расположение продовых данных.
+const dbPath = process.env.MIRAS_DB_PATH
+  ? path.resolve(process.env.MIRAS_DB_PATH)
+  : path.join(__dirname, 'messenger.db');
+const db = new Database(dbPath);
 
 // Оптимизация
 db.pragma('journal_mode = WAL');
@@ -30,6 +35,58 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (sender_id) REFERENCES users(id)
   );
+
+  -- Опрос — содержимое обычного сообщения, вынесенное в нормализованные
+  -- таблицы. Сам вопрос дублируется в messages.text как безопасный fallback:
+  -- клиенты до 1.6.9 покажут его обычным текстом вместо пустого пузыря.
+  CREATE TABLE IF NOT EXISTS polls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL UNIQUE,
+    chat_id TEXT NOT NULL,
+    creator_id INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    description TEXT,
+    show_voter_names INTEGER NOT NULL DEFAULT 1,
+    multiple_choice INTEGER NOT NULL DEFAULT 0,
+    allow_add_options INTEGER NOT NULL DEFAULT 0,
+    allow_change_vote INTEGER NOT NULL DEFAULT 1,
+    closes_at INTEGER,
+    closed_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (creator_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS poll_options (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    poll_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(poll_id, position),
+    FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+
+  -- Выбранные варианты хранятся отдельными строками. Для одиночного опроса
+  -- ограничение «только один» проверяет транзакция сервиса; для множественного
+  -- та же схема естественно допускает несколько option_id на пользователя.
+  CREATE TABLE IF NOT EXISTS poll_votes (
+    poll_id INTEGER NOT NULL,
+    option_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (poll_id, option_id, user_id),
+    FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
+    FOREIGN KEY (option_id) REFERENCES poll_options(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_polls_chat ON polls(chat_id, id);
+  CREATE INDEX IF NOT EXISTS idx_poll_options_poll ON poll_options(poll_id, position);
+  CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(poll_id);
+  CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes(user_id);
 
   CREATE TABLE IF NOT EXISTS favorites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

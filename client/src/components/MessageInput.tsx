@@ -39,6 +39,8 @@ interface MessageInputProps {
   /** Отвечаем на сообщение — такая же панель над полем, как при правке. */
   replying?: ReplyingMessage | null;
   onCancelReply?: () => void;
+  /** Открыть отдельный редактор опроса из меню вложений. */
+  onCreatePoll?: () => void;
   /** Каталог кастомных смайликов — для цитат в панелях правки и ответа. */
   customEmoji?: CustomEmojiMap;
 }
@@ -66,16 +68,28 @@ let stagedSeq = 0;
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend, onTyping, disabled, placeholder,
   editing, onSubmitEdit, onCancelEdit, onRequestEditLast,
-  replying, onCancelReply, customEmoji = {},
+  replying, onCancelReply, onCreatePoll, customEmoji = {},
 }) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [emojiPanelHeight, setEmojiPanelHeight] = useState(300);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    const close = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest?.('.attach-btn')) return;
+      if (!attachMenuRef.current?.contains(event.target as Node)) setAttachMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [attachMenuOpen]);
 
   // На телефоне поле остаётся прежней textarea. contentEditable в Android
   // WebView ведёт себя заметно капризнее (курсор, автозамена, системная
@@ -385,6 +399,37 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       {emojiOpen && !isNativeMobile && <EmojiPicker onPick={insertEmoji} onClose={() => closeEmoji(false)} />}
 
+      {attachMenuOpen && !editing && (
+        <div className="composer-attach-menu" ref={attachMenuRef} role="menu" aria-label="Добавить к сообщению">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setAttachMenuOpen(false); fileInputRef.current?.click(); }}
+          >
+            <span className="attach-menu-icon image">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+            </span>
+            <span><strong>Изображение</strong><small>Фото и картинки</small></span>
+          </button>
+          <button type="button" role="menuitem" disabled>
+            <span className="attach-menu-icon file">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg>
+            </span>
+            <span><strong>Файлы <em>В разработке</em></strong><small>Документы и архивы</small></span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setAttachMenuOpen(false); closeEmoji(false); onCreatePoll?.(); }}
+          >
+            <span className="attach-menu-icon poll">
+              <svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" /></svg>
+            </span>
+            <span><strong>Опрос</strong><small>Задать вопрос участникам</small></span>
+          </button>
+        </div>
+      )}
+
       {/* Правка, ответ и приложенная картинка — НАД полосой ввода и во всю её
           ширину, а не внутри: полоса скруглена под одну строку, и вложенная в
           неё панель ломала бы форму. */}
@@ -508,13 +553,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
         {!editing && (
           <button
             type="button"
-            className="attach-btn"
-            onClick={() => fileInputRef.current?.click()}
+            className={'attach-btn' + (attachMenuOpen ? ' is-active' : '')}
+            onClick={() => setAttachMenuOpen((open) => !open)}
             disabled={disabled}
-            aria-label="Прикрепить изображение"
-            title="Прикрепить изображение"
+            aria-label="Добавить вложение"
+            title="Добавить вложение"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.5-9.5a4 4 0 0 1 5.7 5.7l-9.5 9.5a2 2 0 1 1-2.8-2.8l8.8-8.8" /></svg>
           </button>
         )}
       </div>

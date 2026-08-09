@@ -8,6 +8,7 @@ const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { isParticipant } = require('../services/chatParticipants');
 const { reactionsForMessages } = require('../services/reactions');
+const { attachPollsToMessages } = require('../services/polls');
 const router = express.Router();
 
 // Канал-объявление: в нём считаем «просмотрено» (см. историю чата ниже).
@@ -235,6 +236,11 @@ router.get('/:chatId', verifyToken, (req, res) => {
         m.reply_to_file = null;
       }
     }
+
+    // Опрос персонализирован: user_option_ids и, при открытых именах,
+    // участники зависят от запрашивающего. Поэтому дополняем историю только
+    // после проверки доступа к чату и именно для req.userId.
+    attachPollsToMessages(messages, req.userId);
 
     // Реакции — одним запросом на всю страницу, а не по запросу на сообщение.
     const reactionsByMessage = reactionsForMessages(messages.map((m) => m.id));

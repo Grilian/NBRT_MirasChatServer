@@ -33,6 +33,17 @@ const { canPostToGroup } = require('./services/chatPermissions');
 const { isValidChatImagePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
 const calendarScheduler = require('./services/calendarScheduler');
+const {
+  PollError,
+  normalizePollDraft,
+  insertPoll,
+  serializePoll,
+  voteInPoll,
+  addPollOption,
+  stopPoll,
+  emitPollUpdate,
+  closeExpiredPolls,
+} = require('./services/polls');
 
 const db = require('./db');
 
@@ -301,17 +312,24 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('chat_message', async (data) => {
+  socket.on('chat_message', async (rawData, ack) => {
+    const data = rawData && typeof rawData === 'object' ? rawData : {};
+    let acknowledged = false;
+    const respond = (payload) => {
+      if (acknowledged || typeof ack !== 'function') return;
+      acknowledged = true;
+      ack(payload);
+    };
     // Не доверяем data.senderId — это просто то, что прислал клиент, и его
     // легко подделать. Единственный источник истины — socket.userId,
     // выставленный сервером при аутентифицированном 'user_online'.
     const senderId = socket.userId;
-    if (!senderId) return;
+    if (!senderId) { respond({ ok: false, error: 'auth_required' }); return; }
 
     // Пишем только в чат, где отправитель реально участник — раньше это никак
     // не проверялось, и любой мог отправить сообщение в chat_<a>_<b> чужих
     // пользователей, просто зная их id.
-    if (!isParticipant(data.chatId, senderId)) return;
+    if (!isParticipant(data.chatId, senderId)) { respond({ ok: false, error: 'chat_forbidden' }); return; }
 
     // «Кто может писать» — единый механизм прав (services/chatPermissions.js).
     // Проверка обязательна здесь: дизейбл композера на клиенте только для
@@ -319,6 +337,7 @@ io.on('connection', (socket) => {
     const groupMatch = String(data.chatId).match(/^group_(\d+)$/);
     if (groupMatch && !canPostToGroup(Number(groupMatch[1]), senderId)) {
       socket.emit('message_blocked', { reason: 'write_not_allowed', chatId: data.chatId });
+      respond({ ok: false, error: 'write_not_allowed' });
       return;
     }
 
@@ -326,31 +345,47 @@ io.on('connection', (socket) => {
     // строка, null или мегабайтная простыня одинаково создавали запись. Пустые
     // сообщения замусоривали превью в списке чатов, а длинные — разъезжались
     // по вёрстке у всех участников.
+    let pollDraft = null;
+    if (data.poll !== undefined && data.poll !== null) {
+      try {
+        pollDraft = normalizePollDraft(data.poll);
+      } catch (e) {
+        socket.emit('poll_error', {
+          code: e instanceof PollError ? e.code : 'invalid_poll',
+          message: e.message || 'Не удалось создать опрос',
+        });
+        respond({ ok: false, error: e instanceof PollError ? e.code : 'invalid_poll' });
+        return;
+      }
+    }
+
     const text = typeof data.text === 'string' ? data.text.trim() : '';
     // Обрезка не должна разрубить код кастомного смайлика: огрызок ":cat" уже
     // не станет картинкой и остался бы в БД навсегда техническим текстом.
     // Клиент режет текст сам, но его обрезку можно обойти — это последняя линия.
-    const finalText = text.length > MAX_MESSAGE_LENGTH
-      ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '')
-      : text;
+    const finalText = pollDraft
+      ? pollDraft.question
+      : (text.length > MAX_MESSAGE_LENGTH
+        ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '')
+        : text);
 
     // Картинка приходит уже загруженной отдельным REST-запросом (см.
     // POST /api/messages/upload-image) — сюда попадает только путь к ней.
     // Доверять пути от клиента нельзя: без проверки можно было бы подсунуть
     // произвольный /uploads/... файл чужого назначения. isValidChatImagePath
     // сверяет и формат пути, и то, что файл реально существует на диске.
-    const hasImage = typeof data.filePath === 'string' && isValidChatImagePath(data.filePath);
+    const hasImage = !pollDraft && typeof data.filePath === 'string' && isValidChatImagePath(data.filePath);
     const filePath = hasImage ? data.filePath : null;
     const fileWidth = hasImage && Number.isFinite(Number(data.fileWidth)) ? Number(data.fileWidth) : null;
     const fileHeight = hasImage && Number.isFinite(Number(data.fileHeight)) ? Number(data.fileHeight) : null;
 
     // Сообщение без текста и без картинки — отправлять нечего.
-    if (!finalText && !filePath) return;
+    if (!finalText && !filePath) { respond({ ok: false, error: 'empty_message' }); return; }
 
     // Ответ: id принимаем только если это сообщение существует и лежит в ЭТОМ
     // же чате — иначе цитатой можно было бы вытащить кусок чужой переписки,
     // просто подставив её id (клиент показывает текст исходного сообщения).
-    const replyToId = Number.isInteger(Number(data.replyToId)) && Number(data.replyToId) > 0
+    const replyToId = !pollDraft && Number.isInteger(Number(data.replyToId)) && Number(data.replyToId) > 0
       ? Number(data.replyToId)
       : null;
     const replySource = replyToId
@@ -370,6 +405,7 @@ io.on('connection', (socket) => {
 
     if (isFlooding(socket)) {
       socket.emit('message_blocked', { reason: 'rate_limit', chatId: data.chatId });
+      respond({ ok: false, error: 'rate_limit' });
       return;
     }
 
@@ -394,6 +430,7 @@ io.on('connection', (socket) => {
 
       if (!muteExempt) {
         socket.emit('message_blocked', { reason: 'muted', chatId: data.chatId });
+        respond({ ok: false, error: 'muted' });
         return;
       }
     }
@@ -406,10 +443,19 @@ io.on('connection', (socket) => {
            reply_to_id, forwarded_from_name, forwarded_from_chat)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const result = stmt.run(
-        data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
-        finalReplyTo, forwardedFromName, forwardedFromChat
-      );
+      // Сообщение и опрос — одна атомарная операция: нельзя оставить в ленте
+      // текст вопроса без вариантов, если вставка опроса оборвалась.
+      const persist = db.transaction(() => {
+        const result = stmt.run(
+          data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
+          finalReplyTo, forwardedFromName, forwardedFromChat
+        );
+        const poll = pollDraft
+          ? insertPoll(result.lastInsertRowid, data.chatId, senderId, pollDraft)
+          : null;
+        return { result, pollId: poll ? poll.id : null };
+      });
+      const { result, pollId } = persist();
 
       const message = {
         id: result.lastInsertRowid,
@@ -433,9 +479,14 @@ io.on('connection', (socket) => {
         ...(finalReplyTo ? replyPreviewOf(finalReplyTo) : {}),
         forwarded_from_name: forwardedFromName,
         forwarded_from_chat: forwardedFromChat,
+        ...(pollId ? { poll: serializePoll(pollId, senderId) } : {}),
       };
 
       emitToChat(data.chatId, 'chat_message', message, senderId);
+      // Подтверждаем сразу после атомарной записи и живой рассылки. Ошибка
+      // вторичного пуш-уведомления не должна заставлять клиента повторно
+      // создать уже существующий опрос.
+      respond({ ok: true, messageId: Number(result.lastInsertRowid), pollId });
 
       // Автоподписка: как только между двумя людьми реально пошли сообщения,
       // чат появляется в списке контактов у обеих сторон (не только у
@@ -508,7 +559,45 @@ io.on('connection', (socket) => {
       }
     } catch (e) {
       console.error('Ошибка:', e);
+      if (pollDraft) {
+        socket.emit('poll_error', {
+          code: e instanceof PollError ? e.code : 'poll_create_failed',
+          message: e.message || 'Не удалось создать опрос',
+        });
+      }
+      respond({ ok: false, error: e instanceof PollError ? e.code : 'message_failed' });
     }
+  });
+
+  const runPollAction = (data, action) => {
+    const userId = socket.userId;
+    if (!userId) return;
+    if (isFlooding(socket)) {
+      socket.emit('poll_error', { code: 'rate_limit', message: 'Слишком много действий подряд' });
+      return;
+    }
+    try {
+      const pollId = action(userId);
+      emitPollUpdate(io, pollId);
+    } catch (e) {
+      socket.emit('poll_error', {
+        poll_id: Number(data && data.pollId) || undefined,
+        code: e instanceof PollError ? e.code : 'poll_action_failed',
+        message: e.message || 'Не удалось обновить опрос',
+      });
+    }
+  };
+
+  socket.on('poll_vote', (data) => {
+    runPollAction(data, (userId) => voteInPoll(data && data.pollId, userId, data && data.optionIds));
+  });
+
+  socket.on('poll_add_option', (data) => {
+    runPollAction(data, (userId) => addPollOption(data && data.pollId, userId, data && data.text));
+  });
+
+  socket.on('poll_stop', (data) => {
+    runPollAction(data, (userId) => stopPoll(data && data.pollId, userId));
   });
 
   // Приложение свернули/развернули. Шлёт только нативный мобильный клиент —
@@ -633,8 +722,15 @@ io.on('connection', (socket) => {
   // от chat_message/senderId, здесь это разрушающее действие над чужими данными).
   socket.on('message_edit', ({ id, text }) => {
     try {
-      const row = db.prepare('SELECT chat_id, sender_id, deleted FROM messages WHERE id = ?').get(id);
-      if (!row || row.deleted || Number(row.sender_id) !== Number(socket.userId)) return;
+      const row = db.prepare(`
+        SELECT m.chat_id, m.sender_id, m.deleted,
+               EXISTS(SELECT 1 FROM polls p WHERE p.message_id = m.id) AS is_poll
+        FROM messages m WHERE m.id = ?
+      `).get(id);
+      // Вопрос — часть структуры опроса, а не обычный редактируемый текст.
+      // Старый клиент видит fallback-текст, но не должен рассинхронизировать
+      // его с polls.question обходом нового интерфейса.
+      if (!row || row.deleted || row.is_poll || Number(row.sender_id) !== Number(socket.userId)) return;
 
       const trimmed = String(text || '').trim();
       if (!trimmed) return;
@@ -762,4 +858,14 @@ server.listen(PORT, () => {
   // должны быть готовы. Состояния в памяти он не держит, так что перезапуск
   // сервера ничего не теряет.
   calendarScheduler.start(io);
+  // Дедлайн должен завершать опрос сам, даже если в этот момент никто не
+  // открыл сообщение и не попытался проголосовать. Обновление рассылается
+  // персонально, чтобы анонимный опрос не раскрыл список участников.
+  const sweepPollDeadlines = () => {
+    try { closeExpiredPolls(io); }
+    catch (error) { console.error('Ошибка завершения опросов по сроку:', error); }
+  };
+  sweepPollDeadlines();
+  const pollDeadlineTimer = setInterval(sweepPollDeadlines, 30_000);
+  pollDeadlineTimer.unref?.();
 });

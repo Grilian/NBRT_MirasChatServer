@@ -46,10 +46,31 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
       `).all(...relatedChatIds)
     : [];
 
+  // Опросы — часть содержимого сообщений, но лежат в отдельных таблицах.
+  // Собираем как созданные пользователем, так и привязанные к сообщениям,
+  // которые будут физически удалены вместе с аккаунтом/личным тредом.
+  const pollRows = [
+    ...db.prepare('SELECT * FROM polls WHERE creator_id = ? OR message_id IN (SELECT id FROM messages WHERE sender_id = ?)').all(id, id),
+    ...(relatedChatIds.length
+      ? db.prepare(`SELECT * FROM polls WHERE chat_id IN (${relatedChatIds.map(() => '?').join(',')})`).all(...relatedChatIds)
+      : []),
+  ];
+  const polls = Array.from(new Map(pollRows.map((poll) => [poll.id, poll])).values());
+  const pollIds = polls.map((poll) => poll.id);
+  const pollOptions = pollIds.length
+    ? db.prepare(`SELECT * FROM poll_options WHERE poll_id IN (${pollIds.map(() => '?').join(',')})`).all(...pollIds)
+    : [];
+  const pollVotes = pollIds.length
+    ? db.prepare(`SELECT * FROM poll_votes WHERE poll_id IN (${pollIds.map(() => '?').join(',')})`).all(...pollIds)
+    : [];
+
   const archive = {
     archived_at: new Date().toISOString(),
     profile: (({ password, ...rest }) => rest)(user),
     messages,
+    polls,
+    poll_options: pollOptions,
+    poll_votes: pollVotes,
     favorites: db.prepare('SELECT * FROM favorites WHERE user_id = ?').all(id),
     comments_made: db.prepare('SELECT * FROM user_comments WHERE user_id = ?').all(id),
     comments_received: db.prepare('SELECT * FROM user_comments WHERE target_user_id = ?').all(id),
@@ -63,6 +84,16 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
   fs.writeFileSync(path.join(BACKUPS_DIR, backupFile), JSON.stringify(archive, null, 2), 'utf8');
 
   const tx = db.transaction(() => {
+    // Сначала персональные голоса в чужих опросах, затем целиком собственные
+    // опросы. Внешние ключи на продовой БД могут быть выключены, поэтому на
+    // каскад не полагаемся.
+    db.prepare('DELETE FROM poll_votes WHERE user_id = ?').run(id);
+    if (pollIds.length) {
+      const placeholders = pollIds.map(() => '?').join(',');
+      db.prepare(`DELETE FROM poll_votes WHERE poll_id IN (${placeholders})`).run(...pollIds);
+      db.prepare(`DELETE FROM poll_options WHERE poll_id IN (${placeholders})`).run(...pollIds);
+      db.prepare(`DELETE FROM polls WHERE id IN (${placeholders})`).run(...pollIds);
+    }
     if (relatedChatIds.length) {
       db.prepare(`DELETE FROM messages WHERE chat_id IN (${relatedChatIds.map(() => '?').join(',')})`).run(...relatedChatIds);
     }

@@ -26,6 +26,8 @@ import { renderUnreadBadge } from '../utils/badgeIcon';
 import { describeStatus } from '../utils/statusMeta';
 import { WritePolicy, WRITE_BLOCKED_HINT } from '../utils/writePolicy';
 import StatusSheet from '../components/StatusSheet';
+import PollCreator from '../components/PollCreator';
+import { Poll, PollDraft } from '../types/poll';
 import { CustomEmojiMap, buildEmojiMap, toPlainText } from '../utils/customEmoji';
 import { invalidateEmojiPackCache } from '../components/EmojiPicker';
 import {
@@ -94,6 +96,7 @@ interface Message {
   /** Сколько человек прочитало — только в каналах-объявлениях. */
   read_count?: number;
   reactions?: MessageReaction[];
+  poll?: Poll;
 }
 interface LastMessage {
   chat_id: string;
@@ -322,6 +325,8 @@ const Chat: React.FC = () => {
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
+  const [pollSubmitting, setPollSubmitting] = useState(false);
   const [groupInfoId, setGroupInfoId] = useState<number | null>(null);
   // Свой профиль — модальное окно поверх любого раздела, а не подэкран
   // настроек: он открывается по аватару с рельса, откуда бы ни нажали, и
@@ -559,8 +564,8 @@ const Chat: React.FC = () => {
   // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
   // тот же открытый чат, "назад" снова сворачивает, и так до полного
   // закрытия приложения.
-  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId, profileOpen, peopleOpen });
-  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, groupInfoId, profileOpen, peopleOpen };
+  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen });
+  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen };
 
   useEffect(() => watchMobileKeyboard(), []);
 
@@ -625,6 +630,7 @@ const Chat: React.FC = () => {
       // Модалки поверх всего — закрываются первыми, иначе "назад" уводил
       // экран из-под открытого окна, а само окно оставалось висеть.
       if (nav.groupInfoId !== null) { setGroupInfoId(null); return; }
+      if (nav.pollCreatorOpen) { setPollCreatorOpen(false); return; }
       if (nav.createGroupOpen) { setCreateGroupOpen(false); return; }
       if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
       if (nav.directoryOpen) { setDirectoryOpen(false); return; }
@@ -1119,8 +1125,28 @@ const Chat: React.FC = () => {
       }
     };
 
+    const pollUpdated = (data: { message_id: number; poll: Poll }) => {
+      setMessages((current) => current.map((message) => (
+        message.id === data.message_id ? { ...message, poll: data.poll, text: data.poll.question } : message
+      )));
+    };
+    const pollError = (data: { message?: string }) => {
+      pushToast({
+        chatId: 'poll-error',
+        title: 'Опрос',
+        body: data?.message || 'Не удалось обновить опрос',
+        avatarPath: null,
+      });
+    };
+
     socket.on('chat_message', handler);
-    return () => { socket.off('chat_message', handler); };
+    socket.on('poll_updated', pollUpdated);
+    socket.on('poll_error', pollError);
+    return () => {
+      socket.off('chat_message', handler);
+      socket.off('poll_updated', pollUpdated);
+      socket.off('poll_error', pollError);
+    };
   }, [socket, currentUserId, pushToast]);
 
   // Загрузка истории при смене чата
@@ -1407,6 +1433,43 @@ const Chat: React.FC = () => {
       socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
       setReplyingMessage(null);
     }
+  };
+
+  const handleCreatePoll = (draft: PollDraft) => {
+    if (!socket || !activeChat || pollSubmitting) return;
+    setPollSubmitting(true);
+    socket.timeout(10_000).emit('chat_message', {
+      chatId: activeChat,
+      text: draft.question,
+      poll: draft,
+    }, (timeoutError: Error | null, response?: { ok?: boolean; error?: string }) => {
+      setPollSubmitting(false);
+      if (timeoutError || !response?.ok) {
+        pushToast({
+          chatId: 'poll-create-error',
+          title: 'Опрос не создан',
+          body: timeoutError ? 'Сервер не ответил. Проверьте соединение и повторите.' : 'Сервер отклонил создание опроса.',
+          avatarPath: null,
+        });
+        return;
+      }
+      setReplyingMessage(null);
+      setPollCreatorOpen(false);
+      closeKeyboard();
+    });
+    socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
+  };
+
+  const handleVotePoll = (pollId: number, optionIds: number[]) => {
+    socket?.emit('poll_vote', { pollId, optionIds });
+  };
+
+  const handleAddPollOption = (pollId: number, text: string) => {
+    socket?.emit('poll_add_option', { pollId, text });
+  };
+
+  const handleStopPoll = (pollId: number) => {
+    socket?.emit('poll_stop', { pollId });
   };
 
   // Пересылка: отправляем те же сообщения в выбранный чат с подписью «переслано
@@ -2168,6 +2231,9 @@ const Chat: React.FC = () => {
             onRemoveReaction={handleRemoveReaction}
             onForwardToSelf={selfChatId ? (ids) => forwardTo(ids, selfChatId, false) : undefined}
             selfChatName={selfChatName}
+            onVotePoll={handleVotePoll}
+            onAddPollOption={handleAddPollOption}
+            onStopPoll={handleStopPoll}
           />
           {muted && (
             <div className="muted-banner">
@@ -2205,8 +2271,20 @@ const Chat: React.FC = () => {
             onRequestEditLast={requestEditLast}
             replying={replyingMessage}
             onCancelReply={() => setReplyingMessage(null)}
+            onCreatePoll={() => {
+              setReplyingMessage(null);
+              closeKeyboard();
+              setPollCreatorOpen(true);
+            }}
           />
         </main>
+      )}
+      {pollCreatorOpen && (
+        <PollCreator
+          onClose={() => { if (!pollSubmitting) setPollCreatorOpen(false); }}
+          onCreate={handleCreatePoll}
+          submitting={pollSubmitting}
+        />
       )}
     </div>
   );

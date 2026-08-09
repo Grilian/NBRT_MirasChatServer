@@ -8,6 +8,8 @@ import { CustomEmojiMap, renderTextWithEmoji, toPlainText } from '../utils/custo
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
+import PollCard from './PollCard';
+import { Poll } from '../types/poll';
 
 interface Message {
   id: number;
@@ -34,6 +36,7 @@ interface Message {
   forwarded_from_name?: string | null;
   forwarded_from_chat?: string | null;
   reactions?: MessageReaction[];
+  poll?: Poll;
 }
 
 interface ChatWindowProps {
@@ -72,6 +75,9 @@ interface ChatWindowProps {
   onForwardToSelf?: (ids: number[]) => void;
   /** Название личного чата из панели управления — оно в пункте меню. */
   selfChatName?: string;
+  onVotePoll?: (pollId: number, optionIds: number[]) => void;
+  onAddPollOption?: (pollId: number, text: string) => void;
+  onStopPoll?: (pollId: number) => void;
 }
 
 const LONG_PRESS_MS = 450;
@@ -166,7 +172,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, onToggleReaction, onRemoveReaction,
-  onForwardToSelf, selfChatName
+  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll,
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
   // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
@@ -673,10 +679,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       },
     } : null;
 
-    const edit: MenuItem | null = mine ? {
+    const edit: MenuItem | null = mine && !msg.poll ? {
       kind: 'action', key: 'edit', label: 'Изменить',
       icon: icon('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'),
       onClick: () => startEdit(msg),
+    } : null;
+
+    const pollClosed = !!msg.poll?.closed_at || (!!msg.poll?.closes_at && msg.poll.closes_at <= Date.now());
+    const stopPollItem: MenuItem | null = msg.poll && Number(msg.poll.creator_id) === Number(currentUserId) && !pollClosed && onStopPoll ? {
+      kind: 'action', key: 'stop-poll', label: 'Остановить опрос', danger: true,
+      icon: icon('M4 4l16 16', 'M5 9h4V5', 'M15 19v-4h4'),
+      onClick: () => {
+        setMenuFor(null);
+        if (window.confirm('Остановить опрос? После этого новые голоса принимать нельзя.')) onStopPoll(msg.poll!.id);
+      },
     } : null;
 
     // У картинки без подписи копировать нечего — текста в сообщении нет.
@@ -696,7 +712,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       onClick: () => { setMenuFor(null); onCreateTask(msg.text); },
     } : null;
 
-    const forward: MenuItem | null = onForward ? {
+    const forward: MenuItem | null = onForward && !msg.poll ? {
       kind: 'action', key: 'forward', label: 'Переслать',
       icon: icon('m15 17 5-5-5-5', 'M4 18v-2a4 4 0 0 1 4-4h12'),
       onClick: () => { setMenuFor(null); onForward([msg.id]); },
@@ -704,7 +720,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     // Название берём из панели управления: там его меняют на «Облако» или
     // «Архив», и пункт меню обязан называть чат так же, как список чатов.
-    const forwardSelf: MenuItem | null = onForwardToSelf ? {
+    const forwardSelf: MenuItem | null = onForwardToSelf && !msg.poll ? {
       kind: 'action', key: 'forward-self', label: `Переслать в ${selfChatName || 'Избранное'}`,
       icon: icon('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'),
       onClick: () => { setMenuFor(null); onForwardToSelf([msg.id]); },
@@ -738,10 +754,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     const order = isNativeMobile
       ? (mine
-        ? [readInfo, editedInfo, reply, copy, task, forward, forwardSelf, edit, remove]
+        ? [stopPollItem, readInfo, editedInfo, reply, copy, task, forward, forwardSelf, edit, remove]
         : [reply, copy, task, forward, forwardSelf, remove])
       : (mine
-        ? [reply, edit, copy, task, forward, forwardSelf, remove, select, readInfo, editedInfo]
+        ? [stopPollItem, reply, edit, copy, task, forward, forwardSelf, remove, select, readInfo, editedInfo]
         : [reply, copy, task, forward, forwardSelf, remove, select]);
 
     return order.filter((item): item is MenuItem => item !== null);
@@ -868,6 +884,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             isSelected ? 'is-selected' : '',
             isEditing ? 'is-editing' : '',
             highlightedId === msg.id ? 'is-highlighted' : '',
+            msg.poll ? 'has-poll' : '',
           ].filter(Boolean).join(' ');
 
           return (
@@ -888,7 +905,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 {selectMode && selectable && (
                   <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
                 )}
-                <div className={'bubble' + (bareTransparentImage ? ' bubble-alpha-only' : '')}>
+                <div className={'bubble' + (bareTransparentImage ? ' bubble-alpha-only' : '') + (msg.poll ? ' bubble-poll' : '')}>
                     {/* Имя автора — только в общем чате и только над первым
                         сообщением блока: в переписке один на один оно
                         повторяло бы имя из шапки на каждой реплике. */}
@@ -939,7 +956,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         <img src={resolveUploadUrl(msg.file_path) || ''} alt="" />
                       </button>
                     )}
-                    {msg.text && (
+                    {msg.poll && onVotePoll && onAddPollOption && (
+                      <PollCard
+                        poll={msg.poll}
+                        onVote={onVotePoll}
+                        onAddOption={onAddPollOption}
+                        selectionMode={selectMode}
+                      />
+                    )}
+                    {msg.text && (!msg.poll || !onVotePoll || !onAddPollOption) && (
                       <span className="bubble-text">{renderTextWithEmoji(msg.text, customEmoji, `m${msg.id}`)}</span>
                     )}
                     {/* Время и галочки — внутри пузыря, как в Telegram:
