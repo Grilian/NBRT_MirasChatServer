@@ -1,6 +1,7 @@
 {
   "name": "miraschat-desktop",
-  "version": "1.6.9-1",
+  "version": "1.6.10-hotfix.1",
+  "releaseVersion": "1.6.9.1",
   "buildVersion": "1.6.9.1",
   "private": true,
   "description": "MirasChat — десктопный клиент для Windows",
@@ -23,6 +24,7 @@
     "appId": "ru.miras.mirasChat",
     "productName": "MirasChat",
     "compression": "store",
+    "detectUpdateChannel": false,
     "directories": {
       "output": "release",
       "buildResources": "assets"

@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, Notificatio
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
+const { releaseVersion } = require('../package.json');
 
 const isDev = !app.isPackaged;
 
@@ -324,6 +325,10 @@ if (!gotLock) {
 // Единственное, чего избегаем, — закрыть приложение прямо посреди переписки.
 // Поэтому момент установки выбирается по состоянию окна (см. update-downloaded).
 autoUpdater.autoDownload = true;
+// Четвёртую пользовательскую цифру версии Electron хранит как prerelease:
+// 1.6.9.1 -> 1.6.10-hotfix.1. Такой номер новее 1.6.9, но старее будущей
+// функциональной 1.6.10. Без этого флага стабильный клиент пропускает хотфиксы.
+autoUpdater.allowPrerelease = true;
 
 // Установку при выходе включаем только когда обновление реально можно ставить.
 // Раньше здесь стояло true намертво, и это перебивало расписание: назначили
@@ -504,7 +509,9 @@ ipcMain.on('update:check', () => checkForUpdates());
 // закрытия приложения и жмёт «Перезапустить» в настройках.
 ipcMain.on('update:install', () => installUpdate());
 
-ipcMain.handle('app:version', () => app.getVersion());
+// В настройках и отчёте серверу показываем общий номер всех платформ, а не
+// технический SemVer, необходимый electron-updater.
+ipcMain.handle('app:version', () => releaseVersion || app.getVersion());
 
 ipcMain.handle('autostart:get', () => app.getLoginItemSettings().openAtLogin);
 ipcMain.handle('autostart:set', (event, enabled) => {
