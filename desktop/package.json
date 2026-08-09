@@ -1,6 +1,7 @@
 {
   "name": "miraschat-desktop",
-  "version": "1.6.9",
+  "version": "1.6.9-1",
+  "buildVersion": "1.6.9.1",
   "private": true,
   "description": "MirasChat — десктопный клиент для Windows",
   "main": "src/main.js",
@@ -59,6 +60,7 @@
       }
     ],
     "nsis": {
+      "artifactName": "MirasChat Setup 1.6.9.1.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
