@@ -10,6 +10,11 @@ export interface OutgoingPayload {
   forwardedFromName?: string;
   forwardedFromChat?: string;
   poll?: unknown;
+  attachment?: {
+    name: string;
+    type: string;
+    size: number;
+  };
 }
 
 export interface OutgoingMessage {
@@ -81,4 +86,3 @@ export function retryDelayMs(attempts: number): number {
   const base = Math.min(30_000, 1_000 * (2 ** Math.min(Math.max(attempts - 1, 0), 5)));
   return base + Math.floor(Math.random() * Math.min(1_000, base / 4));
 }
-

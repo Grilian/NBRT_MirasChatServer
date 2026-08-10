@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import api from '../api/client';
 import EmojiPicker from './EmojiPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
 import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
@@ -7,9 +6,12 @@ import { isNativeMobile } from '../utils/mobileNotify';
 import { getLastMobileKeyboardHeight, hideMobileKeyboard } from '../utils/mobileKeyboard';
 
 export interface PendingImage {
-  file_path: string;
-  file_width: number;
-  file_height: number;
+  file: File;
+}
+
+export interface SendResult {
+  ok: boolean;
+  error?: string;
 }
 
 export interface EditingMessage {
@@ -25,7 +27,7 @@ export interface ReplyingMessage {
 }
 
 interface MessageInputProps {
-  onSend: (text: string, image?: PendingImage) => void;
+  onSend: (text: string, image?: PendingImage) => Promise<SendResult>;
   onTyping?: () => void;
   disabled?: boolean;
   /** Подпись-подсказка в поле ввода, когда отправка запрещена */
@@ -54,9 +56,8 @@ const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 interface StagedImage {
   /** Свой id: файлы с одинаковым именем нельзя различить по нему самому. */
   id: number;
+  file: File;
   previewUrl: string;
-  uploading: boolean;
-  uploaded: PendingImage | null;
   error: string | null;
 }
 
@@ -72,6 +73,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -111,7 +113,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   // Локальный URL превью живёт, пока картинка не отправлена или не убрана —
   // без явного revoke он утёк бы памятью браузера при частой вставке фото.
-  useEffect(() => () => { staged.forEach((s) => URL.revokeObjectURL(s.previewUrl)); }, [staged]);
+  const stagedRef = useRef(staged);
+  stagedRef.current = staged;
+  useEffect(() => () => {
+    stagedRef.current.forEach((s) => URL.revokeObjectURL(s.previewUrl));
+  }, []);
 
   // Вход в режим правки — подставляем текст и ставим курсор в конец.
   // Ключ по id, а не по самому объекту: иначе перерисовка родителя затирала бы
@@ -214,25 +220,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
     requestAnimationFrame(() => window.dispatchEvent(new Event('miras-composer-resize')));
   }, [closeEmoji, disabled, emojiOpen]);
 
-  const uploadImage = async (file: File, id: number) => {
-    const form = new FormData();
-    form.append('image', file);
-    // Обновляем строго по id: пока грузится одна картинка, человек успевает
-    // добавить или убрать другие, и позиция в массиве уже не та.
-    const patch = (change: Partial<StagedImage>) => {
-      setStaged((prev) => prev.map((s) => (s.id === id ? { ...s, ...change } : s)));
-    };
-    try {
-      const { data } = await api.post('/messages/upload-image', form);
-      patch({
-        uploading: false,
-        uploaded: { file_path: data.file_path, file_width: data.file_width, file_height: data.file_height },
-      });
-    } catch (err: any) {
-      patch({ uploading: false, error: err.response?.data?.error || 'Не удалось загрузить' });
-    }
-  };
-
   const stageFiles = (files: FileList | File[] | null | undefined) => {
     if (!files || disabled) return;
     const picked = Array.from(files).filter((f) => IMAGE_MIME.includes(f.type));
@@ -241,8 +228,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     const next = picked.map((file) => {
       const id = ++stagedSeq;
       const previewUrl = URL.createObjectURL(file);
-      uploadImage(file, id);
-      return { id, previewUrl, uploading: true, uploaded: null, error: null } as StagedImage;
+      return { id, file, previewUrl, error: null } as StagedImage;
     });
     setStaged((prev) => [...prev, ...next]);
   };
@@ -255,9 +241,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
     });
   };
 
-  const submit = () => {
+  const submit = async () => {
     const trimmed = text.trim();
-    if (disabled) return;
+    if (disabled || submitting) return;
 
     // В режиме правки поле сохраняет сообщение, а не отправляет новое.
     if (editing) {
@@ -267,28 +253,46 @@ const MessageInput: React.FC<MessageInputProps> = ({
       return;
     }
 
-    if (staged.some((s) => s.uploading)) return; // ждём, пока догрузятся
+    if (!trimmed && staged.length === 0) return;
 
-    const ready = staged.filter((s) => s.uploaded).map((s) => s.uploaded!);
-    if (!trimmed && ready.length === 0) return;
-
-    if (ready.length === 0) {
-      onSend(trimmed);
-    } else {
-      // Каждая картинка уходит своим сообщением; подпись достаётся первому,
-      // как в Telegram, — иначе она либо потеряется, либо продублируется под
-      // каждой картинкой.
-      ready.slice(0, MAX_IMAGES_PER_SEND).forEach((image, i) => {
-        onSend(i === 0 ? trimmed : '', image);
-      });
+    if (staged.length === 0) {
+      const result = await onSend(trimmed);
+      if (result.ok) clearField();
+      return;
     }
 
-    clearField();
+    setSubmitting(true);
+    const batch = staged.slice(0, MAX_IMAGES_PER_SEND);
+    const sentIds = new Set<number>();
+    let captionSent = false;
+    try {
+      for (let i = 0; i < batch.length; i += 1) {
+        const item = batch[i];
+        let result: SendResult;
+        try {
+          // Если первый файл исчез с устройства, подпись должна достаться
+          // следующему успешно сохранённому, а не потеряться или уйти позже
+          // отдельным сообщением.
+          result = await onSend(captionSent ? '' : trimmed, { file: item.file });
+        } catch {
+          result = { ok: false, error: 'Не удалось сохранить изображение на устройстве' };
+        }
+        if (result.ok) {
+          sentIds.add(item.id);
+          if (!captionSent) captionSent = true;
+        } else {
+          setStaged((previous) => previous.map((current) => current.id === item.id
+            ? { ...current, error: result.error || 'Не удалось подготовить изображение' }
+            : current));
+        }
+      }
+    } finally {
+      setSubmitting(false);
+    }
+
+    if (captionSent) clearField();
     // Всё, что не влезло в лимит, остаётся прикреплённым — человек отправит
     // следующей пачкой, а не обнаружит, что часть картинок молча пропала.
-    const sentIds = new Set(
-      staged.filter((s) => s.uploaded).slice(0, MAX_IMAGES_PER_SEND).map((s) => s.id),
-    );
     setStaged((prev) => {
       prev.forEach((s) => { if (sentIds.has(s.id)) URL.revokeObjectURL(s.previewUrl); });
       return prev.filter((s) => !sentIds.has(s.id));
@@ -297,7 +301,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    submit();
+    void submit();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -306,7 +310,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     // выбор символа, и отправлять по нему сообщение нельзя.
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      submit();
+      void submit();
       return;
     }
 
@@ -470,11 +474,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
           {staged.map((item, i) => (
             <div
               key={item.id}
-              className={'composer-attachment-preview' + (i >= MAX_IMAGES_PER_SEND ? ' is-overflow' : '')}
+              className={'composer-attachment-preview' + (i >= MAX_IMAGES_PER_SEND ? ' is-overflow' : '') + (item.error ? ' is-error' : '')}
               title={item.error || (i >= MAX_IMAGES_PER_SEND ? 'Уйдёт следующей отправкой' : undefined)}
             >
               <img src={item.previewUrl} alt="" />
-              {item.uploading && <span className="composer-attachment-spinner" aria-hidden="true" />}
+              {item.error && <span className="composer-attachment-unavailable" aria-hidden="true">!</span>}
               <button
                 type="button"
                 className="composer-attachment-remove"
@@ -484,7 +488,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
             </div>
           ))}
           {staged.some((s) => s.error) && (
-            <span className="composer-attachment-error">Часть изображений не загрузилась</span>
+            <span className="composer-attachment-error">
+              {staged.find((s) => s.error)?.error}. Уберите файл и добавьте заново.
+            </span>
           )}
           {staged.length > MAX_IMAGES_PER_SEND && (
             <span className="composer-attachment-error">
@@ -567,9 +573,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
       <button
         type="submit"
         className="send-btn"
-        disabled={disabled || (editing
+        disabled={disabled || submitting || (editing
           ? !text.trim()
-          : (!text.trim() && !staged.some((s) => s.uploaded)) || staged.some((s) => s.uploading))}
+          : (!text.trim() && staged.length === 0))}
         aria-label={editing ? 'Сохранить' : 'Отправить'}
       >
         {editing ? (

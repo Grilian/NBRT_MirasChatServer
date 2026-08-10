@@ -686,7 +686,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    Теперь пропорция и предел высоты живут на одном элементе: браузер сам сужает
    ширину, и кадр виден целиком. */
 .bubble-image {
-  display: block; width: calc(100% + 22px); max-width: 320px; max-height: 320px;
+  position: relative; display: block; width: calc(100% + 22px); max-width: 320px; max-height: 320px;
   margin: -6px -11px 4px;
   border: none; padding: 0; cursor: zoom-in; background: var(--paper-sunken);
   border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
@@ -706,6 +706,14 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    пересылке — второй, и следующий элемент над картинкой поймал бы третий. */
 .bubble-image:not(:first-child) { margin-top: 4px; border-radius: var(--radius-md); }
 .bubble-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bubble-image.has-local-preview:not([style]) img { height: auto; max-height: 320px; object-fit: contain; }
+.bubble-image.is-send-failed img { filter: brightness(.62); }
+.image-send-retry {
+  position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%;
+  color: #fff; background: var(--unread); box-shadow: var(--shadow-md);
+  font-size: 25px; font-weight: 700; line-height: 1;
+}
 
 .lightbox-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 60;
@@ -1018,6 +1026,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Не влезающие в лимит одной отправки — приглушены: видно, что они прикреплены,
    но уйдут следующей пачкой. */
 .composer-attachment-preview.is-overflow { opacity: .45; }
+.composer-attachment-preview.is-error img { filter: brightness(.58); }
 .composer-attachment-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .composer-attachment-spinner {
   position: absolute; inset: 0; background: color-mix(in srgb, black 40%, transparent);
@@ -1026,6 +1035,11 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 @keyframes composer-spin { to { transform: rotate(360deg); } }
 .composer-attachment-error { font-size: 12.5px; color: var(--unread); }
+.composer-attachment-unavailable {
+  position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%;
+  background: var(--unread); color: #fff; font-weight: 700; z-index: 1;
+}
 /* Крестик у каждого превью в углу: одной кнопкой на всю пачку убирать нечего,
    а рядом с превью он ушёл бы в перенос вместе с картинками. */
 .composer-attachment-remove {

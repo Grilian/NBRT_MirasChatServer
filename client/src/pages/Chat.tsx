@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { App as CapApp } from '@capacitor/app';
 import ChatList, { ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
-import MessageInput, { EditingMessage, PendingImage, ReplyingMessage } from '../components/MessageInput';
+import MessageInput, { EditingMessage, PendingImage, ReplyingMessage, SendResult } from '../components/MessageInput';
 import ForwardModal, { ForwardPreviewItem, ForwardTarget } from '../components/ForwardModal';
 import DeleteMessagesModal, { DeleteRequest } from '../components/DeleteMessagesModal';
 import { MessageReaction } from '../components/ReactionDetailsModal';
@@ -69,6 +69,11 @@ import {
   retryDelayMs,
   saveOutgoingQueue,
 } from '../utils/outgoingQueue';
+import {
+  deleteOutgoingAttachment,
+  getOutgoingAttachment,
+  storeOutgoingAttachment,
+} from '../utils/outgoingAttachments';
 
 interface User {
   id: number;
@@ -92,6 +97,7 @@ interface Message {
   file_path?: string | null;
   file_width?: number | null;
   file_height?: number | null;
+  local_file_url?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -383,6 +389,9 @@ const Chat: React.FC = () => {
 
   const currentUserId = Number(localStorage.getItem('userId'));
   const [outgoingQueue, setOutgoingQueue] = useState<OutgoingMessage[]>(() => loadOutgoingQueue(currentUserId));
+  const [outgoingAttachmentUrls, setOutgoingAttachmentUrls] = useState<Record<string, string>>({});
+  const outgoingAttachmentUrlsRef = useRef(outgoingAttachmentUrls);
+  outgoingAttachmentUrlsRef.current = outgoingAttachmentUrls;
   const outgoingQueueRef = useRef(outgoingQueue);
   outgoingQueueRef.current = outgoingQueue;
   const processingOutgoingRef = useRef(false);
@@ -392,6 +401,49 @@ const Chat: React.FC = () => {
   useEffect(() => {
     saveOutgoingQueue(currentUserId, outgoingQueue);
   }, [currentUserId, outgoingQueue]);
+
+  const removeOutgoing = useCallback((clientMessageId: string) => {
+    setOutgoingQueue((previous) => previous.filter((item) => item.clientMessageId !== clientMessageId));
+    setOutgoingAttachmentUrls((previous) => {
+      const url = previous[clientMessageId];
+      if (!url) return previous;
+      URL.revokeObjectURL(url);
+      const next = { ...previous };
+      delete next[clientMessageId];
+      return next;
+    });
+    void deleteOutgoingAttachment(clientMessageId).catch(() => {});
+  }, []);
+
+  // После нового запуска восстанавливаем локальные preview URL из IndexedDB.
+  useEffect(() => {
+    let cancelled = false;
+    const toRestore = outgoingQueue.filter((item) => (
+      item.payload.attachment && !outgoingAttachmentUrlsRef.current[item.clientMessageId]
+    ));
+    void Promise.all(toRestore.map(async (item) => {
+      try {
+        const stored = await getOutgoingAttachment(item.clientMessageId);
+        if (cancelled || !stored) return;
+        const url = URL.createObjectURL(stored.blob);
+        setOutgoingAttachmentUrls((previous) => {
+          if (previous[item.clientMessageId]) {
+            URL.revokeObjectURL(url);
+            return previous;
+          }
+          return { ...previous, [item.clientMessageId]: url };
+        });
+      } catch {
+        // Отсутствие бинарной записи обработает отправщик как failed; эффект
+        // восстановления не должен ломать остальную очередь.
+      }
+    }));
+    return () => { cancelled = true; };
+  }, [outgoingQueue]);
+
+  useEffect(() => () => {
+    Object.values(outgoingAttachmentUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
 
   // Живой снимок состояния для обработчика сокета — см. подробности там же.
   const liveRef = useRef({
@@ -1106,9 +1158,7 @@ const Chat: React.FC = () => {
       // локальную запись по сквозному id; числового server id до отправки у
       // неё ещё не было, поэтому дедуп только по нему здесь недостаточен.
       if (isMine && message.client_message_id) {
-        setOutgoingQueue((previous) => previous.filter((queued) => (
-          queued.clientMessageId !== message.client_message_id
-        )));
+        removeOutgoing(message.client_message_id);
       }
 
       // «Человек прямо сейчас это видит»: мало того, что чат открыт — окно
@@ -1228,7 +1278,7 @@ const Chat: React.FC = () => {
       socket.off('poll_updated', pollUpdated);
       socket.off('poll_error', pollError);
     };
-  }, [socket, currentUserId, pushToast]);
+  }, [socket, currentUserId, pushToast, removeOutgoing]);
 
   // Загрузка истории при смене чата
   useEffect(() => {
@@ -1501,19 +1551,43 @@ const Chat: React.FC = () => {
     });
   }, []);
 
-  const enqueueOutgoing = useCallback((payload: OutgoingPayload) => {
-    const item = createOutgoingMessage(currentUserId, payload);
+  const patchOutgoingQueue = useCallback((update: (previous: OutgoingMessage[]) => OutgoingMessage[]) => {
     setOutgoingQueue((previous) => {
-      const next = [...previous, item];
-      // Не ждём useEffect: к моменту возврата из обработчика кнопки запись уже
-      // находится на диске браузерного профиля.
+      const next = update(previous);
       saveOutgoingQueue(currentUserId, next);
       return next;
     });
-    return item;
   }, [currentUserId]);
 
-  const flushOutgoingQueue = useCallback(() => {
+  const enqueueOutgoing = useCallback(async (payload: OutgoingPayload, image?: PendingImage): Promise<SendResult> => {
+    const finalPayload: OutgoingPayload = image
+      ? {
+        ...payload,
+        attachment: { name: image.file.name, type: image.file.type, size: image.file.size },
+      }
+      : payload;
+    const item = createOutgoingMessage(currentUserId, finalPayload);
+
+    if (image) {
+      try {
+        await storeOutgoingAttachment(item.clientMessageId, image.file);
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error && error.message === 'source_file_unavailable'
+            ? 'Файл удалён или недоступен'
+            : 'Не удалось сохранить изображение на устройстве',
+        };
+      }
+      const url = URL.createObjectURL(image.file);
+      setOutgoingAttachmentUrls((previous) => ({ ...previous, [item.clientMessageId]: url }));
+    }
+
+    patchOutgoingQueue((previous) => [...previous, item]);
+    return { ok: true };
+  }, [currentUserId, patchOutgoingQueue]);
+
+  const flushOutgoingQueue = useCallback(async () => {
     if (!socket || !socket.connected || !socketAuthenticated || processingOutgoingRef.current) return;
     const item = outgoingQueueRef.current.find((queued) => (
       queued.state === 'pending' && queued.nextAttemptAt <= Date.now()
@@ -1522,12 +1596,54 @@ const Chat: React.FC = () => {
 
     processingOutgoingRef.current = true;
     const attempt = item.attempts + 1;
-    setOutgoingQueue((previous) => previous.map((queued) => (
+    patchOutgoingQueue((previous) => previous.map((queued) => (
       queued.clientMessageId === item.clientMessageId ? { ...queued, attempts: attempt } : queued
     )));
 
+    let sendingItem = item;
+    if (item.payload.attachment && !item.payload.filePath) {
+      try {
+        const stored = await getOutgoingAttachment(item.clientMessageId);
+        if (!stored) throw new Error('attachment_missing');
+        const form = new FormData();
+        form.append('image', stored.blob, stored.name);
+        const { data } = await api.post('/messages/upload-image', form);
+        sendingItem = {
+          ...item,
+          attempts: attempt,
+          payload: {
+            ...item.payload,
+            filePath: data.file_path,
+            fileWidth: data.file_width,
+            fileHeight: data.file_height,
+          },
+        };
+        // Сначала устойчиво запоминаем выданный сервером путь, и только потом
+        // отправляем socket-событие. После падения повтор не загрузит файл ещё
+        // раз и не оставит лишний объект на сервере.
+        patchOutgoingQueue((previous) => previous.map((queued) => (
+          queued.clientMessageId === item.clientMessageId ? sendingItem : queued
+        )));
+      } catch (error) {
+        processingOutgoingRef.current = false;
+        patchOutgoingQueue((previous) => previous.map((queued) => queued.clientMessageId === item.clientMessageId
+          ? {
+            ...queued,
+            state: 'failed',
+            lastError: error instanceof Error && error.message === 'attachment_missing'
+              ? 'attachment_missing'
+              : 'attachment_upload_failed',
+            nextAttemptAt: 0,
+          }
+          : queued));
+        return;
+      }
+    }
+
+    const { attachment: _attachment, ...socketPayload } = sendingItem.payload;
+
     socket.timeout(10_000).emit('chat_message', {
-      ...item.payload,
+      ...socketPayload,
       clientMessageId: item.clientMessageId,
     }, (timeoutError: Error | null, response?: {
       ok?: boolean;
@@ -1540,28 +1656,28 @@ const Chat: React.FC = () => {
       if (!timeoutError && response?.ok && response.messageId) {
         // Эхо chat_message обычно приходит первым. Если оно потерялось вместе
         // с сетью, ack всё равно превращает локальный пузырь в серверный.
-        if (liveRef.current.activeChat === item.payload.chatId) {
+        if (liveRef.current.activeChat === sendingItem.payload.chatId) {
           setMessages((previous) => previous.some((message) => message.id === response.messageId)
             ? previous
             : [...previous, {
               id: response.messageId!,
-              chat_id: item.payload.chatId,
-              text: item.payload.text,
-              file_path: item.payload.filePath || null,
-              file_width: item.payload.fileWidth || null,
-              file_height: item.payload.fileHeight || null,
+              chat_id: sendingItem.payload.chatId,
+              text: sendingItem.payload.text,
+              file_path: sendingItem.payload.filePath || null,
+              file_width: sendingItem.payload.fileWidth || null,
+              file_height: sendingItem.payload.fileHeight || null,
               sender_id: currentUserId,
               username: currentUsername,
               display_name: currentDisplayName,
               created_at: response.createdAt || item.createdAt,
               status: 'sent',
               client_message_id: item.clientMessageId,
-              reply_to_id: item.payload.replyToId || null,
-              forwarded_from_name: item.payload.forwardedFromName || null,
-              forwarded_from_chat: item.payload.forwardedFromChat || null,
+              reply_to_id: sendingItem.payload.replyToId || null,
+              forwarded_from_name: sendingItem.payload.forwardedFromName || null,
+              forwarded_from_chat: sendingItem.payload.forwardedFromChat || null,
             }]);
         }
-        setOutgoingQueue((previous) => previous.filter((queued) => queued.clientMessageId !== item.clientMessageId));
+        removeOutgoing(item.clientMessageId);
         return;
       }
 
@@ -1570,38 +1686,39 @@ const Chat: React.FC = () => {
         'auth_required', 'chat_forbidden', 'write_not_allowed', 'muted',
         'empty_message', 'invalid_client_message_id',
       ]).has(error);
-      setOutgoingQueue((previous) => previous.map((queued) => (
+      const failed = !!item.payload.attachment || permanent;
+      patchOutgoingQueue((previous) => previous.map((queued) => (
         queued.clientMessageId !== item.clientMessageId
           ? queued
           : {
             ...queued,
-            state: permanent ? 'failed' : 'pending',
+            state: failed ? 'failed' : 'pending',
             lastError: error,
-            nextAttemptAt: permanent ? 0 : Date.now() + retryDelayMs(attempt),
+            nextAttemptAt: failed ? 0 : Date.now() + retryDelayMs(attempt),
           }
       )));
     });
-  }, [socket, socketAuthenticated, currentUserId, currentUsername, currentDisplayName]);
+  }, [socket, socketAuthenticated, currentUserId, currentUsername, currentDisplayName, patchOutgoingQueue, removeOutgoing]);
 
   useEffect(() => {
-    flushOutgoingQueue();
-    const timer = window.setInterval(flushOutgoingQueue, 1000);
+    void flushOutgoingQueue();
+    const timer = window.setInterval(() => { void flushOutgoingQueue(); }, 1000);
     return () => window.clearInterval(timer);
   }, [flushOutgoingQueue, outgoingQueue]);
 
-  const handleSendMessage = (text: string, image?: PendingImage) => {
+  const handleSendMessage = async (text: string, image?: PendingImage): Promise<SendResult> => {
     if (activeChat) {
-      enqueueOutgoing({
+      const result = await enqueueOutgoing({
         chatId: activeChat,
         text,
-        filePath: image?.file_path,
-        fileWidth: image?.file_width,
-        fileHeight: image?.file_height,
         replyToId: replyingMessage?.id,
-      });
+      }, image);
+      if (!result.ok) return result;
       socket?.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
       setReplyingMessage(null);
+      return result;
     }
+    return { ok: false, error: 'Чат не выбран' };
   };
 
   const handleCreatePoll = (draft: PollDraft) => {
@@ -2018,6 +2135,7 @@ const Chat: React.FC = () => {
       file_path: item.payload.filePath || null,
       file_width: item.payload.fileWidth || null,
       file_height: item.payload.fileHeight || null,
+      local_file_url: outgoingAttachmentUrls[item.clientMessageId] || null,
       sender_id: currentUserId,
       username: currentUsername,
       display_name: currentDisplayName,

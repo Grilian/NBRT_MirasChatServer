@@ -17,6 +17,7 @@ interface Message {
   file_path?: string | null;
   file_width?: number | null;
   file_height?: number | null;
+  local_file_url?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -699,7 +700,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       icon: icon('m9 17-5-5 5-5', 'M20 18v-2a4 4 0 0 0-4-4H4'),
       onClick: () => {
         setMenuFor(null);
-        onStartReply({ id: msg.id, text: msg.text, author: nameFor(msg), hasImage: !!msg.file_path });
+        onStartReply({ id: msg.id, text: msg.text, author: nameFor(msg), hasImage: !!(msg.file_path || msg.local_file_url) });
       },
     } : null;
 
@@ -891,6 +892,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           // решают диалог удаления и сервер, а не доступность галочки.
           const pendingDelivery = msg.status === 'sending' || msg.status === 'failed';
           const selectable = !pendingDelivery;
+          const imageUrl = msg.local_file_url || resolveUploadUrl(msg.file_path);
 
           const isSelected = selectedIds.has(msg.id);
           // Картинка без подписи, у которой прозрачность реальная (не просто
@@ -966,20 +968,28 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         </span>
                       </button>
                     )}
-                    {msg.file_path && (
+                    {imageUrl && (
                       <button
                         type="button"
                         // Суффикс `_a` в имени ставит сервер, когда в картинке
                         // есть прозрачность (см. routes/messages.js).
-                        className={'bubble-image' + (/_a\.webp$/.test(msg.file_path) ? ' has-alpha' : '')}
+                        className={'bubble-image' + (msg.file_path && /_a\.webp$/.test(msg.file_path) ? ' has-alpha' : '') + (msg.local_file_url ? ' has-local-preview' : '') + (msg.status === 'failed' ? ' is-send-failed' : '')}
                         style={msg.file_width && msg.file_height ? { aspectRatio: `${msg.file_width} / ${msg.file_height}` } : undefined}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (selectMode) { toggleSelected(msg.id); return; }
-                          setLightboxUrl(resolveUploadUrl(msg.file_path));
+                          if (msg.status === 'failed' && msg.client_message_id && onRetryOutgoing) {
+                            onRetryOutgoing(msg.client_message_id);
+                            return;
+                          }
+                          setLightboxUrl(imageUrl);
                         }}
+                        title={msg.status === 'failed' ? 'Не отправлено. Нажмите, чтобы повторить' : undefined}
                       >
-                        <img src={resolveUploadUrl(msg.file_path) || ''} alt="" />
+                        <img src={imageUrl} alt="" />
+                        {msg.status === 'failed' && (
+                          <span className="image-send-retry" aria-hidden="true">!</span>
+                        )}
                       </button>
                     )}
                     {msg.poll && onVotePoll && onAddPollOption && (
@@ -1008,7 +1018,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         </span>
                       )}
                       <span className="bubble-time">{formatMoscowTime(msg.created_at)}</span>
-                      {mine && (
+                      {mine && !(imageUrl && msg.status === 'failed') && (
                         <TickIcon
                           status={msg.status || 'sent'}
                           onRetry={msg.client_message_id && onRetryOutgoing
