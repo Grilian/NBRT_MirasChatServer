@@ -307,7 +307,13 @@ router.post('/:id/messages/delete', verifyToken, requireMember, requireGroupClea
     // нужно быть готовыми предоставить переписку целиком, удаление лишь
     // прячет сообщение из интерфейса (см. message_delete в index.js).
     const affectedPlaceholders = affected.map(() => '?').join(',');
-    db.prepare(`UPDATE messages SET deleted = 1 WHERE id IN (${affectedPlaceholders})`).run(...affected);
+    const now = Date.now();
+    db.prepare(`
+      UPDATE messages
+      SET deleted = 1, deleted_at = ?, deleted_by = ?
+      WHERE id IN (${affectedPlaceholders})
+         OR thread_root_id IN (${affectedPlaceholders})
+    `).run(now, req.userId, ...affected, ...affected);
 
     const io = req.app.get('io');
     const memberIds = groupMembers(req.groupId).map((m) => m.id);

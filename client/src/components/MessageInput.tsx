@@ -56,6 +56,8 @@ interface MessageInputProps {
   onCreatePoll?: () => void;
   /** Каталог кастомных смайликов — для цитат в панелях правки и ответа. */
   customEmoji?: CustomEmojiMap;
+  /** Явное действие «Ответить» может сразу передать фокус новому композеру. */
+  autoFocus?: boolean;
 }
 
 // Ограничение совпадает с серверным (MAX_MESSAGE_LENGTH в server/index.js):
@@ -80,7 +82,7 @@ let stagedSeq = 0;
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend, onTyping, disabled, placeholder,
   editing, onSubmitEdit, onCancelEdit, onRequestEditLast,
-  replying, onCancelReply, onCreatePoll, customEmoji = {},
+  replying, onCancelReply, onCreatePoll, customEmoji = {}, autoFocus = false,
 }) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage[]>([]);
@@ -124,6 +126,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!autoFocus || disabled) return;
+    const frame = requestAnimationFrame(() => {
+      richRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  // Фокус нужен только при первом появлении конкретного композера.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!attachMenuOpen) return;

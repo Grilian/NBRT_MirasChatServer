@@ -9,7 +9,11 @@ const TOKEN_KEY = 'fcmToken';
 
 async function registerToken(token: string) {
   try {
-    await api.post('/devices', { token, platform: 'android' });
+    await api.post('/devices', {
+      token,
+      platform: 'android',
+      capabilities: ['threads', 'notification-policy'],
+    });
     localStorage.setItem(TOKEN_KEY, token);
   } catch (e) {
     console.error('Ошибка регистрации токена уведомлений:', e);

@@ -79,6 +79,7 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     contacted_by: db.prepare('SELECT * FROM contacts WHERE contact_user_id = ?').all(id),
     device_tokens: db.prepare('SELECT * FROM device_tokens WHERE user_id = ?').all(id),
     app_versions: db.prepare('SELECT * FROM user_app_versions WHERE user_id = ?').all(id),
+    notification_settings: db.prepare('SELECT * FROM chat_notification_settings WHERE user_id = ?').all(id),
     calendar_events: db.prepare('SELECT * FROM calendar_events WHERE owner_id = ?').all(id),
     calendar_invitations: db.prepare('SELECT * FROM calendar_event_guests WHERE user_id = ?').all(id),
     tasks_created: db.prepare('SELECT * FROM tasks WHERE created_by = ?').all(id),
@@ -87,6 +88,7 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     chat_group_membership: db.prepare('SELECT * FROM chat_group_members WHERE user_id = ?').all(id),
     message_reads: db.prepare('SELECT * FROM message_reads WHERE user_id = ?').all(id),
     message_hidden: db.prepare('SELECT * FROM message_hidden WHERE user_id = ?').all(id),
+    thread_hidden: db.prepare('SELECT * FROM thread_hidden WHERE user_id = ?').all(id),
     message_reactions: db.prepare('SELECT * FROM message_reactions WHERE user_id = ?').all(id),
     poll_options_created: db.prepare('SELECT * FROM poll_options WHERE created_by = ?').all(id),
     poll_votes_cast: db.prepare('SELECT * FROM poll_votes WHERE user_id = ?').all(id),
@@ -142,16 +144,20 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     db.prepare('DELETE FROM tasks WHERE created_by = ?').run(id);
     db.prepare('DELETE FROM message_reads WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM message_hidden WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM thread_hidden WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM message_reactions WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM chat_group_writers WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM chat_group_members WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM device_tokens WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM user_app_versions WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM chat_notification_settings WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM messages WHERE sender_id = ?').run(id);
     db.prepare('DELETE FROM favorites WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM chat_recent_openings WHERE user_id = ?').run(id);
     if (relatedChatIds.length) {
       db.prepare(`DELETE FROM chat_recent_openings WHERE chat_id IN (${relatedChatIds.map(() => '?').join(',')})`).run(...relatedChatIds);
+      db.prepare(`DELETE FROM chat_notification_settings WHERE chat_id IN (${relatedChatIds.map(() => '?').join(',')})`)
+        .run(...relatedChatIds);
     }
     db.prepare('DELETE FROM user_comments WHERE user_id = ? OR target_user_id = ?').run(id, id);
     db.prepare('DELETE FROM contacts WHERE user_id = ? OR contact_user_id = ?').run(id, id);

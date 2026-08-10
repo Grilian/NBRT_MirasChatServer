@@ -80,13 +80,16 @@ const CHANNEL_ID = 'messages_v2';
  * priority: 'high' — иначе в Doze доставка откладывается до maintenance-окна,
  * то есть ровно в том случае, ради которого пуш и нужен.
  */
-async function notifyNewMessage(userId, { chatId, messageId, senderName, chatLabel }) {
+async function notifyNewMessage(userId, {
+  chatId, messageId, senderName, chatLabel, forceNotification = false, requiredFeature = null
+}) {
   if (!messaging) return;
 
   try {
     const tokens = db
-      .prepare('SELECT token FROM device_tokens WHERE user_id = ?')
+      .prepare('SELECT token, capabilities FROM device_tokens WHERE user_id = ?')
       .all(userId)
+      .filter((row) => !requiredFeature || String(row.capabilities || '').split(',').includes(requiredFeature))
       .map((row) => row.token);
 
     if (!tokens.length) return;
@@ -101,7 +104,8 @@ async function notifyNewMessage(userId, { chatId, messageId, senderName, chatLab
       data: {
         type: 'new_message',
         chatId: String(chatId),
-        messageId: String(messageId)
+        messageId: String(messageId),
+        forceNotification: forceNotification ? '1' : '0'
       },
       notification: {
         title,

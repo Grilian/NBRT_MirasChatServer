@@ -368,6 +368,31 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_message_hidden_user ON message_hidden(user_id);
 
+  -- Персональное скрытие корневого сообщения должно скрывать и всю его ветку,
+  -- включая ответы, которые появятся позже. Список отдельных message_id этого
+  -- обеспечить не может, поэтому корень фиксируется отдельно.
+  CREATE TABLE IF NOT EXISTS thread_hidden (
+    root_message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    hidden_at INTEGER NOT NULL,
+    PRIMARY KEY (root_message_id, user_id),
+    FOREIGN KEY (root_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  -- Настройки уведомлений хранятся на сервере, чтобы глушение конкретного
+  -- пользователя/группы одинаково работало на всех устройствах и для FCM.
+  CREATE TABLE IF NOT EXISTS chat_notification_settings (
+    user_id INTEGER NOT NULL,
+    chat_id TEXT NOT NULL,
+    muted INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, chat_id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_thread_hidden_user ON thread_hidden(user_id);
+
   -- Реакции на сообщения. PRIMARY KEY (message_id, user_id) — это и есть
   -- правило «одна реакция на человека»: повторная установка идёт через
   -- ON CONFLICT DO UPDATE и заменяет прежнюю, а не добавляет вторую.
@@ -561,6 +586,34 @@ try {
 // уже существующую строку, а не создать дубликат.
 try {
   db.exec(`ALTER TABLE messages ADD COLUMN client_message_id TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+// Ответ ветки остаётся обычным сообщением со всеми юридически значимыми
+// полями, но не попадает в основную ленту. Корнем всегда является сообщение
+// верхнего уровня; вложенных веток нет.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN thread_root_id INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN deleted_at INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN deleted_by INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN force_notification INTEGER NOT NULL DEFAULT 0`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE device_tokens ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`);
 } catch (e) {
   // Колонка уже есть
 }
@@ -818,11 +871,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
   CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
   CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+  CREATE INDEX IF NOT EXISTS idx_messages_thread_root ON messages(thread_root_id, id);
   CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorites(user_id);
   CREATE INDEX IF NOT EXISTS idx_chat_recent_user_opened
     ON chat_recent_openings(user_id, last_opened_at DESC);
   CREATE INDEX IF NOT EXISTS idx_user_comments_user_id ON user_comments(user_id);
   CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_notification_settings_user
+    ON chat_notification_settings(user_id, muted);
 `);
 
 // До появления отдельной истории открытий точного времени не было. Для уже

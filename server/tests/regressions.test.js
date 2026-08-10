@@ -20,6 +20,8 @@ const calendarRoutes = require('../routes/calendar');
 const groupRoutes = require('../routes/groups');
 const taskRoutes = require('../routes/tasks');
 const superadminRoutes = require('../routes/superadmin');
+const unreadRoutes = require('../routes/unread');
+const notificationSettingsRoutes = require('../routes/notificationSettings');
 const { isValidBirthDate } = require('../utils/validators');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 
@@ -37,6 +39,8 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/superadmin', superadminRoutes);
+app.use('/api/unread', unreadRoutes);
+app.use('/api/notification-settings', notificationSettingsRoutes);
 
 let server;
 let baseUrl;
@@ -53,8 +57,8 @@ function tokenFor(id) {
   return jwt.sign({ id, username: `user_${id}`, source: 'local' }, process.env.JWT_SECRET);
 }
 
-async function request(route, { token, method = 'GET', body } = {}) {
-  const headers = {};
+async function request(route, { token, method = 'GET', body, headers: extraHeaders = {} } = {}) {
+  const headers = { ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(baseUrl + route, {
@@ -65,6 +69,57 @@ async function request(route, { token, method = 'GET', body } = {}) {
   const data = await response.json();
   return { response, data };
 }
+
+test('legacy clients do not receive unread counts for thread-only replies', async () => {
+  const authorId = createUser('unread_thread_author');
+  const recipientId = createUser('unread_thread_recipient');
+  const chatId = `chat_${Math.min(authorId, recipientId)}_${Math.max(authorId, recipientId)}`;
+  const rootId = Number(db.prepare(
+    'INSERT INTO messages (chat_id, sender_id, text) VALUES (?, ?, ?)'
+  ).run(chatId, authorId, 'root').lastInsertRowid);
+  db.prepare(
+    'INSERT INTO messages (chat_id, sender_id, text, thread_root_id) VALUES (?, ?, ?, ?)'
+  ).run(chatId, authorId, 'thread reply', rootId);
+
+  const token = tokenFor(recipientId);
+  const legacy = await request('/api/unread', { token });
+  const modern = await request('/api/unread', {
+    token,
+    headers: { 'X-Miras-Features': 'threads,notification-policy' },
+  });
+
+  assert.equal(legacy.response.status, 200);
+  assert.equal(modern.response.status, 200);
+  assert.equal(legacy.data[chatId], 1);
+  assert.equal(modern.data[chatId], 2);
+});
+
+test('notification settings can mute only a chat available to the current user', async () => {
+  const firstId = createUser('notification_settings_first');
+  const secondId = createUser('notification_settings_second');
+  const outsiderId = createUser('notification_settings_outsider');
+  const chatId = `chat_${Math.min(firstId, secondId)}_${Math.max(firstId, secondId)}`;
+  const token = tokenFor(firstId);
+
+  const muted = await request(`/api/notification-settings/${chatId}`, {
+    token,
+    method: 'PUT',
+    body: { muted: true },
+  });
+  assert.equal(muted.response.status, 200);
+  assert.equal(muted.data.muted, true);
+
+  const listed = await request('/api/notification-settings', { token });
+  assert.deepEqual(listed.data.muted_chat_ids, [chatId]);
+
+  const forbiddenChat = `chat_${Math.min(secondId, outsiderId)}_${Math.max(secondId, outsiderId)}`;
+  const forbidden = await request(`/api/notification-settings/${forbiddenChat}`, {
+    token,
+    method: 'PUT',
+    body: { muted: true },
+  });
+  assert.equal(forbidden.response.status, 403);
+});
 
 test.before(async () => {
   await new Promise((resolve) => {

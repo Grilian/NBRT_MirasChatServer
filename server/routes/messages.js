@@ -10,6 +10,14 @@ const { isParticipant } = require('../services/chatParticipants');
 const { reactionsForMessages } = require('../services/reactions');
 const { attachPollsToMessages } = require('../services/polls');
 const { touchRecentChat, listRecentChats } = require('../services/recentChats');
+const {
+  ThreadError,
+  attachThreadSummaries,
+  getThread,
+  markThreadRead,
+  rootForUser,
+  threadSummary,
+} = require('../services/threads');
 const router = express.Router();
 
 // Последние открытые переписки синхронизируются между платформами. В список
@@ -123,6 +131,43 @@ router.post('/upload-image', verifyToken, (req, res) => {
   });
 });
 
+// Ветка читается отдельно от основной истории: её ответы не должны попадать в
+// обычную пагинацию чата и отмечаться прочитанными одним открытием разговора.
+router.get('/threads/:rootId', verifyToken, (req, res) => {
+  try {
+    res.json(getThread(req.params.rootId, req.userId));
+  } catch (error) {
+    const status = error instanceof ThreadError ? error.status : 500;
+    res.status(status).json({ error: error.code || error.message });
+  }
+});
+
+router.get('/threads/:rootId/summary', verifyToken, (req, res) => {
+  try {
+    rootForUser(req.params.rootId, req.userId);
+    res.json(threadSummary(req.params.rootId, req.userId));
+  } catch (error) {
+    const status = error instanceof ThreadError ? error.status : 500;
+    res.status(status).json({ error: error.code || error.message });
+  }
+});
+
+router.post('/threads/:rootId/read', verifyToken, (req, res) => {
+  try {
+    const result = markThreadRead(req.params.rootId, req.userId);
+    const io = req.app.get('io');
+    io?.to(`user:${req.userId}`).emit('thread_read', {
+      root_id: Number(req.params.rootId),
+      message_ids: result.messageIds,
+      summary: result.summary,
+    });
+    res.json({ ok: true, message_ids: result.messageIds, summary: result.summary });
+  } catch (error) {
+    const status = error instanceof ThreadError ? error.status : 500;
+    res.status(status).json({ error: error.code || error.message });
+  }
+});
+
 // Последнее сообщение по каждому chat_id — для превью в списке диалогов.
 // Раньше выборка не была сужена до "чатов текущего пользователя" — chat_id
 // (chat_<a>_<b>, miras_admin_<login>_<id>) детерминированно вычисляется из
@@ -138,7 +183,8 @@ router.get('/meta/last', verifyToken, (req, res) => {
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
         FROM messages
-        WHERE NOT EXISTS (
+        WHERE thread_root_id IS NULL
+          AND NOT EXISTS (
           SELECT 1 FROM message_hidden h WHERE h.message_id = messages.id AND h.user_id = ?
         )
         GROUP BY chat_id
@@ -224,7 +270,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LEFT JOIN messages rm ON rm.id = m.reply_to_id
           LEFT JOIN users ru ON ru.id = rm.sender_id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
-          WHERE m.chat_id = ? AND m.id < ?
+          WHERE m.chat_id = ? AND m.id < ? AND m.thread_root_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
           ORDER BY m.id DESC
           LIMIT ?
@@ -240,7 +286,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LEFT JOIN messages rm ON rm.id = m.reply_to_id
           LEFT JOIN users ru ON ru.id = rm.sender_id
           LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
-          WHERE m.chat_id = ?
+          WHERE m.chat_id = ? AND m.thread_root_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
           ORDER BY m.id DESC
           LIMIT ? OFFSET ?
@@ -273,6 +319,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
     // участники зависят от запрашивающего. Поэтому дополняем историю только
     // после проверки доступа к чату и именно для req.userId.
     attachPollsToMessages(messages, req.userId);
+    attachThreadSummaries(messages, req.userId);
 
     // Реакции — одним запросом на всю страницу, а не по запросу на сообщение.
     const reactionsByMessage = reactionsForMessages(messages.map((m) => m.id));
@@ -287,7 +334,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
       ? false
       : db.prepare(`
           SELECT 1 FROM messages m
-          WHERE m.chat_id = ? AND m.id < ?
+          WHERE m.chat_id = ? AND m.id < ? AND m.thread_root_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
           LIMIT 1
         `).get(chatId, oldestId, req.userId) !== undefined;

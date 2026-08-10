@@ -24,6 +24,8 @@ export interface GroupDetail {
 interface GroupInfoModalProps {
   groupId: number;
   currentUserId: number;
+  notificationsMuted?: boolean;
+  onToggleNotifications?: (muted: boolean) => Promise<void>;
   onClose: () => void;
   /** Название/состав поменялись — обновить сводку в списке чатов. */
   onUpdated: (group: GroupDetail) => void;
@@ -31,7 +33,10 @@ interface GroupInfoModalProps {
   onGone: (chatId: string) => void;
 }
 
-const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId, onClose, onUpdated, onGone }) => {
+const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
+  groupId, currentUserId, notificationsMuted = false, onToggleNotifications,
+  onClose, onUpdated, onGone,
+}) => {
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [nameDraft, setNameDraft] = useState('');
@@ -39,6 +44,8 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId,
   const [adding, setAdding] = useState(false);
   const [addIds, setAddIds] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+  const [notificationBusy, setNotificationBusy] = useState(false);
+  const [notificationError, setNotificationError] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -161,6 +168,19 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId,
     }
   };
 
+  const toggleNotifications = async () => {
+    if (!onToggleNotifications || notificationBusy) return;
+    setNotificationBusy(true);
+    setNotificationError('');
+    try {
+      await onToggleNotifications(!notificationsMuted);
+    } catch (error: any) {
+      setNotificationError(error.response?.data?.error || 'Не удалось изменить уведомления');
+    } finally {
+      setNotificationBusy(false);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card directory-modal group-info-modal" onClick={(e) => e.stopPropagation()}>
@@ -219,6 +239,21 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({ groupId, currentUserId,
                 </button>
               )}
               <div className="group-info-count">{group.member_count} {declineMembers(group.member_count)}</div>
+              <button
+                type="button"
+                className={'group-info-notification-btn' + (notificationsMuted ? ' is-muted' : '')}
+                onClick={toggleNotifications}
+                disabled={notificationBusy}
+                aria-pressed={notificationsMuted}
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+                  {notificationsMuted && <path d="M4 4l16 16" />}
+                </svg>
+                {notificationBusy ? 'Сохраняем…' : notificationsMuted ? 'Включить уведомления' : 'Отключить уведомления'}
+              </button>
+              {notificationError && <div className="group-info-notification-error" role="status">{notificationError}</div>}
             </div>
 
             {isOwner && (

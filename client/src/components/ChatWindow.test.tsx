@@ -56,3 +56,46 @@ describe('ChatWindow context menu', () => {
     expect(container.querySelector('.msg-menu-layer')).toHaveStyle({ maxHeight: '392px' });
   });
 });
+
+describe('ChatWindow threads', () => {
+  test('shows an accessible reply entry and focuses a new thread composer', () => {
+    const onOpenThread = jest.fn();
+    const { getByRole } = render(
+      <ChatWindow
+        chatId="test"
+        messages={[{ ...message, file_path: null, thread: {
+          reply_count: 0, unread_count: 0, last_reply_at: null, recent_authors: [],
+        } }]}
+        currentUserId={1}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+        onOpenThread={onOpenThread}
+      />,
+    );
+
+    fireEvent.click(getByRole('button', { name: 'Ответить' }));
+    expect(onOpenThread).toHaveBeenCalledWith(1, true);
+  });
+
+  test('opens an existing thread without forcing the keyboard', () => {
+    const onOpenThread = jest.fn();
+    const { getByRole } = render(
+      <ChatWindow
+        chatId="test"
+        messages={[{ ...message, file_path: null, thread: {
+          reply_count: 2,
+          unread_count: 1,
+          last_reply_at: '2026-08-09T10:05:00.000Z',
+          recent_authors: [{ id: 2, username: 'user' }],
+        } }]}
+        currentUserId={1}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+        onOpenThread={onOpenThread}
+      />,
+    );
+
+    fireEvent.click(getByRole('button', { name: /2 ответа/ }));
+    expect(onOpenThread).toHaveBeenCalledWith(1, false);
+  });
+});

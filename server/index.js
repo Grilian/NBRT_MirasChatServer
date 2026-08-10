@@ -24,6 +24,7 @@ const departmentsRoutes = require('./routes/departments');
 const groupsRoutes = require('./routes/groups');
 const tasksRoutes = require('./routes/tasks');
 const emojiRoutes = require('./routes/emoji');
+const notificationSettingsRoutes = require('./routes/notificationSettings');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
 const { isSharedChat, markRead, readCountsFor } = require('./services/readReceipts');
@@ -32,6 +33,11 @@ const { notifyNewMessage } = require('./services/push');
 const { canPostToGroup } = require('./services/chatPermissions');
 const { isValidChatImagePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
+const {
+  NotificationPolicyError,
+  resolveForceNotification,
+  shouldNotifyUser,
+} = require('./services/notificationPolicy');
 const calendarScheduler = require('./services/calendarScheduler');
 const {
   PollError,
@@ -45,6 +51,13 @@ const {
   closeExpiredPolls,
 } = require('./services/polls');
 const { listRecentChats } = require('./services/recentChats');
+const {
+  ThreadError,
+  rootForUser,
+  threadSummary,
+  hideThread,
+  softDeleteThread,
+} = require('./services/threads');
 
 const db = require('./db');
 
@@ -163,6 +176,7 @@ app.use('/api/departments', departmentsRoutes);
 app.use('/api/groups', verifyToken, groupsRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/emoji', emojiRoutes);
+app.use('/api/notification-settings', notificationSettingsRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
 // на каждый файл (как публичные CDN-ссылки на фото профиля у большинства
@@ -468,19 +482,20 @@ io.on('connection', (socket) => {
     }
 
     try {
+      const forceNotification = resolveForceNotification(senderId, data.forceNotification === true);
       // Сохраняем в локальную БД
       const stmt = db.prepare(`
         INSERT INTO messages
           (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip,
-           reply_to_id, forwarded_from_name, forwarded_from_chat, client_message_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           reply_to_id, forwarded_from_name, forwarded_from_chat, client_message_id, force_notification)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       // Сообщение и опрос — одна атомарная операция: нельзя оставить в ленте
       // текст вопроса без вариантов, если вставка опроса оборвалась.
       const persist = db.transaction(() => {
         const result = stmt.run(
           data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
-          finalReplyTo, forwardedFromName, forwardedFromChat, clientMessageId
+          finalReplyTo, forwardedFromName, forwardedFromChat, clientMessageId, forceNotification ? 1 : 0
         );
         const poll = pollDraft
           ? insertPoll(result.lastInsertRowid, data.chatId, senderId, pollDraft)
@@ -505,6 +520,7 @@ io.on('connection', (socket) => {
         file_height: fileHeight,
         status: 'sent',
         created_at: new Date().toISOString(),
+        force_notification: forceNotification,
         username: senderRow ? senderRow.username : undefined,
         display_name: senderRow ? senderRow.display_name : undefined,
         // Отметка «просмотрено» — только в каналах-объявлениях. Ставим ноль
@@ -588,12 +604,15 @@ io.on('connection', (socket) => {
         const group = db.prepare('SELECT name FROM chat_groups WHERE id = ?').get(data.chatId.slice('group_'.length));
         chatLabel = group ? group.name : undefined;
       }
-      for (const userId of offlineRecipients) {
+      for (const userId of offlineRecipients.filter(
+        (id) => shouldNotifyUser(id, data.chatId, forceNotification)
+      )) {
         notifyNewMessage(userId, {
           chatId: data.chatId,
           messageId: result.lastInsertRowid,
           senderName,
-          chatLabel
+          chatLabel,
+          forceNotification,
         });
       }
 
@@ -630,7 +649,176 @@ io.on('connection', (socket) => {
           message: e.message || 'Не удалось создать опрос',
         });
       }
-      respond({ ok: false, error: e instanceof PollError ? e.code : 'message_failed' });
+      respond({
+        ok: false,
+        error: e instanceof PollError || e instanceof NotificationPolicyError ? e.code : 'message_failed'
+      });
+    }
+  });
+
+  // Ответы ветки хранятся в той же таблице сообщений и используют те же
+  // изображения, опросы, идемпотентность и права записи. Отличается только
+  // thread_root_id и канал выдачи: в основную ленту ответ не дублируется.
+  socket.on('thread_message', (rawData, ack) => {
+    const data = rawData && typeof rawData === 'object' ? rawData : {};
+    const respond = (payload) => { if (typeof ack === 'function') ack(payload); };
+    const senderId = Number(socket.userId);
+    if (!senderId) { respond({ ok: false, error: 'auth_required' }); return; }
+
+    try {
+      const root = rootForUser(data.rootId, senderId);
+      const forceNotification = resolveForceNotification(senderId, data.forceNotification === true);
+      if (isFlooding(socket)) { respond({ ok: false, error: 'rate_limit' }); return; }
+      const groupMatch = String(root.chat_id).match(/^group_(\d+)$/);
+      if (groupMatch && !canPostToGroup(Number(groupMatch[1]), senderId)) {
+        respond({ ok: false, error: 'write_not_allowed' });
+        return;
+      }
+
+      const sender = db.prepare(
+        'SELECT username, display_name, avatar_path, muted FROM users WHERE id = ?'
+      ).get(senderId);
+      if (sender?.muted) {
+        const participants = participantsForChatId(root.chat_id);
+        let muteExempt = false;
+        if (participants && participants.length === 2) {
+          const otherId = participants.find((participantId) => participantId !== senderId);
+          const otherGroup = db.prepare(
+            'SELECT g.name FROM users u LEFT JOIN groups g ON g.id = u.group_id WHERE u.id = ?'
+          ).get(otherId);
+          muteExempt = !!(otherGroup && MUTE_EXEMPT_GROUPS.includes(otherGroup.name));
+        }
+        if (!muteExempt) { respond({ ok: false, error: 'muted' }); return; }
+      }
+
+      const clientMessageId = data.clientMessageId == null ? null : String(data.clientMessageId);
+      if (clientMessageId && !/^[a-zA-Z0-9_-]{16,100}$/.test(clientMessageId)) {
+        respond({ ok: false, error: 'invalid_client_message_id' });
+        return;
+      }
+      if (clientMessageId) {
+        const existing = db.prepare(
+          'SELECT id, created_at FROM messages WHERE sender_id = ? AND client_message_id = ?'
+        ).get(senderId, clientMessageId);
+        if (existing) {
+          respond({ ok: true, messageId: Number(existing.id), createdAt: existing.created_at, deduplicated: true });
+          return;
+        }
+      }
+
+      let pollDraft = null;
+      if (data.poll != null) pollDraft = normalizePollDraft(data.poll);
+      const rawText = typeof data.text === 'string' ? data.text.trim() : '';
+      const text = pollDraft
+        ? pollDraft.question
+        : rawText.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '');
+      const hasImage = !pollDraft && typeof data.filePath === 'string' && isValidChatImagePath(data.filePath);
+      const filePath = hasImage ? data.filePath : null;
+      const fileWidth = hasImage && Number.isFinite(Number(data.fileWidth)) ? Number(data.fileWidth) : null;
+      const fileHeight = hasImage && Number.isFinite(Number(data.fileHeight)) ? Number(data.fileHeight) : null;
+      if (!text && !filePath) { respond({ ok: false, error: 'empty_message' }); return; }
+
+      const requestedReply = Number(data.replyToId);
+      const replySource = Number.isInteger(requestedReply) && requestedReply > 0
+        ? db.prepare(`
+            SELECT id FROM messages
+            WHERE id = ? AND chat_id = ? AND (id = ? OR thread_root_id = ?)
+          `).get(requestedReply, root.chat_id, root.id, root.id)
+        : null;
+      const replyToId = replySource ? requestedReply : null;
+      const persist = db.transaction(() => {
+        const result = db.prepare(`
+          INSERT INTO messages
+            (chat_id, sender_id, text, file_path, file_width, file_height, status,
+             sender_ip, reply_to_id, client_message_id, thread_root_id, force_notification)
+          VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?)
+        `).run(root.chat_id, senderId, text, filePath, fileWidth, fileHeight,
+          clientIpOf(socket), replyToId, clientMessageId, root.id, forceNotification ? 1 : 0);
+        const poll = pollDraft ? insertPoll(result.lastInsertRowid, root.chat_id, senderId, pollDraft) : null;
+        return { result, pollId: poll ? poll.id : null };
+      });
+      const { result, pollId } = persist();
+      const message = {
+        id: Number(result.lastInsertRowid),
+        chat_id: root.chat_id,
+        thread_root_id: Number(root.id),
+        sender_id: senderId,
+        username: sender?.username,
+        display_name: sender?.display_name,
+        avatar_path: sender?.avatar_path,
+        text,
+        file_path: filePath,
+        file_width: fileWidth,
+        file_height: fileHeight,
+        status: 'sent',
+        created_at: new Date().toISOString(),
+        force_notification: forceNotification,
+        client_message_id: clientMessageId,
+        reply_to_id: replyToId,
+        ...(replyToId ? replyPreviewOf(replyToId) : {}),
+        ...(pollId ? { poll: serializePoll(pollId, senderId) } : {}),
+        reactions: [],
+      };
+
+      emitToChat(root.chat_id, 'thread_message', message, senderId);
+      emitToChat(root.chat_id, 'thread_summary_changed', {
+        root_id: Number(root.id),
+        summary: threadSummary(root.id, senderId),
+      }, senderId);
+      respond({ ok: true, messageId: message.id, createdAt: message.created_at, pollId });
+
+      // Уведомления ветки получают автор корня и уже участвовавшие в ней люди.
+      // Сам ответ при этом виден всем участникам исходного чата; подписка
+      // влияет только на отвлекающий сигнал, а не на доступ к данным.
+      const subscribedIds = db.prepare(`
+        SELECT DISTINCT sender_id FROM messages
+        WHERE (id = ? OR thread_root_id = ?) AND sender_id != ?
+      `).all(root.id, root.id, senderId)
+        .map((row) => Number(row.sender_id))
+        .filter((userId) => isParticipant(root.chat_id, userId))
+        .filter((userId) => !db.prepare(
+          'SELECT 1 FROM thread_hidden WHERE root_message_id = ? AND user_id = ?'
+        ).get(root.id, userId));
+
+      if (subscribedIds.length) {
+        io.to(subscribedIds.map((userId) => `user:${userId}`)).emit('thread_notification', {
+          ...message,
+          root_id: Number(root.id),
+        });
+      }
+
+      let chatLabel = 'Ветка';
+      if (root.chat_id === 'general') chatLabel = 'Ветка · Общий чат';
+      else if (groupMatch) {
+        const group = db.prepare('SELECT name FROM chat_groups WHERE id = ?').get(Number(groupMatch[1]));
+        if (group?.name) chatLabel = `Ветка · ${group.name}`;
+      }
+      const senderName = sender ? (sender.display_name || sender.username) : undefined;
+      for (const userId of subscribedIds
+        .filter((id) => !canReceiveInApp(id))
+        .filter((id) => shouldNotifyUser(id, root.chat_id, forceNotification))) {
+        notifyNewMessage(userId, {
+          chatId: root.chat_id,
+          messageId: message.id,
+          senderName,
+          chatLabel,
+          forceNotification,
+          requiredFeature: 'threads',
+        });
+      }
+
+      if (subscribedIds.some((userId) => isUserOnline(userId))) {
+        db.prepare("UPDATE messages SET status = 'delivered' WHERE id = ? AND status = 'sent'").run(message.id);
+        emitToChat(root.chat_id, 'message_status', { id: message.id, status: 'delivered' }, senderId);
+      }
+    } catch (error) {
+      console.error('Ошибка отправки в ветку:', error);
+      respond({
+        ok: false,
+        error: error instanceof ThreadError || error instanceof PollError || error instanceof NotificationPolicyError
+          ? error.code
+          : 'thread_message_failed',
+      });
     }
   });
 
@@ -837,11 +1025,15 @@ io.on('connection', (socket) => {
       const userId = Number(socket.userId);
       if (!userId) return;
 
-      const row = db.prepare('SELECT id, chat_id, sender_id, deleted FROM messages WHERE id = ?').get(id);
+      const row = db.prepare('SELECT id, chat_id, sender_id, deleted, thread_root_id FROM messages WHERE id = ?').get(id);
       if (!row || row.deleted) return;
       if (!isParticipant(row.chat_id, userId)) return;
 
       if (!forEveryone) {
+        if (!row.thread_root_id) {
+          hideThread(row.id, userId);
+          io.to('user:' + userId).emit('thread_hidden', { root_id: row.id, chat_id: row.chat_id });
+        }
         db.prepare('INSERT OR IGNORE INTO message_hidden (message_id, user_id, hidden_at) VALUES (?, ?, ?)')
           .run(row.id, userId, Date.now());
         // Только этому человеку и только в его сессии — остальных это не касается.
@@ -854,8 +1046,22 @@ io.on('connection', (socket) => {
         return;
       }
 
-      db.prepare('UPDATE messages SET deleted = 1 WHERE id = ?').run(id);
-      emitToChat(row.chat_id, 'message_deleted', { id, chat_id: row.chat_id }, row.sender_id);
+      if (!row.thread_root_id) {
+        softDeleteThread(row.id, userId);
+        emitToChat(row.chat_id, 'message_deleted', {
+          id, chat_id: row.chat_id, thread_deleted: true,
+        }, row.sender_id);
+      } else {
+        db.prepare('UPDATE messages SET deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?')
+          .run(Date.now(), userId, id);
+        emitToChat(row.chat_id, 'thread_message_deleted', {
+          id, root_id: Number(row.thread_root_id), chat_id: row.chat_id,
+        }, row.sender_id);
+        emitToChat(row.chat_id, 'thread_summary_changed', {
+          root_id: Number(row.thread_root_id),
+          summary: threadSummary(row.thread_root_id, userId),
+        }, row.sender_id);
+      }
     } catch (e) {
       console.error('Ошибка удаления сообщения:', e);
     }

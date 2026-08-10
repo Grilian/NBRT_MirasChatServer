@@ -8,6 +8,11 @@ const router = express.Router();
 router.get('/', verifyToken, (req, res) => {
   try {
     const currentUserId = req.userId;
+    const supportsThreads = String(req.get('x-miras-features') || '')
+      .split(',')
+      .map((item) => item.trim())
+      .includes('threads');
+    const threadVisibilityClause = supportsThreads ? '' : 'AND m.thread_root_id IS NULL';
 
     // Непрочитанное — это всё чужое, что не в статусе 'read'. Раньше здесь
     // стояло status = 'delivered', и это молча ломало счётчики в самом важном
@@ -38,10 +43,15 @@ router.get('/', verifyToken, (req, res) => {
           AND status != 'read'
           AND (deleted IS NULL OR deleted = 0)
           AND chat_id != 'general'
+          ${threadVisibilityClause}
           AND chat_id NOT LIKE 'group\\_%' ESCAPE '\\'
           AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+          AND NOT EXISTS (
+            SELECT 1 FROM thread_hidden th
+            WHERE th.root_message_id = COALESCE(m.thread_root_id, m.id) AND th.user_id = ?
+          )
       GROUP BY chat_id
-    `).all(currentUserId, currentUserId);
+    `).all(currentUserId, currentUserId, currentUserId);
 
     const sharedRows = db.prepare(`
       SELECT m.chat_id, COUNT(*) AS count
@@ -50,11 +60,16 @@ router.get('/', verifyToken, (req, res) => {
       WHERE
           m.sender_id != ?
           AND r.message_id IS NULL
+          ${threadVisibilityClause}
           AND (m.deleted IS NULL OR m.deleted = 0)
           AND (m.chat_id = 'general' OR m.chat_id LIKE 'group\\_%' ESCAPE '\\')
           AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+          AND NOT EXISTS (
+            SELECT 1 FROM thread_hidden th
+            WHERE th.root_message_id = COALESCE(m.thread_root_id, m.id) AND th.user_id = ?
+          )
       GROUP BY m.chat_id
-    `).all(currentUserId, currentUserId, currentUserId);
+    `).all(currentUserId, currentUserId, currentUserId, currentUserId);
 
     const unreadCounts = {};
     [...personalRows, ...sharedRows].forEach(row => {

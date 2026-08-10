@@ -20,6 +20,8 @@ interface UserInfoModalProps {
     birthDate?: string | null;
   };
   online?: boolean;
+  notificationsMuted?: boolean;
+  onToggleNotifications?: (muted: boolean) => Promise<void>;
   canModerate?: boolean;
   groups?: { id: number; name: string }[];
   /** Личная заметка о человеке — раньше правилась прямо в списке чатов
@@ -43,7 +45,7 @@ const icon = (...paths: string[]) => (
   </svg>
 );
 
-// Заложены под будущее, ни одна пока не подключена — см. setSoonNote.
+// Уведомления уже подключены; остальные действия пока остаются заделом под UI.
 const PLANNED_ACTIONS = [
   { key: 'call', label: 'Звонок', icon: icon('M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.6a2 2 0 0 1-.4 2.1L8.1 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.8.3 1.7.6 2.6.7a2 2 0 0 1 1.7 2Z') },
   { key: 'mute', label: 'Уведомления', icon: icon('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9', 'M13.7 21a2 2 0 0 1-3.4 0') },
@@ -53,7 +55,10 @@ const PLANNED_ACTIONS = [
 
 const FILE_TABS = ['Медиа', 'Файлы', 'Ссылки', 'Голосовые'];
 
-const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate, groups = [], comment, onUpdateComment, onClose }) => {
+const UserInfoModal: React.FC<UserInfoModalProps> = ({
+  user, online, notificationsMuted = false, onToggleNotifications,
+  canModerate, groups = [], comment, onUpdateComment, onClose,
+}) => {
   const name = nameFor(user);
   const coverUrl = resolveUploadUrl(user.avatarPath);
 
@@ -67,6 +72,7 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
   const [moderation, setModeration] = useState<ModerationInfo | null>(null);
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
   const [modError, setModError] = useState('');
+  const [notificationBusy, setNotificationBusy] = useState(false);
 
   const [editingComment, setEditingComment] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
@@ -87,6 +93,22 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
   const saveComment = () => {
     onUpdateComment?.(commentDraft.trim());
     setEditingComment(false);
+  };
+
+  const runProfileAction = async (key: string, label: string) => {
+    if (key !== 'mute' || !onToggleNotifications) {
+      setSoonNote(label);
+      return;
+    }
+    setNotificationBusy(true);
+    try {
+      await onToggleNotifications(!notificationsMuted);
+      setSoonNote(notificationsMuted ? 'Уведомления включены' : 'Уведомления отключены');
+    } catch (error: any) {
+      setSoonNote(error.response?.data?.error || 'Не удалось изменить уведомления');
+    } finally {
+      setNotificationBusy(false);
+    }
   };
 
   // Тишина/тип/группа/роль — не публичные поля, подгружаем отдельно и только
@@ -144,20 +166,25 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ user, online, canModerate
               <div className="user-info-name">{name}</div>
               <div className={'user-info-status' + (online ? ' is-online' : '')}>{online ? 'в сети' : 'не в сети'}</div>
 
-              {/* Кнопки заложены под будущее — звонки, уведомления, поиск.
-                  Ни одна не подключена, поэтому каждая честно об этом
-                  сообщает, а не молчит в ответ на нажатие. */}
+              {/* Уведомления работают; остальные кнопки пока показывают статус разработки. */}
               <div className="user-info-actions">
                 {PLANNED_ACTIONS.map((action) => (
                   <button
                     key={action.key}
                     type="button"
-                    className="user-info-action"
-                    title={action.label}
-                    aria-label={action.label}
-                    onClick={() => setSoonNote(action.label)}
+                    className={'user-info-action' + (action.key === 'mute' && notificationsMuted ? ' is-muted' : '')}
+                    title={action.key === 'mute'
+                      ? (notificationsMuted ? 'Включить уведомления' : 'Отключить уведомления')
+                      : action.label}
+                    aria-label={action.key === 'mute'
+                      ? (notificationsMuted ? 'Включить уведомления' : 'Отключить уведомления')
+                      : action.label}
+                    aria-pressed={action.key === 'mute' ? notificationsMuted : undefined}
+                    disabled={action.key === 'mute' && notificationBusy}
+                    onClick={() => runProfileAction(action.key, action.label)}
                   >
                     {action.icon}
+                    {action.key === 'mute' && notificationsMuted && <span className="notification-muted-slash" aria-hidden="true" />}
                   </button>
                 ))}
               </div>

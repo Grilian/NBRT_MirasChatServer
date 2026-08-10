@@ -10,6 +10,7 @@ import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
 import PollCard from './PollCard';
 import { Poll } from '../types/poll';
+import { ThreadSummary } from '../types/thread';
 
 interface Message {
   id: number;
@@ -40,6 +41,7 @@ interface Message {
   forwarded_from_chat?: string | null;
   reactions?: MessageReaction[];
   poll?: Poll;
+  thread?: ThreadSummary;
 }
 
 interface ChatWindowProps {
@@ -82,6 +84,7 @@ interface ChatWindowProps {
   onAddPollOption?: (pollId: number, text: string) => void;
   onStopPoll?: (pollId: number) => void;
   onRetryOutgoing?: (clientMessageId: string) => void;
+  onOpenThread?: (messageId: number, focusComposer: boolean) => void;
 }
 
 const LONG_PRESS_MS = 450;
@@ -93,6 +96,15 @@ const REACTION_FACES_MAX = 3;
 // за стрелку. Не «сколько влезет по ширине» — число фиксировано, чтобы ряд
 // не перестраивался от длины набора и не прыгал при открытии меню.
 const REACTIONS_IN_ROW = 6;
+
+function threadReplyLabel(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return `${count} ответов`;
+  if (mod10 === 1) return `${count} ответ`;
+  if (mod10 >= 2 && mod10 <= 4) return `${count} ответа`;
+  return `${count} ответов`;
+}
 
 /**
  * Одинаковые реакции складываем в один чип. Порядок групп — по первому
@@ -197,7 +209,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, onToggleReaction, onRemoveReaction,
-  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing,
+  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onOpenThread,
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
   // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
@@ -285,6 +297,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     initialPinRef.current = false;
     initialPinTimersRef.current.forEach(clearTimeout);
     initialPinTimersRef.current = [];
+    // Если позиционирование прервалось жестом, StrictMode-перемонтажом или
+    // закрытием соседней панели раньше 140 мс, лента не должна навсегда
+    // остаться visibility:hidden.
+    setInitialPositioning(false);
   }, []);
 
   const startInitialPin = useCallback(() => {
@@ -752,6 +768,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       },
     } : null;
 
+    const openThread: MenuItem | null = onOpenThread ? {
+      kind: 'action', key: 'thread', label: 'Ответить в ветке',
+      icon: icon('M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z', 'M8 9h8', 'M8 13h5'),
+      onClick: () => { setMenuFor(null); onOpenThread(msg.id, true); },
+    } : null;
+
     const edit: MenuItem | null = mine && !msg.poll ? {
       kind: 'action', key: 'edit', label: 'Изменить',
       icon: icon('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'),
@@ -827,11 +849,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     const order = isNativeMobile
       ? (mine
-        ? [stopPollItem, readInfo, editedInfo, reply, copy, task, forward, forwardSelf, edit, remove]
-        : [reply, copy, task, forward, forwardSelf, remove])
+        ? [stopPollItem, readInfo, editedInfo, openThread, reply, copy, task, forward, forwardSelf, edit, remove]
+        : [openThread, reply, copy, task, forward, forwardSelf, remove])
       : (mine
-        ? [stopPollItem, reply, edit, copy, task, forward, forwardSelf, remove, select, readInfo, editedInfo]
-        : [reply, copy, task, forward, forwardSelf, remove, select]);
+        ? [stopPollItem, openThread, reply, edit, copy, task, forward, forwardSelf, remove, select, readInfo, editedInfo]
+        : [openThread, reply, copy, task, forward, forwardSelf, remove, select]);
 
     return order.filter((item): item is MenuItem => item !== null);
   };
@@ -1084,6 +1106,43 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     спеке именно так, не просто счётчик). Клик открывает
                     детальный список, крестик снимает — он появляется только
                     там, где снимать вправе (своя реакция или своё сообщение). */}
+                {onOpenThread && !pendingDelivery && (
+                  <button
+                    type="button"
+                    className={'thread-link' + ((msg.thread?.unread_count || 0) > 0 ? ' has-unread' : '')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (selectMode) { toggleSelected(msg.id); return; }
+                      onOpenThread(msg.id, !msg.thread?.reply_count);
+                    }}
+                  >
+                    {!!msg.thread?.reply_count && (
+                      <span className="thread-link-avatars" aria-hidden="true">
+                        {msg.thread.recent_authors.slice(0, 2).map((author) => (
+                          <Avatar
+                            key={author.id}
+                            name={author.display_name || author.username}
+                            avatarPath={author.avatar_path}
+                            size="sm"
+                          />
+                        ))}
+                      </span>
+                    )}
+                    <span className="thread-link-copy">
+                      <strong>{msg.thread?.reply_count ? threadReplyLabel(msg.thread.reply_count) : 'Ответить'}</strong>
+                      {!!msg.thread?.last_reply_at && (
+                        <span>последний ответ в {formatMoscowTime(msg.thread.last_reply_at)}</span>
+                      )}
+                    </span>
+                    {!!msg.thread?.unread_count && (
+                      <span className="thread-link-unread">{msg.thread.unread_count} новых</span>
+                    )}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+                    </svg>
+                  </button>
+                )}
+
                 {!!msg.reactions?.length && (
                   <div className="msg-reactions">
                     {groupReactions(msg.reactions).map(({ emoji, list }) => {
