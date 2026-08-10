@@ -200,6 +200,22 @@ test('removed task participants receive a refresh event', async () => {
   assert.ok(emitted.some((item) => item.room === `user:${participantId}` && item.event === 'tasks_changed'));
 });
 
+test('client message ids are idempotent per sender', () => {
+  const senderId = createUser('queue_sender');
+  const otherSenderId = createUser('queue_other_sender');
+  const insert = db.prepare(`
+    INSERT INTO messages (chat_id, sender_id, text, client_message_id)
+    VALUES ('general', ?, 'queued', ?)
+  `);
+
+  insert.run(senderId, 'msg_queue_test_123456');
+  assert.throws(
+    () => insert.run(senderId, 'msg_queue_test_123456'),
+    /UNIQUE constraint failed/,
+  );
+  assert.doesNotThrow(() => insert.run(otherSenderId, 'msg_queue_test_123456'));
+});
+
 test('account deletion clears dependent records and transfers group ownership', () => {
   const deletedId = createUser('deleted_user');
   const survivorId = createUser('surviving_user');

@@ -61,6 +61,14 @@ import {
   onUiPrefsChanged,
   saveUiPrefs
 } from '../utils/uiPrefs';
+import {
+  OutgoingMessage,
+  OutgoingPayload,
+  createOutgoingMessage,
+  loadOutgoingQueue,
+  retryDelayMs,
+  saveOutgoingQueue,
+} from '../utils/outgoingQueue';
 
 interface User {
   id: number;
@@ -88,7 +96,16 @@ interface Message {
   username: string;
   display_name?: string | null;
   created_at: string;
-  status?: 'sent' | 'delivered' | 'read';
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  client_message_id?: string | null;
+  delivery_error?: string;
+  reply_to_id?: number | null;
+  reply_to_text?: string | null;
+  reply_to_file?: string | null;
+  reply_to_author?: string | null;
+  reply_to_deleted?: number | boolean | null;
+  forwarded_from_name?: string | null;
+  forwarded_from_chat?: string | null;
   /** Личная отметка о прочтении — единственный достоверный признак в общих чатах. */
   read_by_me?: number | boolean;
   edited_at?: string | null;
@@ -254,6 +271,10 @@ const Chat: React.FC = () => {
   // Собственный статус в рельсе: «Онлайн» показываем только при живом сокете —
   // иначе он врал бы при обрыве связи, когда сообщения уже никуда не уходят.
   const [socketConnected, setSocketConnected] = useState(false);
+  const [socketAuthenticated, setSocketAuthenticated] = useState(false);
+  const [connectionState, setConnectionState] = useState<'offline' | 'connecting' | 'server-unavailable' | 'connected'>(() => (
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'connecting'
+  ));
   const [users, setUsers] = useState<User[]>([]);
   const [directory, setDirectory] = useState<DirectoryUser[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
@@ -361,6 +382,16 @@ const Chat: React.FC = () => {
   const conversationVisible = windowFocused && conversationOpen;
 
   const currentUserId = Number(localStorage.getItem('userId'));
+  const [outgoingQueue, setOutgoingQueue] = useState<OutgoingMessage[]>(() => loadOutgoingQueue(currentUserId));
+  const outgoingQueueRef = useRef(outgoingQueue);
+  outgoingQueueRef.current = outgoingQueue;
+  const processingOutgoingRef = useRef(false);
+
+  // localStorage пишется синхронно: после добавления в очередь сообщение уже
+  // переживёт закрытие окна, падение renderer-процесса или выгрузку Android.
+  useEffect(() => {
+    saveOutgoingQueue(currentUserId, outgoingQueue);
+  }, [currentUserId, outgoingQueue]);
 
   // Живой снимок состояния для обработчика сокета — см. подробности там же.
   const liveRef = useRef({
@@ -664,11 +695,47 @@ const Chat: React.FC = () => {
     // На 'connect' (в т.ч. при переподключении после разрыва сети) —
     // заново объявляем себя онлайн и подтягиваем свежее состояние,
     // чтобы после реконнекта не остаться с протухшими данными.
-    newSocket.on('disconnect', () => setSocketConnected(false));
+    const markDisconnected = () => {
+      setSocketConnected(false);
+      setSocketAuthenticated(false);
+      setConnectionState(navigator.onLine === false ? 'offline' : 'connecting');
+    };
+    newSocket.on('disconnect', markDisconnected);
+    newSocket.on('connect_error', () => {
+      setSocketConnected(false);
+      setSocketAuthenticated(false);
+      setConnectionState(navigator.onLine === false ? 'offline' : 'server-unavailable');
+    });
+
+    const handleBrowserOffline = () => {
+      setSocketConnected(false);
+      setSocketAuthenticated(false);
+      setConnectionState('offline');
+    };
+    const handleBrowserOnline = () => {
+      setConnectionState('connecting');
+      newSocket.connect();
+    };
+    window.addEventListener('offline', handleBrowserOffline);
+    window.addEventListener('online', handleBrowserOnline);
 
     newSocket.on('connect', () => {
-      setSocketConnected(true);
-      newSocket.emit('user_online', localStorage.getItem('token'));
+      setConnectionState('connecting');
+      newSocket.timeout(10_000).emit(
+        'user_online',
+        localStorage.getItem('token'),
+        (timeoutError: Error | null, response?: { ok?: boolean }) => {
+          if (timeoutError || !response?.ok) {
+            setSocketConnected(false);
+            setSocketAuthenticated(false);
+            setConnectionState(navigator.onLine === false ? 'offline' : 'server-unavailable');
+            return;
+          }
+          setSocketConnected(true);
+          setSocketAuthenticated(true);
+          setConnectionState('connected');
+        },
+      );
 
       // Подтягиваем свой профиль целиком — сессии обычных пользователей не
       // истекают и не переиздаются, так что это единственный способ подобрать
@@ -957,6 +1024,8 @@ const Chat: React.FC = () => {
     return () => {
       Object.values(expiryTimers).forEach(clearTimeout);
       clearInterval(rosterRefreshInterval);
+      window.removeEventListener('offline', handleBrowserOffline);
+      window.removeEventListener('online', handleBrowserOnline);
       newSocket.disconnect();
     };
   }, [currentUserId, refetchUnread, pushToast, reloadEmojiCatalog]);
@@ -1033,6 +1102,15 @@ const Chat: React.FC = () => {
       const isMine = message.sender_id === currentUserId;
       const isActiveChat = !!chatId && chatId === liveActiveChat;
 
+      // Живое эхо — такое же подтверждение, как ack. Удаляем устойчивую
+      // локальную запись по сквозному id; числового server id до отправки у
+      // неё ещё не было, поэтому дедуп только по нему здесь недостаточен.
+      if (isMine && message.client_message_id) {
+        setOutgoingQueue((previous) => previous.filter((queued) => (
+          queued.clientMessageId !== message.client_message_id
+        )));
+      }
+
       // «Человек прямо сейчас это видит»: мало того, что чат открыт — окно
       // должно быть в фокусе, а сама переписка не закрыта настройками или
       // списком чатов. Свёрнутое в трей окно с открытым чатом раньше
@@ -1048,7 +1126,10 @@ const Chat: React.FC = () => {
       // просто пересоздавался с нуля — а на самом деле дублировалось само
       // событие, а не запись в БД.
       if (isActiveChat) {
-        setMessages(prev => prev.some(m => m.id === message.id) ? prev : [...prev, message]);
+        setMessages(prev => prev.some(m => (
+          m.id === message.id
+          || (!!message.client_message_id && m.client_message_id === message.client_message_id)
+        )) ? prev : [...prev, message]);
       }
 
       // Превью последнего сообщения в списке диалогов — обновляем сразу,
@@ -1420,9 +1501,97 @@ const Chat: React.FC = () => {
     });
   }, []);
 
+  const enqueueOutgoing = useCallback((payload: OutgoingPayload) => {
+    const item = createOutgoingMessage(currentUserId, payload);
+    setOutgoingQueue((previous) => {
+      const next = [...previous, item];
+      // Не ждём useEffect: к моменту возврата из обработчика кнопки запись уже
+      // находится на диске браузерного профиля.
+      saveOutgoingQueue(currentUserId, next);
+      return next;
+    });
+    return item;
+  }, [currentUserId]);
+
+  const flushOutgoingQueue = useCallback(() => {
+    if (!socket || !socket.connected || !socketAuthenticated || processingOutgoingRef.current) return;
+    const item = outgoingQueueRef.current.find((queued) => (
+      queued.state === 'pending' && queued.nextAttemptAt <= Date.now()
+    ));
+    if (!item) return;
+
+    processingOutgoingRef.current = true;
+    const attempt = item.attempts + 1;
+    setOutgoingQueue((previous) => previous.map((queued) => (
+      queued.clientMessageId === item.clientMessageId ? { ...queued, attempts: attempt } : queued
+    )));
+
+    socket.timeout(10_000).emit('chat_message', {
+      ...item.payload,
+      clientMessageId: item.clientMessageId,
+    }, (timeoutError: Error | null, response?: {
+      ok?: boolean;
+      error?: string;
+      messageId?: number;
+      createdAt?: string;
+    }) => {
+      processingOutgoingRef.current = false;
+
+      if (!timeoutError && response?.ok && response.messageId) {
+        // Эхо chat_message обычно приходит первым. Если оно потерялось вместе
+        // с сетью, ack всё равно превращает локальный пузырь в серверный.
+        if (liveRef.current.activeChat === item.payload.chatId) {
+          setMessages((previous) => previous.some((message) => message.id === response.messageId)
+            ? previous
+            : [...previous, {
+              id: response.messageId!,
+              chat_id: item.payload.chatId,
+              text: item.payload.text,
+              file_path: item.payload.filePath || null,
+              file_width: item.payload.fileWidth || null,
+              file_height: item.payload.fileHeight || null,
+              sender_id: currentUserId,
+              username: currentUsername,
+              display_name: currentDisplayName,
+              created_at: response.createdAt || item.createdAt,
+              status: 'sent',
+              client_message_id: item.clientMessageId,
+              reply_to_id: item.payload.replyToId || null,
+              forwarded_from_name: item.payload.forwardedFromName || null,
+              forwarded_from_chat: item.payload.forwardedFromChat || null,
+            }]);
+        }
+        setOutgoingQueue((previous) => previous.filter((queued) => queued.clientMessageId !== item.clientMessageId));
+        return;
+      }
+
+      const error = response?.error || (timeoutError ? 'timeout' : 'send_failed');
+      const permanent = new Set([
+        'auth_required', 'chat_forbidden', 'write_not_allowed', 'muted',
+        'empty_message', 'invalid_client_message_id',
+      ]).has(error);
+      setOutgoingQueue((previous) => previous.map((queued) => (
+        queued.clientMessageId !== item.clientMessageId
+          ? queued
+          : {
+            ...queued,
+            state: permanent ? 'failed' : 'pending',
+            lastError: error,
+            nextAttemptAt: permanent ? 0 : Date.now() + retryDelayMs(attempt),
+          }
+      )));
+    });
+  }, [socket, socketAuthenticated, currentUserId, currentUsername, currentDisplayName]);
+
+  useEffect(() => {
+    flushOutgoingQueue();
+    const timer = window.setInterval(flushOutgoingQueue, 1000);
+    return () => window.clearInterval(timer);
+  }, [flushOutgoingQueue, outgoingQueue]);
+
   const handleSendMessage = (text: string, image?: PendingImage) => {
-    if (socket && activeChat) {
-      socket.emit('chat_message', {
+    if (activeChat) {
+      enqueueOutgoing({
         chatId: activeChat,
         text,
         filePath: image?.file_path,
@@ -1430,7 +1599,7 @@ const Chat: React.FC = () => {
         fileHeight: image?.file_height,
         replyToId: replyingMessage?.id,
       });
-      socket.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
+      socket?.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
       setReplyingMessage(null);
     }
   };
@@ -1476,7 +1645,6 @@ const Chat: React.FC = () => {
   // от». Копией, а не ссылкой — исходное могут удалить, а пересланное должно
   // остаться (и наоборот: правка исходного пересланное не трогает).
   const forwardTo = (ids: number[], targetChatId: string, openTarget = true) => {
-    if (!socket) return;
     const sourceName = activeChatMeta?.name || '';
 
     // Порядок сохраняем по id: выделяли в произвольном порядке, а прийти
@@ -1486,12 +1654,12 @@ const Chat: React.FC = () => {
       .sort((a, b) => a.id - b.id);
 
     for (const msg of toSend) {
-      socket.emit('chat_message', {
+      enqueueOutgoing({
         chatId: targetChatId,
         text: msg.text,
-        filePath: msg.file_path,
-        fileWidth: msg.file_width,
-        fileHeight: msg.file_height,
+        filePath: msg.file_path || undefined,
+        fileWidth: msg.file_width || undefined,
+        fileHeight: msg.file_height || undefined,
         forwardedFromName: nameFor(msg),
         forwardedFromChat: sourceName,
       });
@@ -1839,6 +2007,43 @@ const Chat: React.FC = () => {
         }
       : null;
   })();
+
+  const serverClientIds = new Set(messages.map((message) => message.client_message_id).filter(Boolean));
+  const optimisticMessages: Message[] = outgoingQueue
+    .filter((item) => item.payload.chatId === activeChat && !serverClientIds.has(item.clientMessageId))
+    .map((item) => ({
+      id: item.temporaryId,
+      chat_id: item.payload.chatId,
+      text: item.payload.text,
+      file_path: item.payload.filePath || null,
+      file_width: item.payload.fileWidth || null,
+      file_height: item.payload.fileHeight || null,
+      sender_id: currentUserId,
+      username: currentUsername,
+      display_name: currentDisplayName,
+      created_at: item.createdAt,
+      status: item.state === 'failed' ? 'failed' : 'sending',
+      client_message_id: item.clientMessageId,
+      delivery_error: item.lastError,
+      reply_to_id: item.payload.replyToId || null,
+      reply_to_text: messages.find((message) => message.id === item.payload.replyToId)?.text || null,
+      reply_to_file: messages.find((message) => message.id === item.payload.replyToId)?.file_path || null,
+      reply_to_author: (() => {
+        const source = messages.find((message) => message.id === item.payload.replyToId);
+        return source ? nameFor(source) : null;
+      })(),
+      forwarded_from_name: item.payload.forwardedFromName || null,
+      forwarded_from_chat: item.payload.forwardedFromChat || null,
+    }));
+  const visibleMessages = [...messages, ...optimisticMessages];
+
+  const retryOutgoing = useCallback((clientMessageId: string) => {
+    setOutgoingQueue((previous) => previous.map((item) => (
+      item.clientMessageId === clientMessageId
+        ? { ...item, state: 'pending', attempts: 0, nextAttemptAt: 0, lastError: undefined }
+        : item
+    )));
+  }, []);
 
   // Раньше искали только среди контактов (allUsers) — окно профиля молча не
   // открывалось для человека из «Люди», которого ещё не добавили в чаты
@@ -2202,9 +2407,19 @@ const Chat: React.FC = () => {
             )}
           </div>
 
+          {connectionState !== 'connected' && (
+            <div className={`connection-banner is-${connectionState}`} role="status" aria-live="polite">
+              {connectionState === 'offline'
+                ? 'Нет интернета. Сообщения останутся в очереди.'
+                : connectionState === 'server-unavailable'
+                  ? 'Сервер недоступен. Повторное подключение…'
+                  : 'Соединение…'}
+            </div>
+          )}
+
           <ChatWindow
             chatId={activeChat}
-            messages={messages}
+            messages={visibleMessages}
             currentUserId={currentUserId}
             showAuthors={activeChat === GENERAL_CHAT_ID || activeChatMeta?.section === 'group'}
             onDeleteMessages={requestDelete}
@@ -2234,6 +2449,7 @@ const Chat: React.FC = () => {
             onVotePoll={handleVotePoll}
             onAddPollOption={handleAddPollOption}
             onStopPoll={handleStopPoll}
+            onRetryOutgoing={retryOutgoing}
           />
           {muted && (
             <div className="muted-banner">

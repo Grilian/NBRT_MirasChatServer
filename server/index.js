@@ -298,7 +298,7 @@ io.on('connection', (socket) => {
   // Раньше принимали userId прямо от клиента без проверки — любой мог
   // назваться чужим id и получать чужие личные сообщения через комнату
   // 'user:<id>'. Теперь клиент присылает свой JWT, а userId берём из него.
-  socket.on('user_online', (token) => {
+  socket.on('user_online', (token, ack) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_super_secret_key');
       const userId = decoded.id;
@@ -307,8 +307,10 @@ io.on('connection', (socket) => {
       socket.join('user:' + userId);
       io.emit('online_users', onlineUserIds());
       markPendingDelivered(userId);
+      if (typeof ack === 'function') ack({ ok: true, userId });
     } catch (e) {
       socket.emit('auth_error', { reason: 'invalid_token' });
+      if (typeof ack === 'function') ack({ ok: false, error: 'invalid_token' });
     }
   });
 
@@ -326,10 +328,39 @@ io.on('connection', (socket) => {
     const senderId = socket.userId;
     if (!senderId) { respond({ ok: false, error: 'auth_required' }); return; }
 
+    // Старые клиенты этого поля не присылают и продолжают работать. Для
+    // новых оно является ключом идемпотентности: повтор после потерянного ack
+    // должен подтвердить исходную запись, а не вставить вторую.
+    const clientMessageId = data.clientMessageId === undefined || data.clientMessageId === null
+      ? null
+      : String(data.clientMessageId);
+    if (clientMessageId && !/^[a-zA-Z0-9_-]{16,100}$/.test(clientMessageId)) {
+      respond({ ok: false, error: 'invalid_client_message_id' });
+      return;
+    }
+
     // Пишем только в чат, где отправитель реально участник — раньше это никак
     // не проверялось, и любой мог отправить сообщение в chat_<a>_<b> чужих
     // пользователей, просто зная их id.
     if (!isParticipant(data.chatId, senderId)) { respond({ ok: false, error: 'chat_forbidden' }); return; }
+
+    if (clientMessageId) {
+      const existing = db.prepare(`
+        SELECT id, created_at
+        FROM messages
+        WHERE sender_id = ? AND client_message_id = ?
+      `).get(senderId, clientMessageId);
+      if (existing) {
+        respond({
+          ok: true,
+          messageId: Number(existing.id),
+          clientMessageId,
+          createdAt: existing.created_at,
+          deduplicated: true,
+        });
+        return;
+      }
+    }
 
     // «Кто может писать» — единый механизм прав (services/chatPermissions.js).
     // Проверка обязательна здесь: дизейбл композера на клиенте только для
@@ -440,15 +471,15 @@ io.on('connection', (socket) => {
       const stmt = db.prepare(`
         INSERT INTO messages
           (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip,
-           reply_to_id, forwarded_from_name, forwarded_from_chat)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           reply_to_id, forwarded_from_name, forwarded_from_chat, client_message_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       // Сообщение и опрос — одна атомарная операция: нельзя оставить в ленте
       // текст вопроса без вариантов, если вставка опроса оборвалась.
       const persist = db.transaction(() => {
         const result = stmt.run(
           data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
-          finalReplyTo, forwardedFromName, forwardedFromChat
+          finalReplyTo, forwardedFromName, forwardedFromChat, clientMessageId
         );
         const poll = pollDraft
           ? insertPoll(result.lastInsertRowid, data.chatId, senderId, pollDraft)
@@ -479,6 +510,7 @@ io.on('connection', (socket) => {
         ...(finalReplyTo ? replyPreviewOf(finalReplyTo) : {}),
         forwarded_from_name: forwardedFromName,
         forwarded_from_chat: forwardedFromChat,
+        client_message_id: clientMessageId,
         ...(pollId ? { poll: serializePoll(pollId, senderId) } : {}),
       };
 
@@ -486,7 +518,13 @@ io.on('connection', (socket) => {
       // Подтверждаем сразу после атомарной записи и живой рассылки. Ошибка
       // вторичного пуш-уведомления не должна заставлять клиента повторно
       // создать уже существующий опрос.
-      respond({ ok: true, messageId: Number(result.lastInsertRowid), pollId });
+      respond({
+        ok: true,
+        messageId: Number(result.lastInsertRowid),
+        clientMessageId,
+        createdAt: message.created_at,
+        pollId,
+      });
 
       // Автоподписка: как только между двумя людьми реально пошли сообщения,
       // чат появляется в списке контактов у обеих сторон (не только у
@@ -558,6 +596,26 @@ io.on('connection', (socket) => {
         emitToChat(data.chatId, 'message_status', { id: result.lastInsertRowid, status: 'delivered' }, senderId);
       }
     } catch (e) {
+      // Две вкладки одного аккаунта могут одновременно восстановить одну и
+      // ту же локальную очередь. Уникальный индекс остановит вторую вставку;
+      // для клиента это успешный идемпотентный повтор, а не ошибка.
+      if (clientMessageId) {
+        const existing = db.prepare(`
+          SELECT id, created_at
+          FROM messages
+          WHERE sender_id = ? AND client_message_id = ?
+        `).get(senderId, clientMessageId);
+        if (existing) {
+          respond({
+            ok: true,
+            messageId: Number(existing.id),
+            clientMessageId,
+            createdAt: existing.created_at,
+            deduplicated: true,
+          });
+          return;
+        }
+      }
       console.error('Ошибка:', e);
       if (pollDraft) {
         socket.emit('poll_error', {

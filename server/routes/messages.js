@@ -187,7 +187,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
     const messages = useCursor
       ? db.prepare(`
           SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
-                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat,
+                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
                  rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
                  (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
@@ -203,7 +203,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
         `).all(req.userId, chatId, before, req.userId, limit)
       : db.prepare(`
           SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
-                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat,
+                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
                  rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
                  (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}

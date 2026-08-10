@@ -543,6 +543,21 @@ try {
   // Колонка уже есть
 }
 
+// Идентификатор назначает клиент до первой попытки отправки и хранит вместе
+// с сообщением в локальной очереди. Если сервер успел записать сообщение, но
+// подтверждение потерялось при обрыве сети, повтор с тем же id должен вернуть
+// уже существующую строку, а не создать дубликат.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN client_message_id TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_sender_client_id
+  ON messages(sender_id, client_message_id)
+  WHERE client_message_id IS NOT NULL
+`);
+
 // Миграция: группы, роли, режим тишины — управляются из панели супер-админа
 try {
   db.exec(`ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES groups(id)`);

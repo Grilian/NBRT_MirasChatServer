@@ -21,7 +21,9 @@ interface Message {
   username: string;
   display_name?: string | null;
   created_at: string;
-  status?: 'sent' | 'delivered' | 'read';
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  client_message_id?: string | null;
+  delivery_error?: string;
   edited_at?: string | null;
   deleted?: boolean | number;
   /** Когда прочитали — только в личной переписке (см. readReceipts.js). */
@@ -78,6 +80,7 @@ interface ChatWindowProps {
   onVotePoll?: (pollId: number, optionIds: number[]) => void;
   onAddPollOption?: (pollId: number, text: string) => void;
   onStopPoll?: (pollId: number) => void;
+  onRetryOutgoing?: (clientMessageId: string) => void;
 }
 
 const LONG_PRESS_MS = 450;
@@ -115,7 +118,28 @@ type MenuItem =
 // больше пяти минут считаем новым блоком, даже если писал тот же человек.
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
-function TickIcon({ status }: { status: 'sent' | 'delivered' | 'read' }) {
+function TickIcon({ status, onRetry }: {
+  status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  onRetry?: () => void;
+}) {
+  if (status === 'sending') {
+    return (
+      <span className="ticks is-sending" title="Отправляется" aria-label="Отправляется">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" />
+        </svg>
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <button type="button" className="ticks is-failed" title="Не отправлено. Нажмите, чтобы повторить" onClick={onRetry}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+          <circle cx="12" cy="12" r="9" /><path d="M12 7v6" /><path d="M12 17h.01" />
+        </svg>
+      </button>
+    );
+  }
   const doubleTick = status === 'delivered' || status === 'read';
   return (
     <span className={'ticks' + (status === 'read' ? ' read' : '')}>
@@ -172,7 +196,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, onToggleReaction, onRemoveReaction,
-  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll,
+  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing,
 }) => {
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
   // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
@@ -865,7 +889,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           // Отмечать можно любое сообщение: своё удаляется как раньше, чужое —
           // как минимум скрывается у себя. Хватит ли прав убрать его у всех,
           // решают диалог удаления и сервер, а не доступность галочки.
-          const selectable = true;
+          const pendingDelivery = msg.status === 'sending' || msg.status === 'failed';
+          const selectable = !pendingDelivery;
 
           const isSelected = selectedIds.has(msg.id);
           // Картинка без подписи, у которой прозрачность реальная (не просто
@@ -885,6 +910,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             isEditing ? 'is-editing' : '',
             highlightedId === msg.id ? 'is-highlighted' : '',
             msg.poll ? 'has-poll' : '',
+            pendingDelivery ? 'is-pending-delivery' : '',
           ].filter(Boolean).join(' ');
 
           return (
@@ -894,11 +920,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 data-msg-id={msg.id}
                 className={className}
                 onClick={selectMode && selectable ? () => toggleSelected(msg.id) : undefined}
-                onContextMenu={!selectMode ? (e) => handleContextMenu(e, msg) : undefined}
+                onContextMenu={!selectMode && !pendingDelivery ? (e) => handleContextMenu(e, msg) : undefined}
                 // Жест продолжается и после входа в режим выделения — иначе
                 // палец, доехав до второго сообщения, терял бы обработчик.
-                onTouchStart={(e) => handleTouchStart(e, msg)}
-                onTouchEnd={(e) => handleTouchEnd(e, msg)}
+                onTouchStart={!pendingDelivery ? (e) => handleTouchStart(e, msg) : undefined}
+                onTouchEnd={!pendingDelivery ? (e) => handleTouchEnd(e, msg) : undefined}
                 onTouchCancel={handleTouchCancel}
                 onTouchMove={handleTouchMove}
               >
@@ -982,7 +1008,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         </span>
                       )}
                       <span className="bubble-time">{formatMoscowTime(msg.created_at)}</span>
-                      {mine && <TickIcon status={msg.status || 'sent'} />}
+                      {mine && (
+                        <TickIcon
+                          status={msg.status || 'sent'}
+                          onRetry={msg.client_message_id && onRetryOutgoing
+                            ? () => onRetryOutgoing(msg.client_message_id!)
+                            : undefined}
+                        />
+                      )}
                     </span>
                 </div>
 

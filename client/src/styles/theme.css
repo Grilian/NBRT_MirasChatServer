@@ -556,6 +556,16 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .conv-title .status.is-offline { color: var(--ink-muted); }
 .conv-title .status.is-broadcast { color: var(--ink-muted); }
 .conv-title .status.is-typing { color: var(--accent); }
+.connection-banner {
+  flex: none; padding: 4px 12px; text-align: center; font-size: 12.5px; font-weight: 500;
+  color: var(--ink-muted); background: color-mix(in srgb, var(--accent) 10%, var(--sidebar));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+}
+.connection-banner.is-offline,
+.connection-banner.is-server-unavailable {
+  color: var(--unread); background: color-mix(in srgb, var(--unread) 10%, var(--sidebar));
+  border-bottom-color: color-mix(in srgb, var(--unread) 24%, var(--line));
+}
 
 /* Три точки «печатает…» рядом с текстом в шапке */
 .typing-dots { display: inline-flex; align-items: flex-end; gap: 2.5px; padding-bottom: 2px; }
@@ -782,8 +792,11 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 @media (prefers-reduced-motion: reduce) {
   .msg.is-highlighted .bubble { animation: none; box-shadow: 0 0 0 2px var(--accent); }
 }
-.bubble-meta .ticks { display: inline-flex; }
+.bubble-meta .ticks { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: inherit; }
 .bubble-meta .ticks.read { color: var(--tick-read); }
+.bubble-meta .ticks.is-sending { opacity: .72; }
+.bubble-meta .ticks.is-failed { color: var(--unread); cursor: pointer; }
+.msg.is-pending-delivery .bubble { opacity: .78; }
 
 .bubble-editing { padding: 3px; background: none !important; box-shadow: none; }
 .bubble-edit-input {
