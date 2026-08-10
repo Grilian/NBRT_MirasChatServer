@@ -610,6 +610,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('typing', (data) => {
+    if (!data || typeof data !== 'object') return;
     broadcastToChat(socket, data.chatId, 'typing', {
       chatId: data.chatId,
       userId: data.userId,
@@ -618,6 +619,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('stop_typing', (data) => {
+    if (!data || typeof data !== 'object') return;
     broadcastToChat(socket, data.chatId, 'stop_typing', {
       chatId: data.chatId,
       userId: data.userId
@@ -630,7 +632,8 @@ io.on('connection', (socket) => {
   // сообщения (клиент их фильтрует, но полагаться на это нельзя). Теперь
   // сужаем апдейт до чата, в котором сокет реально участник, и только до
   // чужих сообщений в нём.
-  socket.on('message_read', ({ chatId, messageIds }) => {
+  socket.on('message_read', (data) => {
+    const { chatId, messageIds } = data && typeof data === 'object' ? data : {};
     const userId = socket.userId;
     if (!userId || !chatId) return;
     if (!Array.isArray(messageIds) || messageIds.length === 0) return;
@@ -720,8 +723,9 @@ io.on('connection', (socket) => {
   // Редактировать/удалить можно только своё сообщение — проверяем по
   // фактическому sender_id в БД, а не по тому, что прислал клиент (в отличие
   // от chat_message/senderId, здесь это разрушающее действие над чужими данными).
-  socket.on('message_edit', ({ id, text }) => {
+  socket.on('message_edit', (data) => {
     try {
+      const { id, text } = data && typeof data === 'object' ? data : {};
       const row = db.prepare(`
         SELECT m.chat_id, m.sender_id, m.deleted,
                EXISTS(SELECT 1 FROM polls p WHERE p.message_id = m.id) AS is_poll
@@ -734,6 +738,7 @@ io.on('connection', (socket) => {
 
       const trimmed = String(text || '').trim();
       if (!trimmed) return;
+      if (trimmed.length > MAX_MESSAGE_LENGTH) return;
 
       const editedAt = new Date().toISOString();
       db.prepare('UPDATE messages SET text = ?, edited_at = ? WHERE id = ?').run(trimmed, editedAt, id);
@@ -761,8 +766,9 @@ io.on('connection', (socket) => {
   // собеседник ровно один, и это симметрично), а в группе только владельцу
   // группы и орг-администрации: иначе любой из полусотни участников мог бы
   // стереть чужую реплику у всех разом.
-  socket.on('message_delete', ({ id, forEveryone }) => {
+  socket.on('message_delete', (data) => {
     try {
+      const { id, forEveryone } = data && typeof data === 'object' ? data : {};
       const userId = Number(socket.userId);
       if (!userId) return;
 
@@ -793,8 +799,9 @@ io.on('connection', (socket) => {
   // Поставить/сменить свою реакцию. Замена прежней — на уровне схемы
   // (PRIMARY KEY на паре message+user), отдельной проверки «уже ставил» не
   // нужно. Повторный клик по той же реакции снимает её — как в Telegram.
-  socket.on('reaction_set', ({ messageId, emoji }) => {
+  socket.on('reaction_set', (data) => {
     try {
+      const { messageId, emoji } = data && typeof data === 'object' ? data : {};
       const userId = Number(socket.userId);
       if (!userId || !isValidEmoji(emoji)) return;
 
@@ -819,8 +826,9 @@ io.on('connection', (socket) => {
   // Снять реакцию. Свою — всегда; чужую — только автор сообщения и только под
   // своим: это про «уберите это из-под моей реплики», а не про модерацию чужих
   // реакций где угодно.
-  socket.on('reaction_remove', ({ messageId, userId: targetUserId }) => {
+  socket.on('reaction_remove', (data) => {
     try {
+      const { messageId, userId: targetUserId } = data && typeof data === 'object' ? data : {};
       const userId = Number(socket.userId);
       if (!userId) return;
 

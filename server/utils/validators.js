@@ -44,6 +44,10 @@ function isValidBirthDate(value) {
   if (typeof value !== 'string' || !BIRTH_DATE_RE.test(value)) return false;
   const date = new Date(value + 'T00:00:00Z');
   if (Number.isNaN(date.getTime())) return false;
+  // Date нормализует несуществующие даты (например, 2025-02-31 превращает
+  // в март). Сверяем результат обратно со входом, чтобы такие значения не
+  // попадали в профиль и календарь дней рождения.
+  if (date.toISOString().slice(0, 10) !== value) return false;
   const year = date.getUTCFullYear();
   return year >= 1900 && date.getTime() <= Date.now();
 }

@@ -76,6 +76,19 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     comments_received: db.prepare('SELECT * FROM user_comments WHERE target_user_id = ?').all(id),
     contacts_of: db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(id),
     contacted_by: db.prepare('SELECT * FROM contacts WHERE contact_user_id = ?').all(id),
+    device_tokens: db.prepare('SELECT * FROM device_tokens WHERE user_id = ?').all(id),
+    app_versions: db.prepare('SELECT * FROM user_app_versions WHERE user_id = ?').all(id),
+    calendar_events: db.prepare('SELECT * FROM calendar_events WHERE owner_id = ?').all(id),
+    calendar_invitations: db.prepare('SELECT * FROM calendar_event_guests WHERE user_id = ?').all(id),
+    tasks_created: db.prepare('SELECT * FROM tasks WHERE created_by = ?').all(id),
+    task_participation: db.prepare('SELECT * FROM task_participants WHERE user_id = ?').all(id),
+    chat_groups_owned: db.prepare('SELECT * FROM chat_groups WHERE created_by = ?').all(id),
+    chat_group_membership: db.prepare('SELECT * FROM chat_group_members WHERE user_id = ?').all(id),
+    message_reads: db.prepare('SELECT * FROM message_reads WHERE user_id = ?').all(id),
+    message_hidden: db.prepare('SELECT * FROM message_hidden WHERE user_id = ?').all(id),
+    message_reactions: db.prepare('SELECT * FROM message_reactions WHERE user_id = ?').all(id),
+    poll_options_created: db.prepare('SELECT * FROM poll_options WHERE created_by = ?').all(id),
+    poll_votes_cast: db.prepare('SELECT * FROM poll_votes WHERE user_id = ?').all(id),
   };
 
   fs.mkdirSync(BACKUPS_DIR, { recursive: true });
@@ -88,6 +101,9 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     // опросы. Внешние ключи на продовой БД могут быть выключены, поэтому на
     // каскад не полагаемся.
     db.prepare('DELETE FROM poll_votes WHERE user_id = ?').run(id);
+    // Вариант, добавленный участником в чужой опрос, тоже ссылается на него.
+    // Голоса за этот вариант уйдут каскадом вместе с ним.
+    db.prepare('DELETE FROM poll_options WHERE created_by = ?').run(id);
     if (pollIds.length) {
       const placeholders = pollIds.map(() => '?').join(',');
       db.prepare(`DELETE FROM poll_votes WHERE poll_id IN (${placeholders})`).run(...pollIds);
@@ -97,6 +113,39 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     if (relatedChatIds.length) {
       db.prepare(`DELETE FROM messages WHERE chat_id IN (${relatedChatIds.map(() => '?').join(',')})`).run(...relatedChatIds);
     }
+
+    // В группах с другими участниками передаём владение следующему участнику,
+    // чтобы удаление аккаунта не уничтожало общий чат. Пустую группу удаляем.
+    const ownedGroups = db.prepare('SELECT id FROM chat_groups WHERE created_by = ?').all(id);
+    for (const group of ownedGroups) {
+      const replacement = db.prepare(`
+        SELECT user_id FROM chat_group_members
+        WHERE chat_group_id = ? AND user_id != ?
+        ORDER BY joined_at, id LIMIT 1
+      `).get(group.id, id);
+      if (replacement) {
+        db.prepare('UPDATE chat_groups SET created_by = ? WHERE id = ?').run(replacement.user_id, group.id);
+        db.prepare("UPDATE chat_group_members SET role = 'owner' WHERE chat_group_id = ? AND user_id = ?")
+          .run(group.id, replacement.user_id);
+      } else {
+        const chatId = `group_${group.id}`;
+        db.prepare('DELETE FROM messages WHERE chat_id = ?').run(chatId);
+        db.prepare('DELETE FROM favorites WHERE chat_id = ?').run(chatId);
+        db.prepare('DELETE FROM chat_groups WHERE id = ?').run(group.id);
+      }
+    }
+
+    db.prepare('DELETE FROM calendar_event_guests WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM calendar_events WHERE owner_id = ?').run(id);
+    db.prepare('DELETE FROM task_participants WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM tasks WHERE created_by = ?').run(id);
+    db.prepare('DELETE FROM message_reads WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM message_hidden WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM message_reactions WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM chat_group_writers WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM chat_group_members WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM device_tokens WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM user_app_versions WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM messages WHERE sender_id = ?').run(id);
     db.prepare('DELETE FROM favorites WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM user_comments WHERE user_id = ? OR target_user_id = ?').run(id, id);

@@ -269,11 +269,11 @@ router.put('/events/:id', verifyToken, (req, res) => {
     const event = parsed.value;
     db.prepare(`
       UPDATE calendar_events
-      SET title = ?, description = ?, location = ?, starts_at = ?, ends_at = ?,
+      SET scope_kind = ?, scope_id = ?, title = ?, description = ?, location = ?, starts_at = ?, ends_at = ?,
           all_day = ?, color = ?, recurrence = ?, is_task = ?, updated_at = ?
       WHERE id = ?
     `).run(
-      event.title, event.description, event.location, event.starts_at, event.ends_at,
+      event.scope_kind, event.scope_id, event.title, event.description, event.location, event.starts_at, event.ends_at,
       event.all_day, event.color, event.recurrence, event.is_task, Date.now(), id
     );
 

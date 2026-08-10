@@ -53,17 +53,28 @@ function loginRateLimit(req, res, next) {
   const now = Date.now();
   const entry = loginAttempts.get(ip);
 
-  if (!entry || now - entry.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
-    loginAttempts.set(ip, { count: 1, firstAttemptAt: now });
-    return next();
+  if (entry && now - entry.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
+    loginAttempts.delete(ip);
   }
 
-  if (entry.count >= RATE_LIMIT_MAX_ATTEMPTS) {
+  const current = loginAttempts.get(ip);
+  if (current && current.count >= RATE_LIMIT_MAX_ATTEMPTS) {
     return res.status(429).json({ error: 'Слишком много попыток входа, попробуйте позже' });
   }
 
-  entry.count += 1;
+  req.loginRateLimitKey = ip;
   next();
+}
+
+function recordLoginFailure(req) {
+  const key = req.loginRateLimitKey || 'unknown';
+  const now = Date.now();
+  const entry = loginAttempts.get(key);
+  if (!entry || now - entry.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
+    loginAttempts.set(key, { count: 1, firstAttemptAt: now });
+  } else {
+    entry.count += 1;
+  }
 }
 
 router.post('/login', loginRateLimit, (req, res) => {
@@ -74,8 +85,11 @@ router.post('/login', loginRateLimit, (req, res) => {
     const admin = db.prepare('SELECT * FROM super_admins WHERE username = ?').get(username);
 
     if (!admin || !bcrypt.compareSync(password, admin.password)) {
+      recordLoginFailure(req);
       return res.status(401).json({ error: 'Неверный логин или пароль' });
     }
+
+    loginAttempts.delete(req.loginRateLimitKey);
 
     const token = jwt.sign(
       { id: admin.id, role: 'superadmin', username: admin.username },
@@ -212,10 +226,11 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
+    let nextUsername = null;
     // Логин — только у супер-админа (не входит в общую "модерацию", доступную
     // и с ролью "Администратор" из обычного клиента).
     if (req.body.username !== undefined) {
-      const nextUsername = String(req.body.username).trim();
+      nextUsername = String(req.body.username).trim();
       if (isReservedLogin(nextUsername) || !isValidLogin(nextUsername)) {
         return res.status(400).json({ error: 'Логин: 5-32 символов, латиница, цифры и подчёркивание, должен начинаться с буквы' });
       }
@@ -223,16 +238,23 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
       const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?').get(nextUsername, id);
       if (existing) return res.status(400).json({ error: 'Это имя уже занято' });
 
-      db.prepare('UPDATE users SET username = ? WHERE id = ?').run(nextUsername, id);
     }
 
-    const updated = applyModeration(id, {
-      group_id: req.body.group_id,
-      role: req.body.role,
-      account_type: req.body.account_type,
-      muted: req.body.muted,
-      department_id: req.body.department_id,
+    // Имя и поля модерации — один запрос пользователя. Если одно из полей
+    // неверно, ни одно другое не должно успеть сохраниться.
+    const saveUser = db.transaction(() => {
+      if (nextUsername !== null) {
+        db.prepare('UPDATE users SET username = ? WHERE id = ?').run(nextUsername, id);
+      }
+      return applyModeration(id, {
+        group_id: req.body.group_id,
+        role: req.body.role,
+        account_type: req.body.account_type,
+        muted: req.body.muted,
+        department_id: req.body.department_id,
+      });
     });
+    const updated = saveUser();
 
     notifyModerated(req.app.get('io'), updated);
 

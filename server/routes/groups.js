@@ -160,26 +160,33 @@ router.put('/:id', verifyToken, requireMember, requireOwner, (req, res) => {
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Название группы обязательно' });
 
-    if (req.body.announcements_only !== undefined) {
-      db.prepare('UPDATE chat_groups SET name = ?, announcements_only = ? WHERE id = ?')
-        .run(name, req.body.announcements_only ? 1 : 0, req.groupId);
-    } else {
-      db.prepare('UPDATE chat_groups SET name = ? WHERE id = ?').run(name, req.groupId);
+    // Сначала валидируем всё тело. Раньше имя/режим объявлений успевали
+    // сохраниться, а затем неверная write_policy возвращала 400 — клиент видел
+    // ошибку, хотя половина запроса уже применялась.
+    if (req.body.write_policy !== undefined && !isWritePolicy(req.body.write_policy)) {
+      return res.status(400).json({ error: 'Неизвестная политика записи' });
     }
 
-    // Политика — тоже необязательное поле: старый клиент, присылающий одно
-    // название, не должен молча сбрасывать права на «всем можно».
-    if (req.body.write_policy !== undefined) {
-      if (!isWritePolicy(req.body.write_policy)) {
-        return res.status(400).json({ error: 'Неизвестная политика записи' });
+    const saveGroup = db.transaction(() => {
+      if (req.body.announcements_only !== undefined) {
+        db.prepare('UPDATE chat_groups SET name = ?, announcements_only = ? WHERE id = ?')
+          .run(name, req.body.announcements_only ? 1 : 0, req.groupId);
+      } else {
+        db.prepare('UPDATE chat_groups SET name = ? WHERE id = ?').run(name, req.groupId);
       }
-      saveWriteSettings(
-        req.groupId,
-        req.body.write_policy,
-        Array.isArray(req.body.write_user_ids) ? req.body.write_user_ids.map(Number) : [],
-        Array.isArray(req.body.write_department_ids) ? req.body.write_department_ids.map(Number) : [],
-      );
-    }
+
+      // Политика — тоже необязательное поле: старый клиент, присылающий одно
+      // название, не должен молча сбрасывать права на «всем можно».
+      if (req.body.write_policy !== undefined) {
+        saveWriteSettings(
+          req.groupId,
+          req.body.write_policy,
+          Array.isArray(req.body.write_user_ids) ? req.body.write_user_ids.map(Number) : [],
+          Array.isArray(req.body.write_department_ids) ? req.body.write_department_ids.map(Number) : [],
+        );
+      }
+    });
+    saveGroup();
 
     const summary = groupSummary(req.groupId);
     const io = req.app.get('io');

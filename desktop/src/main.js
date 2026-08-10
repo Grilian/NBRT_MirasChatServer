@@ -549,9 +549,10 @@ ipcMain.on('window:focus', () => {
 // процесса таких ограничений нет.
 const liveNotifications = new Map();
 
-ipcMain.on('notify:show', (event, { title, body, tag }) => {
+ipcMain.on('notify:show', (event, options) => {
   if (!Notification.isSupported()) return;
   try {
+    const { title, body, tag } = options && typeof options === 'object' ? options : {};
     // Предыдущее уведомление того же чата закрываем сами: иначе на одно
     // сообщение в шторке копится по карточке на каждое сообщение.
     liveNotifications.get(tag)?.close();

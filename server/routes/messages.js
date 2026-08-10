@@ -149,7 +149,10 @@ router.get('/:chatId', verifyToken, (req, res) => {
       return res.status(403).json({ error: 'Нет доступа к этому чату' });
     }
 
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isInteger(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 100)
+      : 50;
 
     // Постраничная подгрузка "вверх" идёт по id последнего известного клиенту
     // сообщения, а не по offset. С offset докрутка истории разъезжалась:
@@ -158,8 +161,9 @@ router.get('/:chatId', verifyToken, (req, res) => {
     // перепрыгивала через непоказанное. Курсор по id от таких сдвигов не
     // зависит. offset ещё принимаем — на нём сидят уже собранные мобильные
     // сборки, которые обновляются не одновременно с сервером.
-    const before = parseInt(req.query.before);
-    const offset = parseInt(req.query.offset) || 0;
+    const before = Number.parseInt(req.query.before, 10);
+    const requestedOffset = Number.parseInt(req.query.offset, 10);
+    const offset = Number.isInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
     const useCursor = Number.isInteger(before);
 
     // ORDER BY id, а не created_at: у сообщений, записанных в одну секунду,

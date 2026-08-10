@@ -162,11 +162,15 @@ router.put('/:id', verifyToken, (req, res) => {
       db.prepare('SELECT user_id FROM task_participants WHERE task_id = ?').all(id).map((r) => r.user_id)
     );
     const nextParticipants = parsed.participantIds.filter((pid) => pid !== req.userId);
+    const nextParticipantSet = new Set(nextParticipants);
+    const removedParticipants = [...alreadyIn].filter((pid) => !nextParticipantSet.has(pid));
     replaceParticipants(id, nextParticipants);
 
     const saved = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     notifyTaskCreated(req.app.get('io'), saved, nextParticipants.filter((pid) => !alreadyIn.has(pid)));
-    notifyTasksChanged(req.app.get('io'), id, saved.created_by);
+    // Удалённые участники уже отсутствуют в таблице, но их открытый клиент
+    // тоже должен перечитать список и убрать ставшую невидимой задачу.
+    notifyTasksChanged(req.app.get('io'), id, saved.created_by, removedParticipants);
 
     res.json(serializeTask(saved, req.userId));
   } catch (e) {

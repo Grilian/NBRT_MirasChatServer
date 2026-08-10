@@ -75,7 +75,10 @@ router.post('/register', (req, res) => {
 router.post('/login', (req, res) => {
   try {
     const { username, password } = req.body;
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    // Регистрация и переименование считают логины без учёта регистра. Вход
+    // должен следовать тому же правилу, иначе сохранённый Alice нельзя было
+    // открыть как alice, хотя завести отдельный alice база уже не позволяла.
+    const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
 
     if (!user) {
       return res.status(401).json({ error: 'Неверный логин или пароль' });
