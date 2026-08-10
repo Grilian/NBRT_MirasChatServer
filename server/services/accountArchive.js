@@ -72,6 +72,7 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     poll_options: pollOptions,
     poll_votes: pollVotes,
     favorites: db.prepare('SELECT * FROM favorites WHERE user_id = ?').all(id),
+    recent_chats: db.prepare('SELECT * FROM chat_recent_openings WHERE user_id = ?').all(id),
     comments_made: db.prepare('SELECT * FROM user_comments WHERE user_id = ?').all(id),
     comments_received: db.prepare('SELECT * FROM user_comments WHERE target_user_id = ?').all(id),
     contacts_of: db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(id),
@@ -148,6 +149,10 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     db.prepare('DELETE FROM user_app_versions WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM messages WHERE sender_id = ?').run(id);
     db.prepare('DELETE FROM favorites WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM chat_recent_openings WHERE user_id = ?').run(id);
+    if (relatedChatIds.length) {
+      db.prepare(`DELETE FROM chat_recent_openings WHERE chat_id IN (${relatedChatIds.map(() => '?').join(',')})`).run(...relatedChatIds);
+    }
     db.prepare('DELETE FROM user_comments WHERE user_id = ? OR target_user_id = ?').run(id, id);
     db.prepare('DELETE FROM contacts WHERE user_id = ? OR contact_user_id = ?').run(id, id);
     db.prepare('DELETE FROM users WHERE id = ?').run(id);

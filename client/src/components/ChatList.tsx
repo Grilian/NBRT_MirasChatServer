@@ -7,7 +7,7 @@ import WebDownloadLinks from './WebDownloadLinks';
 
 export type ChatSection = 'general' | 'staff' | 'group' | 'self';
 
-interface Chat {
+export interface Chat {
   id: string;
   name: string;
   section: ChatSection;
@@ -40,6 +40,7 @@ interface ChatListProps {
   /** Каталог кастомных смайликов — превью тоже показывает текст сообщения. */
   customEmoji?: CustomEmojiMap;
   chats: Chat[];
+  recentChats: Chat[];
   activeChat: string | null;
   onSelectChat: (chatId: string) => void;
   onOpenDirectory: () => void;
@@ -90,12 +91,16 @@ function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOp
 }
 
 const ChatList: React.FC<ChatListProps> = ({
-  chats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
+  chats, recentChats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite,
   onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings,
   resizeHandle,
   selfName, selfAvatarPath, statusPreset, statusCustom, onOpenStatus, customEmoji = {},
 }) => {
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const recentStripRef = React.useRef<HTMLDivElement>(null);
+  const [searchFocused, setSearchFocused] = React.useState(false);
+  const [mobileSearchCollapsed, setMobileSearchCollapsed] = React.useState(false);
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
   const ownStatus = describeStatus(statusPreset, statusCustom);
   // Ищем и по комментарию к имени — он больше не часть name (см. row-comment).
@@ -108,9 +113,36 @@ const ChatList: React.FC<ChatListProps> = ({
 
   let lastGroupLabel: string | null = null;
 
+  const isNarrowScreen = () => window.matchMedia('(max-width: 760px)').matches;
+
+  const handleRosterScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    if (!isNarrowScreen() || searchQuery) return;
+    const shouldCollapse = event.currentTarget.scrollTop > 18;
+    if (shouldCollapse) {
+      searchInputRef.current?.blur();
+      setSearchFocused(false);
+    }
+    setMobileSearchCollapsed(shouldCollapse);
+  };
+
+  const openMobileSearch = () => {
+    setMobileSearchCollapsed(false);
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
+  // У Electron вертикальное колесо над горизонтальной лентой должно листать
+  // контакты, а не чат-лист под ней. Тач-прокрутку браузер обрабатывает сам.
+  const handleRecentWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const strip = recentStripRef.current;
+    if (!strip || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    if (strip.scrollWidth <= strip.clientWidth) return;
+    event.preventDefault();
+    strip.scrollLeft += event.deltaY;
+  };
+
 
   return (
-    <aside className="roster">
+    <aside className={'roster' + (mobileSearchCollapsed ? ' is-search-collapsed' : '')}>
       {resizeHandle}
       <div className="roster-head">
         {/* Свой аватар со статусом. На телефоне блок «себя» с рельса скрыт
@@ -143,6 +175,15 @@ const ChatList: React.FC<ChatListProps> = ({
               </button>
             </>
           )}
+          <button
+            type="button"
+            className="roster-search-open-btn"
+            title="Поиск чатов"
+            aria-label="Открыть поиск чатов"
+            onClick={openMobileSearch}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          </button>
           {/* Видна только на узком экране — там же скрыт пункт «Настройки» в
               нижней панели (не помещался без прокрутки). На десктопе вход в
               настройки остаётся на рельсе, поэтому здесь дублировать не нужно. */}
@@ -156,24 +197,56 @@ const ChatList: React.FC<ChatListProps> = ({
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z" /></svg>
           </button>
         </div>
-        <div className="search">
-          <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-          <input
-            type="text"
-            placeholder="Поиск"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-          />
-          <button type="button" className="icon-btn-ghost new-chat-btn" title="Найти сотрудника" onClick={onOpenDirectory}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
-          </button>
-          <button type="button" className="icon-btn-ghost new-chat-btn" title="Создать группу" onClick={onCreateGroup}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-          </button>
+        <div className={'roster-search-area' + (searchFocused || !!searchQuery ? ' is-recent-open' : '')}>
+          <div className="search">
+            <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Поиск"
+              value={searchQuery}
+              onFocus={() => { setSearchFocused(true); setMobileSearchCollapsed(false); }}
+              onBlur={() => setSearchFocused(false)}
+              onChange={(e) => onSearchChange(e.target.value)}
+            />
+            <button type="button" className="icon-btn-ghost new-chat-btn" title="Найти сотрудника" onClick={onOpenDirectory}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+            </button>
+            <button type="button" className="icon-btn-ghost new-chat-btn" title="Создать группу" onClick={onCreateGroup}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+            </button>
+          </div>
+          {recentChats.length > 0 && (
+            <div
+              ref={recentStripRef}
+              className="recent-chats"
+              aria-label="Недавние чаты"
+              onWheel={handleRecentWheel}
+            >
+              {recentChats.map((chat) => (
+                <button
+                  type="button"
+                  className="recent-chat"
+                  key={chat.id}
+                  title={chat.name}
+                  onClick={() => onSelectChat(chat.id)}
+                >
+                  <Avatar
+                    name={chat.name}
+                    avatarPath={chat.avatarPath}
+                    online={chat.online}
+                    isGroup={chat.section === 'group'}
+                    isSelf={chat.section === 'self'}
+                  />
+                  <span>{chat.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="roster-list">
+      <div className="roster-list" onScroll={handleRosterScroll}>
         {filtered.length === 0 && <div className="roster-empty">Ничего не найдено</div>}
         {filtered.map((chat) => {
           const last = lastMessages[chat.id];

@@ -1,9 +1,20 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { App as CapApp } from '@capacitor/app';
 import EmojiPicker from './EmojiPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
 import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
 import { isNativeMobile } from '../utils/mobileNotify';
-import { getLastMobileKeyboardHeight, hideMobileKeyboard } from '../utils/mobileKeyboard';
+import {
+  getLastMobileKeyboardHeight,
+  hideMobileKeyboard,
+  showMobileKeyboard,
+  onKeyboardHide,
+  onKeyboardShow,
+  onKeyboardWillHide,
+  onKeyboardWillShow,
+  registerMobileInputSurfaceCloser,
+  setChatKeyboardResizeMode,
+} from '../utils/mobileKeyboard';
 
 export interface PendingImage {
   file: File;
@@ -75,9 +86,40 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [staged, setStaged] = useState<StagedImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
-  const [emojiPanelHeight, setEmojiPanelHeight] = useState(300);
+  const [desktopEmojiOpen, setDesktopEmojiOpen] = useState(false);
+  const [emojiPanelHeight, setEmojiPanelHeight] = useState(getLastMobileKeyboardHeight);
+  const [mobileInputMode, setMobileInputMode] = useState<'closed' | 'keyboard' | 'emoji'>('closed');
+  const [mobileEmojiVisible, setMobileEmojiVisibleState] = useState(false);
+  const mobileInputModeRef = useRef(mobileInputMode);
+  const keyboardHideIntentRef = useRef<'none' | 'to-emoji' | 'close'>('none');
+  const keyboardHideIntentUntilRef = useRef(0);
+  const emojiVisibilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  mobileInputModeRef.current = mobileInputMode;
+  const setMobileMode = useCallback((mode: 'closed' | 'keyboard' | 'emoji') => {
+    const wasActive = mobileInputModeRef.current !== 'closed';
+    const willBeActive = mode !== 'closed';
+    if (wasActive !== willBeActive) window.dispatchEvent(new Event('miras-composer-will-resize'));
+    mobileInputModeRef.current = mode;
+    setMobileInputMode(mode);
+  }, []);
+  const setMobileEmojiVisible = useCallback((visible: boolean, delayMs = 0) => {
+    if (emojiVisibilityTimerRef.current !== null) {
+      clearTimeout(emojiVisibilityTimerRef.current);
+      emojiVisibilityTimerRef.current = null;
+    }
+    if (!visible && delayMs > 0) {
+      emojiVisibilityTimerRef.current = setTimeout(() => {
+        emojiVisibilityTimerRef.current = null;
+        setMobileEmojiVisibleState(false);
+      }, delayMs);
+      return;
+    }
+    setMobileEmojiVisibleState(visible);
+  }, []);
+  useEffect(() => () => {
+    if (emojiVisibilityTimerRef.current !== null) clearTimeout(emojiVisibilityTimerRef.current);
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,11 +135,146 @@ const MessageInput: React.FC<MessageInputProps> = ({
     return () => window.removeEventListener('pointerdown', close);
   }, [attachMenuOpen]);
 
-  // На телефоне поле остаётся прежней textarea. contentEditable в Android
-  // WebView ведёт себя заметно капризнее (курсор, автозамена, системная
-  // клавиатура), а чинить это вслепую, без устройства под рукой, нельзя —
-  // сначала обкатываем на вебе и десктопе.
-  const rich = !isNativeMobile;
+  // Один и тот же rich-композер на desktop и mobile: только contentEditable
+  // способен показывать кастомный смайлик картинкой прямо внутри набираемого
+  // текста. Наружу по-прежнему уходит обычный :shortcode:, поэтому серверный
+  // формат и история сообщений не меняются.
+  const rich = true;
+
+  // Место внизу резервируется, пока активен любой режим ввода — реальная
+  // клавиатура или наша панель. Оба делят одну и ту же высоту, поэтому
+  // переключение между ними не меняет зарезервированное место вообще.
+  const emojiOpen = isNativeMobile ? mobileInputMode === 'emoji' : desktopEmojiOpen;
+  const surfaceActive = isNativeMobile && mobileInputMode !== 'closed';
+
+  // Резервируемое место меняется по CSS-transition, а не мгновенно — лента
+  // сообщений должна доскроллиться вслед за ним (тем же событием, каким
+  // раньше пользовалась старая swap-машина), иначе последнее сообщение
+  // на пару кадров окажется под наезжающей поверхностью.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('miras-composer-resize', {
+      detail: { active: surfaceActive },
+    }));
+  }, [surfaceActive, emojiPanelHeight]);
+
+  // Пока открыта переписка — WebView не пересобирается под клавиатуру:
+  // экранная клавиатура рисуется поверх уже смонтированной emoji-панели
+  // отдельным нативным слоем, а не сдвигает вёрстку. Включаем только на
+  // время жизни этого компонента (= пока открыт конкретный чат) — на
+  // остальных экранах (логин, диалоги, панели) поля по-прежнему сами
+  // уезжают от клавиатуры на штатном ресайзе.
+  useEffect(() => {
+    if (!isNativeMobile) return undefined;
+    setChatKeyboardResizeMode(true);
+    // После блокировки/разблокировки Android может восстановить manifest resize mode уже после
+    // onResume. Повторяем overlay-команду из JS; нативный плагин дополнительно делает то же сам.
+    const listenerPromise = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) setChatKeyboardResizeMode(true);
+    });
+    const restoreOverlayAfterRotation = () => setChatKeyboardResizeMode(true);
+    window.addEventListener('orientationchange', restoreOverlayAfterRotation);
+    return () => {
+      window.removeEventListener('orientationchange', restoreOverlayAfterRotation);
+      listenerPromise.then((handle) => handle.remove()).catch(() => {});
+      setChatKeyboardResizeMode(false);
+    };
+  }, []);
+
+  // Высоту зарезервированного места подтягиваем из последней реальной
+  // клавиатуры — тогда emoji-панель занимает ровно то же место, и взгляду
+  // не за что зацепиться при переключении между ними.
+  useEffect(() => {
+    if (!isNativeMobile) return undefined;
+
+    const applyNativeHeight = (height: number) => {
+      if (height >= 120) setEmojiPanelHeight(Math.round(height));
+    };
+
+    const removeWillShow = onKeyboardWillShow((height) => {
+      applyNativeHeight(height);
+      // IME разрешено появляться только после явного запроса режима keyboard:
+      // тап по закрытому полю либо кнопка клавиатуры из emoji-панели.
+      if (mobileInputModeRef.current !== 'keyboard') hideMobileKeyboard();
+    });
+    const removeDidShow = onKeyboardShow((height) => {
+      applyNativeHeight(height);
+      // При emoji -> keyboard содержимое остаётся на месте, пока IME его
+      // накрывает. После полного подъёма держать его видимым уже незачем.
+      if (mobileInputModeRef.current === 'keyboard') setMobileEmojiVisible(false);
+    });
+    const removeWillHide = onKeyboardWillHide(() => {
+      // Если режим уже emoji, это осознанная замена keyboard -> emoji: место
+      // и содержимое остаются. Иначе IME уходит по Back — закрываем всю
+      // конструкцию в начале нативной анимации, чтобы она уехала вместе с IME.
+      if (keyboardHideIntentRef.current === 'to-emoji'
+        && Date.now() <= keyboardHideIntentUntilRef.current) return;
+      if (keyboardHideIntentRef.current === 'to-emoji') keyboardHideIntentRef.current = 'none';
+      if (mobileInputModeRef.current === 'keyboard') {
+        keyboardHideIntentRef.current = 'close';
+        keyboardHideIntentUntilRef.current = 0;
+        // Системный Back скрывает IME, но Android WebView оставляет contentEditable focused.
+        // Без blur следующий тап не создаёт onFocus и новая IME считается незапрошенной.
+        richRef.current?.blur();
+        textareaRef.current?.blur();
+        setMobileEmojiVisible(false);
+        setMobileMode('closed');
+      }
+    });
+    const removeDidHide = onKeyboardHide(() => {
+      // Скрытие по аппаратной кнопке «Назад» закрывает всю общую поверхность.
+      // При переходе keyboard -> emoji режим уже успел стать emoji и остаётся.
+      const intent = keyboardHideIntentRef.current;
+      const isCurrentEmojiTransition = intent === 'to-emoji'
+        && Date.now() <= keyboardHideIntentUntilRef.current;
+      keyboardHideIntentRef.current = 'none';
+      keyboardHideIntentUntilRef.current = 0;
+      if (isCurrentEmojiTransition) {
+        // Пользователь мог успеть запросить keyboard обратно до завершения старого hide.
+        // Запоздалый DidHide не закрывает новый режим, а повторяет запрос IME.
+        if (mobileInputModeRef.current === 'keyboard') showMobileKeyboard();
+        return;
+      }
+      if (mobileInputModeRef.current === 'keyboard') {
+        richRef.current?.blur();
+        textareaRef.current?.blur();
+        setMobileMode('closed');
+      }
+    });
+
+    return () => {
+      removeWillShow();
+      removeDidShow();
+      removeWillHide();
+      removeDidHide();
+    };
+  }, [setMobileEmojiVisible, setMobileMode]);
+
+  useEffect(() => {
+    if (!isNativeMobile) return undefined;
+    return registerMobileInputSurfaceCloser(() => {
+      if (mobileInputModeRef.current === 'closed') return false;
+      const wasEmoji = mobileInputModeRef.current === 'emoji';
+      keyboardHideIntentRef.current = 'close';
+      keyboardHideIntentUntilRef.current = 0;
+      setMobileMode('closed');
+      // В режиме emoji нет нативной IME, поэтому сама панель уезжает вниз CSS-переходом.
+      // Содержимое убираем только после него; pointer-events отключены уже режимом closed.
+      setMobileEmojiVisible(false, wasEmoji ? 220 : 0);
+      hideMobileKeyboard();
+      return true;
+    });
+  }, [setMobileEmojiVisible, setMobileMode]);
+
+  useEffect(() => {
+    if (!disabled) return;
+    setDesktopEmojiOpen(false);
+    if (mobileInputModeRef.current === 'closed') return;
+    keyboardHideIntentRef.current = 'close';
+    keyboardHideIntentUntilRef.current = 0;
+    setMobileEmojiVisible(false);
+    setMobileMode('closed');
+    hideMobileKeyboard();
+  }, [disabled, setMobileEmojiVisible, setMobileMode]);
 
   // Поле ввода было однострочным <input>: длинное сообщение уезжало за
   // границу видимой области, а перенести строку было нельзя вовсе. Теперь
@@ -156,7 +333,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // выбранный посреди набранной фразы, уезжал бы в её хвост.
   const insertEmoji = (picked: string | PickedCustomEmoji) => {
     if (rich) {
-      richRef.current?.insertPicked(picked);
+      richRef.current?.insertPicked(picked, { focus: !(isNativeMobile && emojiOpen) });
       onTyping?.();
       return;
     }
@@ -181,44 +358,111 @@ const MessageInput: React.FC<MessageInputProps> = ({
     onTyping?.();
   };
 
+  // Синхронно, без кадра задержки: панель никуда не размонтируется, так что
+  // ждать перестройки layout под фокус больше незачем — а лишний кадр как
+  // раз и открыл бы окно, где ни клавиатура, ни панель ещё не отмечены
+  // активными, и зарезервированное место успело бы схлопнуться.
   const focusMobileTextarea = useCallback(() => {
     if (!isNativeMobile) return;
-    // После размонтирования нижней панели даём WebView один кадр на новый layout,
-    // затем возвращаем фокус — Android сам поднимет системную клавиатуру.
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      const end = el.selectionStart ?? text.length;
-      el.setSelectionRange(end, end);
-    });
-  }, [text.length]);
+    if (rich) {
+      richRef.current?.focus();
+      showMobileKeyboard();
+      return;
+    }
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    const end = el.selectionStart ?? text.length;
+    el.setSelectionRange(end, end);
+    showMobileKeyboard();
+  }, [text.length, rich]);
 
   const closeEmoji = useCallback((restoreKeyboard = false) => {
-    setEmojiOpen(false);
-    if (restoreKeyboard) focusMobileTextarea();
-  }, [focusMobileTextarea]);
+    if (!isNativeMobile) {
+      setDesktopEmojiOpen(false);
+      return;
+    }
+    if (restoreKeyboard) {
+      setMobileEmojiVisible(true);
+      setMobileMode('keyboard');
+      focusMobileTextarea();
+    } else {
+      const wasEmoji = mobileInputModeRef.current === 'emoji';
+      keyboardHideIntentRef.current = 'close';
+      keyboardHideIntentUntilRef.current = 0;
+      setMobileMode('closed');
+      setMobileEmojiVisible(false, wasEmoji ? 220 : 0);
+    }
+  }, [focusMobileTextarea, setMobileEmojiVisible, setMobileMode]);
 
   const toggleEmoji = useCallback(() => {
     if (disabled) return;
     if (!isNativeMobile) {
-      setEmojiOpen((v) => !v);
+      setDesktopEmojiOpen((v) => !v);
       return;
     }
+    // Панель уже смонтирована и место под неё уже зарезервировано (см.
+    // surfaceActive в разметке) — переключение это просто «попросить
+    // клавиатуру появиться/уйти», без какой-либо координации с панелью.
+    if (mobileInputModeRef.current === 'emoji') {
+      setMobileEmojiVisible(true);
+      setMobileMode('keyboard');
+      focusMobileTextarea();
+    } else {
+      if (mobileInputModeRef.current === 'keyboard') {
+        keyboardHideIntentRef.current = 'to-emoji';
+        keyboardHideIntentUntilRef.current = Date.now() + 1000;
+      }
+      setMobileEmojiVisible(true);
+      setMobileMode('emoji');
+      hideMobileKeyboard();
+    }
+  }, [disabled, focusMobileTextarea, setMobileEmojiVisible, setMobileMode]);
 
-    if (emojiOpen) {
-      closeEmoji(true);
+  const handleMobileFieldPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    if (!isNativeMobile) return;
+    // Тап по самому полю — такой же явный запрос клавиатуры, как кнопка
+    // клавиатуры в emoji-панели. Поверхность уже занимает нужную высоту, поэтому
+    // переключаем только режим и оставляем стандартному pointerdown поставить
+    // курсор именно туда, куда нажал пользователь.
+    if (mobileInputModeRef.current === 'emoji') {
+      setMobileEmojiVisible(true);
+      setMobileMode('keyboard');
+      requestAnimationFrame(() => showMobileKeyboard());
       return;
     }
+    if (mobileInputModeRef.current === 'closed' && document.activeElement === e.currentTarget) {
+      // Fallback для WebView, который скрыл IME без WillHide/DidHide: поле всё ещё focused,
+      // поэтому onFocus повторно не возникнет. В этом единственном случае pointerdown сам
+      // является новым явным запросом keyboard; фокус уже закреплён и потеряться не может.
+      setMobileEmojiVisible(false);
+      setMobileMode('keyboard');
+      showMobileKeyboard();
+    }
+    // В closed ничего не двигаем на pointerdown: иначе поле успевает уехать вверх до pointerup,
+    // WebView отменяет click и первый тап не выдаёт редактору фокус. Переход запускает onFocus ниже.
+  }, [setMobileEmojiVisible, setMobileMode]);
 
-    // Сначала резервируем место примерно той же высоты, что занимала системная
-    // клавиатура, и только потом просим Android её убрать. Визуально нижняя
-    // область меняет содержимое, а не исчезает и появляется заново.
-    setEmojiPanelHeight(getLastMobileKeyboardHeight());
-    setEmojiOpen(true);
-    hideMobileKeyboard();
-    requestAnimationFrame(() => window.dispatchEvent(new Event('miras-composer-resize')));
-  }, [closeEmoji, disabled, emojiOpen]);
+  const handleMobileFieldFocus = useCallback(() => {
+    if (!isNativeMobile) return;
+    // contentEditable способен получить фокус от перестановки Selection при
+    // вставке первого emoji. Такой фокус не является запросом клавиатуры.
+    if (mobileInputModeRef.current === 'closed') {
+      // На некоторых Android WebView focus приходит раньше pointerdown.
+      // Закрытое поле всегда трактуется как явный запрос клавиатуры.
+      setMobileEmojiVisible(false);
+      setMobileMode('keyboard');
+      // У Android WebView автоматический запрос IME иногда теряется при одновременном изменении
+      // геометрии. Нативный show повторяет его после того, как focus уже закреплён за редактором.
+      showMobileKeyboard();
+      return;
+    }
+    if (mobileInputModeRef.current === 'emoji') {
+      const active = document.activeElement as HTMLElement | null;
+      active?.blur();
+      hideMobileKeyboard();
+    }
+  }, [setMobileEmojiVisible, setMobileMode]);
 
   const stageFiles = (files: FileList | File[] | null | undefined) => {
     if (!files || disabled) return;
@@ -387,7 +631,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
   return (
     <form
       onSubmit={handleSubmit}
-      className={'composer' + (dragActive ? ' is-drag-over' : '')}
+      className={'composer' + (dragActive ? ' is-drag-over' : '') + (surfaceActive ? ' has-mobile-input-surface' : '')}
+      style={{ '--mobile-emoji-height': `${emojiPanelHeight}px` } as React.CSSProperties}
       onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragActive(true); }}
       onDragLeave={() => setDragActive(false)}
       onDrop={handleDrop}
@@ -505,10 +750,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
       <button
         type="button"
         className={'emoji-btn' + (emojiOpen ? ' is-active' : '')}
-        // onMouseDown вместо onClick и с preventDefault: панель закрывается по
+        // pointerdown вместо click и с preventDefault: панель закрывается по
         // mousedown снаружи себя, и на обычном клике она успела бы закрыться
         // раньше, чем сюда дойдёт onClick, — кнопка не работала бы вовсе.
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleEmoji(); }}
+        onPointerDown={(e) => {
+          // Снимаем Range до blur/скрытия IME: Android при потере фокуса переставляет DOM Selection
+          // в начало contentEditable, хотя визуальный курсор до этого находился в другом месте.
+          richRef.current?.saveSelection();
+          e.preventDefault();
+          e.stopPropagation();
+          toggleEmoji();
+        }}
         disabled={disabled}
         aria-label={isNativeMobile && emojiOpen ? 'Клавиатура' : 'Смайлики'}
         title={isNativeMobile && emojiOpen ? 'Клавиатура' : 'Смайлики'}
@@ -538,6 +790,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onEscape={editing ? cancelEdit : (replying ? onCancelReply : undefined)}
               onArrowUpEmpty={!editing ? onRequestEditLast : undefined}
               onPasteImageFile={(file) => stageFiles([file])}
+              onPointerDown={handleMobileFieldPointerDown}
+              onFocus={handleMobileFieldFocus}
             />
           ) : (
             <textarea
@@ -547,7 +801,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onChange={handleChange}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              onFocus={() => { if (isNativeMobile && emojiOpen) setEmojiOpen(false); }}
+              onPointerDown={handleMobileFieldPointerDown}
+              onFocus={handleMobileFieldFocus}
               placeholder={fieldPlaceholder}
               disabled={disabled}
             />
@@ -586,13 +841,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
       </button>
       </div>
 
-      {emojiOpen && isNativeMobile && (
-        <EmojiPicker
-          onPick={insertEmoji}
-          onClose={() => closeEmoji(false)}
-          mobilePanel
-          mobileHeight={emojiPanelHeight}
-        />
+      {isNativeMobile && (
+        // Смонтирована всегда, пока открыта переписка — место под неё уже
+        // зарезервировано (surfaceActive), а системная клавиатура при показе
+        // просто рисуется поверх неё отдельным нативным слоем. Переключение
+        // клавиатура↔панель поэтому не требует ни монтирования, ни пересборки
+        // вёрстки — только сама поверхность целиком появляется/пропадает.
+        <div
+          className={'mobile-emoji-surface' + (surfaceActive ? ' is-surface-active' : '') + (mobileEmojiVisible ? ' is-emoji-visible' : '') + (emojiOpen ? ' is-emoji-mode' : '')}
+        >
+          <EmojiPicker onPick={insertEmoji} onClose={() => closeEmoji(false)} mobilePanel />
+        </div>
       )}
     </form>
   );

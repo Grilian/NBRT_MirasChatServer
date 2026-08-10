@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { App as CapApp } from '@capacitor/app';
-import ChatList, { ChatSection } from '../components/ChatList';
+import ChatList, { Chat as RosterChat, ChatSection } from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
 import MessageInput, { EditingMessage, PendingImage, ReplyingMessage, SendResult } from '../components/MessageInput';
 import ForwardModal, { ForwardPreviewItem, ForwardTarget } from '../components/ForwardModal';
@@ -39,7 +39,7 @@ import {
   onMobileNotificationTap
 } from '../utils/mobileNotify';
 import { initMobilePush, unregisterMobilePush, dismissAllPushNotifications } from '../utils/mobilePush';
-import { watchMobileKeyboard, hideMobileKeyboard } from '../utils/mobileKeyboard';
+import { closeMobileInputSurface, watchMobileKeyboard, hideMobileKeyboard } from '../utils/mobileKeyboard';
 import {
   ensureDesktopNotificationPermission,
   showDesktopNotification,
@@ -288,6 +288,7 @@ const Chat: React.FC = () => {
   const [onlineUsers, setOnlineUsers] = useState<number[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const [lastMessages, setLastMessages] = useState<Record<string, LastMessage>>({});
+  const [recentChatIds, setRecentChatIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   // Счётчики непрочитанного перезапрашиваются в нескольких местах разом
@@ -314,6 +315,27 @@ const Chat: React.FC = () => {
   // Счётчик «задачи изменились»: сервер шлёт tasks_changed, панель задач по
   // изменению этого числа перечитывает список.
   const [tasksChangeToken, setTasksChangeToken] = useState(0);
+
+  const applyRecentChats = useCallback((data: unknown) => {
+    if (!Array.isArray(data)) return;
+    setRecentChatIds(data
+      .map(item => (item && typeof item === 'object' ? (item as { chat_id?: unknown }).chat_id : null))
+      .filter((chatId): chatId is string => typeof chatId === 'string')
+      .slice(0, 8));
+  }, []);
+
+  const recordRecentOpening = useCallback((chatId: string) => {
+    if (!chatId || chatId === GENERAL_CHAT_ID) return;
+    // Уже известный допустимый чат поднимаем без ожидания сети — ярлык не
+    // должен заметно переставляться спустя RTT после клика. Новый чат всё
+    // равно добавит только сервер, когда подтвердит наличие исходящих.
+    setRecentChatIds(prev => prev.includes(chatId)
+      ? [chatId, ...prev.filter(id => id !== chatId)].slice(0, 8)
+      : prev);
+    api.post(`/messages/meta/recent/${encodeURIComponent(chatId)}`)
+      .then(({ data }) => applyRecentChats(data))
+      .catch(console.error);
+  }, [applyRecentChats]);
   // Текст сообщения, из которого заводят задачу («Создать задачу» в меню
   // сообщения) — уезжает в TasksPanel вместе с переходом в раздел.
   const [taskDraftText, setTaskDraftText] = useState<string | null>(null);
@@ -672,7 +694,11 @@ const Chat: React.FC = () => {
   const paneAnimTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const closeKeyboard = useCallback(() => {
-    if (!hideMobileKeyboard()) return;
+    // Общая поверхность включает два взаимоисключающих режима. При уходе со страницы закрываем
+    // её целиком: в режиме emoji одной команды системной клавиатуре недостаточно.
+    const surfaceWasOpen = closeMobileInputSurface();
+    const keyboardWasOpen = surfaceWasOpen ? false : hideMobileKeyboard();
+    if (!surfaceWasOpen && !keyboardWasOpen) return;
     setSkipPaneAnim(true);
     if (paneAnimTimer.current) clearTimeout(paneAnimTimer.current);
     paneAnimTimer.current = setTimeout(() => setSkipPaneAnim(false), PANE_ANIM_SKIP_MS);
@@ -710,6 +736,10 @@ const Chat: React.FC = () => {
     if (!isNativeMobile) return;
     const listenerPromise = CapApp.addListener('backButton', () => {
       const nav = backNavRef.current;
+      // Emoji-панель — часть той же нижней конструкции, что и IME. Когда IME
+      // нет и Android отдаёт Back приложению, сначала закрываем конструкцию,
+      // а уже следующим нажатием выполняем навигацию.
+      if (closeMobileInputSurface()) return;
       // Модалки поверх всего — закрываются первыми, иначе "назад" уводил
       // экран из-под открытого окна, а само окно оставалось висеть.
       if (nav.groupInfoId !== null) { setGroupInfoId(null); return; }
@@ -832,6 +862,7 @@ const Chat: React.FC = () => {
       api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
       api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
+      api.get('/messages/meta/recent').then(({ data }) => applyRecentChats(data)).catch(console.error);
       api.get('/groups').then(({ data }) => setChatGroups(data)).catch(console.error);
       // Только для профиля людей, ещё не добавленных в контакты — см.
       // DirectoryUser выше и infoModalUser ниже.
@@ -856,6 +887,10 @@ const Chat: React.FC = () => {
       // сброса она показала бы старый состав, пока её не откроют дважды.
       invalidateEmojiPackCache();
     });
+
+    // Открытие или первая успешная отправка на другом устройстве сразу
+    // перестраивает ту же ленту здесь — порядок недавних общий для аккаунта.
+    newSocket.on('recent_chats_changed', applyRecentChats);
 
     // Список контактов не приходит по сокету целиком (только точечное событие
     // 'contact_added') — подтягиваем его периодически на случай, если событие
@@ -1080,7 +1115,7 @@ const Chat: React.FC = () => {
       window.removeEventListener('online', handleBrowserOnline);
       newSocket.disconnect();
     };
-  }, [currentUserId, refetchUnread, pushToast, reloadEmojiCatalog]);
+  }, [currentUserId, refetchUnread, pushToast, reloadEmojiCatalog, applyRecentChats]);
 
   // Возврат приложения из фона на Android — пока оно свёрнуто, ОС может
   // оборвать сеть (Doze/App Standby), и сокет повиснет отключённым: его
@@ -1517,6 +1552,7 @@ const Chat: React.FC = () => {
       loadingMoreRef.current = false;
     }
     setActiveChat(chatId);
+    recordRecentOpening(chatId);
     closeKeyboard();
     // Открытые Настройки/Профиль/другой раздел иначе продолжали закрывать собой
     // область переписки — activeChat менялся, а видимая панель оставалась прежней.
@@ -1803,7 +1839,9 @@ const Chat: React.FC = () => {
   const handleStartChat = async (user: { id: number; username: string; display_name: string | null; avatar_path: string | null; group_id: number | null; group_name: string | null }) => {
     setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, { ...user, bio: null, phone: null, department: null, position: null, birth_date: null }]);
     setDirectoryOpen(false);
-    setActiveChat(getChatId(user.id));
+    const chatId = getChatId(user.id);
+    setActiveChat(chatId);
+    recordRecentOpening(chatId);
     closeKeyboard();
     setView(VIEW_CONVERSATION);
     try {
@@ -2023,7 +2061,7 @@ const Chat: React.FC = () => {
   // Формирование списка чатов: Общий чат — всегда первым, дальше избранные
   // (по свежести), затем свои групповые чаты, затем реальные группы
   // (настроены в панели супер-админа), внутри каждой — тоже по свежести.
-  const chats = [
+  const allChats: RosterChat[] = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
     // Личный чат «для себя» — сразу за общим, до всех остальных: это заметки
     // и пересылки, к нему возвращаются часто, и искать его среди переписок по
@@ -2058,16 +2096,7 @@ const Chat: React.FC = () => {
       avatarPath: u.avatarPath,
       status: describeStatus(u.statusPreset, u.statusCustom),
     }))
-  ]
-    // Ищем и по комментарию: раньше он был частью name и попадал в поиск сам
-    // собой, а людей нередко и находят по нему («бухгалтерия», «второй этаж»).
-    .filter(c => {
-      const needle = searchQuery.toLowerCase();
-      if (!needle) return true;
-      return c.name.toLowerCase().includes(needle)
-        || ((c as { comment?: string | null }).comment || '').toLowerCase().includes(needle);
-    })
-    .sort((a, b) => {
+  ].sort((a, b) => {
       const rankDiff = groupRank(a) - groupRank(b);
       if (rankDiff !== 0) return rankDiff;
       const aTime = lastMessages[a.id] ? new Date(lastMessages[a.id].created_at).getTime() : 0;
@@ -2083,6 +2112,21 @@ const Chat: React.FC = () => {
         ? 'Избранное'
         : (!uiPrefs.groupContacts && c.section === 'staff' ? null : c.groupLabel),
     }));
+
+  // Поиск влияет только на основной список. Недавние строятся из полного
+  // ростера и сохраняют порядок, который прислал сервер (последнее открытие
+  // первым), иначе ввод одной буквы заставлял бы ярлыки исчезать и прыгать.
+  const searchNeedle = searchQuery.toLowerCase();
+  const chats = allChats.filter(c => (
+    !searchNeedle
+    || c.name.toLowerCase().includes(searchNeedle)
+    || (c.comment || '').toLowerCase().includes(searchNeedle)
+  ));
+  const chatsById = new Map(allChats.map(chat => [chat.id, chat]));
+  const recentChats = recentChatIds
+    .map(chatId => chatsById.get(chatId))
+    .filter((chat): chat is RosterChat => !!chat)
+    .slice(0, 8);
 
   const typingText = activeChat ? typingUsers[activeChat] : undefined;
 
@@ -2251,6 +2295,7 @@ const Chat: React.FC = () => {
         onOpenStatus={() => setStatusSheetOpen(true)}
         customEmoji={customEmoji}
         chats={chats}
+        recentChats={recentChats}
         activeChat={activeChat}
         onSelectChat={handleSelectChat}
         onOpenDirectory={() => setDirectoryOpen(true)}
@@ -2300,6 +2345,7 @@ const Chat: React.FC = () => {
             setChatGroups(prev => prev.some(g => g.id === group.id) ? prev : [...prev, { ...group, role: 'owner' as const }]);
             setCreateGroupOpen(false);
             setActiveChat(group.chat_id);
+            recordRecentOpening(group.chat_id);
             setView(VIEW_CONVERSATION);
           }}
         />
