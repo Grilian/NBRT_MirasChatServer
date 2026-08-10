@@ -62,7 +62,7 @@ describe('ChatWindow threads', () => {
     const onOpenThread = jest.fn();
     const { getByRole } = render(
       <ChatWindow
-        chatId="test"
+        chatId="group_1"
         messages={[{ ...message, file_path: null, thread: {
           reply_count: 0, unread_count: 0, last_reply_at: null, recent_authors: [],
         } }]}
@@ -81,7 +81,7 @@ describe('ChatWindow threads', () => {
     const onOpenThread = jest.fn();
     const { getByRole } = render(
       <ChatWindow
-        chatId="test"
+        chatId="group_1"
         messages={[{ ...message, file_path: null, thread: {
           reply_count: 2,
           unread_count: 1,
@@ -97,5 +97,28 @@ describe('ChatWindow threads', () => {
 
     fireEvent.click(getByRole('button', { name: /2 ответа/ }));
     expect(onOpenThread).toHaveBeenCalledWith(1, false);
+  });
+
+  test('keeps a personal-chat thread in the context menu without an inline entry', () => {
+    const onOpenThread = jest.fn();
+    const { container, getByRole, queryByRole } = render(
+      <ChatWindow
+        chatId="1_2"
+        messages={[{ ...message, file_path: null, thread: {
+          reply_count: 0, unread_count: 0, last_reply_at: null, recent_authors: [],
+        } }]}
+        currentUserId={1}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+        onOpenThread={onOpenThread}
+      />,
+    );
+
+    expect(queryByRole('button', { name: 'Ответить' })).not.toBeInTheDocument();
+
+    const row = container.querySelector('[data-msg-id="1"]') as HTMLElement;
+    fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    fireEvent.click(getByRole('button', { name: 'Ответить в ветке' }));
+    expect(onOpenThread).toHaveBeenCalledWith(1, true);
   });
 });

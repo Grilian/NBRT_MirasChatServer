@@ -211,6 +211,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   onStartReply, onForward, reactionEmoji, customEmoji = {}, onToggleReaction, onRemoveReaction,
   onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onOpenThread,
 }) => {
+  // Постоянный вход в ветку под сообщением нужен только в группах. В личной
+  // переписке ветка остаётся доступна через контекстное меню и не перегружает
+  // каждое сообщение дополнительной строкой.
+  const showInlineThreadLinks = Boolean(chatId && /^group_\d+$/.test(chatId));
   // Удалённое сообщение хранится на сервере (обязательство по закону — до
   // 3 лет метаданные о факте передачи), но в переписке не должно быть видно
   // вообще, включая плейсхолдер "Сообщение удалено" — поэтому просто не
@@ -1106,7 +1110,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     спеке именно так, не просто счётчик). Клик открывает
                     детальный список, крестик снимает — он появляется только
                     там, где снимать вправе (своя реакция или своё сообщение). */}
-                {onOpenThread && !pendingDelivery && (
+                {showInlineThreadLinks && onOpenThread && !pendingDelivery && (
                   <button
                     type="button"
                     className={'thread-link' + ((msg.thread?.unread_count || 0) > 0 ? ' has-unread' : '')}

@@ -648,8 +648,8 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 /* ===== Ветки сообщений ===== */
 .thread-link {
-  align-self: stretch; display: flex; align-items: center; gap: 8px; min-height: 38px;
-  margin: 6px -5px -4px; padding: 4px 7px; border: none; border-radius: 9px;
+  align-self: stretch; display: flex; align-items: center; gap: 8px; min-height: 32px;
+  margin: 2px -5px -4px; padding: 2px 7px; border: none; border-radius: 9px;
   background: transparent; color: color-mix(in srgb, var(--accent) 88%, var(--ink));
   cursor: pointer; text-align: left; font: inherit;
 }
@@ -679,10 +679,14 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .thread-header strong { color: var(--ink); font-size: 16px; }
 .thread-header span { color: var(--ink-muted); font-size: 12px; }
 .thread-close {
-  flex: none; width: 36px; height: 36px; border: none; border-radius: 50%; background: transparent;
-  color: var(--ink-muted); cursor: pointer; font-size: 25px; line-height: 1;
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center;
+  border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink); cursor: pointer; font-size: 34px; line-height: 1;
 }
-.thread-close:hover { color: var(--ink); background: var(--paper-sunken); }
+.thread-close:hover { background: var(--paper-sunken); border-color: color-mix(in srgb, var(--ink) 22%, transparent); }
+.thread-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.thread-close-desktop { transform: translateY(-1px); }
 .thread-close-mobile { display: none; }
 .thread-root {
   flex: none; max-height: 34%; overflow: auto; display: flex; align-items: flex-start; gap: 10px;
