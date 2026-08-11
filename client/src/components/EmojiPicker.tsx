@@ -3,6 +3,7 @@ import api from '../api/client';
 import { resolveUploadUrl } from '../utils/uploads';
 import { CustomEmoji, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
 import { PickedCustomEmoji } from './EmojiComposerField';
+import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
 export interface EmojiPack {
   id: number;
@@ -66,17 +67,17 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose, mobilePanel 
     // а затем тут же снова открывает её синтетическим mouse-событием Android.
     if (mobilePanel) return;
 
-    const onDocPointerDown = (e: MouseEvent | TouchEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) onClose();
+    const onDocPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        dismissLayerWithoutUnderlayActivation(event, onClose);
+      }
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
 
-    document.addEventListener('mousedown', onDocPointerDown);
-    document.addEventListener('touchstart', onDocPointerDown);
+    document.addEventListener('pointerdown', onDocPointerDown, true);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDocPointerDown);
-      document.removeEventListener('touchstart', onDocPointerDown);
+      document.removeEventListener('pointerdown', onDocPointerDown, true);
       document.removeEventListener('keydown', onKey);
     };
   }, [onClose, mobilePanel]);

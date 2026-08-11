@@ -11,6 +11,7 @@ import Avatar from './Avatar';
 export interface ToastNotification {
   /** Ключ стопки — один чат даёт одно уведомление, как в Telegram */
   chatId: string;
+  threadRootId?: number;
   title: string;
   body: string;
   avatarPath?: string | null;
@@ -26,15 +27,15 @@ interface NotificationStackProps {
   toasts: ToastNotification[];
   /** 0 — не скрывать автоматически */
   durationMs: number;
-  onOpen: (chatId: string) => void;
-  onDismiss: (chatId: string) => void;
+  onOpen: (chatId: string, threadRootId?: number) => void;
+  onDismiss: (chatId: string, threadRootId?: number) => void;
 }
 
 interface ToastCardProps {
   toast: ToastNotification;
   durationMs: number;
-  onOpen: (chatId: string) => void;
-  onDismiss: (chatId: string) => void;
+  onOpen: (chatId: string, threadRootId?: number) => void;
+  onDismiss: (chatId: string, threadRootId?: number) => void;
 }
 
 // Смахивание вверх закрывает уведомление — жест того же типа, что и в
@@ -119,7 +120,7 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
       onTouchEnd={endDrag}
       onTouchCancel={endDrag}
     >
-      <button type="button" className="toast-main" onClick={() => onOpen(toast.chatId)}>
+      <button type="button" className="toast-main" onClick={() => onOpen(toast.chatId, toast.threadRootId)}>
         <Avatar name={toast.title} avatarPath={toast.avatarPath} isGeneral={toast.isGeneral} isGroup={toast.isGroup} />
         <div className="toast-text">
           <div className="toast-title">{toast.title}</div>
@@ -136,7 +137,7 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
         type="button"
         className="toast-close"
         aria-label="Закрыть уведомление"
-        onClick={() => onDismiss(toast.chatId)}
+        onClick={() => onDismiss(toast.chatId, toast.threadRootId)}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
           <path d="M18 6 6 18M6 6l12 12" />
@@ -169,7 +170,7 @@ const NotificationStack: React.FC<NotificationStackProps> = ({ toasts, durationM
     <div className="toast-stack">
       {toasts.map((toast) => (
         <ToastCard
-          key={toast.chatId}
+          key={toast.threadRootId ? `thread_${toast.threadRootId}` : toast.chatId}
           toast={toast}
           durationMs={durationMs}
           onOpen={onOpen}

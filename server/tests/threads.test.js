@@ -15,6 +15,7 @@ const {
   attachThreadSummaries,
   getThread,
   hideThread,
+  listThreadsForUser,
   markThreadRead,
   rootForUser,
   softDeleteThread,
@@ -96,4 +97,26 @@ test('personal hiding covers future replies and global deletion retains all cont
     'Корень для удаления', 'Старый ответ', 'Новый ответ после скрытия',
   ]);
   assert.ok(retained.every((row) => row.deleted === 1 && row.deleted_at && row.deleted_by === alice));
+});
+
+test('thread inbox contains only accessible discussions the user participated in', () => {
+  const alice = db.prepare("SELECT id FROM users WHERE username = 'thread_alice'").get().id;
+  const bob = db.prepare("SELECT id FROM users WHERE username = 'thread_bob'").get().id;
+  const chatId = `chat_${Math.min(alice, bob)}_${Math.max(alice, bob)}`;
+  const authoredRoot = insertMessage(chatId, alice, 'Ветка автора');
+  insertMessage(chatId, bob, 'Ответ автору', authoredRoot);
+  const joinedRoot = insertMessage(chatId, bob, 'Ветка собеседника');
+  insertMessage(chatId, alice, 'Участие пользователя', joinedRoot);
+  const untouchedRoot = insertMessage(chatId, bob, 'Чужая ветка');
+  insertMessage(chatId, bob, 'Ответ без участия пользователя', untouchedRoot);
+
+  const inbox = listThreadsForUser(alice);
+  assert.deepEqual(inbox.slice(0, 2).map((item) => item.root_id), [joinedRoot, authoredRoot]);
+  assert.ok(!inbox.some((item) => item.root_id === untouchedRoot));
+  assert.equal(inbox[0].chat.kind, 'personal');
+  assert.equal(inbox[0].chat.name, 'thread_bob');
+  assert.equal(inbox[0].summary.reply_count, 1);
+
+  hideThread(joinedRoot, alice);
+  assert.ok(!listThreadsForUser(alice).some((item) => item.root_id === joinedRoot));
 });

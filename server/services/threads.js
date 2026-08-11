@@ -1,5 +1,5 @@
 const db = require('../db');
-const { isParticipant } = require('./chatParticipants');
+const { isParticipant, participantsForChatId, parseAdminChatId } = require('./chatParticipants');
 const { reactionsForMessages } = require('./reactions');
 const { attachPollsToMessages } = require('./polls');
 const { isSharedChat, markRead } = require('./readReceipts');
@@ -88,6 +88,86 @@ function attachThreadSummaries(messages, userId) {
   return messages;
 }
 
+function chatMeta(chatId, userId) {
+  if (chatId === 'general') return { name: 'Общий чат', kind: 'general', avatar_path: null };
+  const groupMatch = String(chatId).match(/^group_(\d+)$/);
+  if (groupMatch) {
+    const group = db.prepare('SELECT name FROM chat_groups WHERE id = ?').get(Number(groupMatch[1]));
+    return { name: group?.name || 'Группа', kind: 'group', avatar_path: null };
+  }
+  if (/^self_\d+$/.test(String(chatId))) return { name: 'Избранное', kind: 'self', avatar_path: null };
+  if (parseAdminChatId(chatId)) return { name: 'Администратор', kind: 'personal', avatar_path: null };
+  const participants = participantsForChatId(chatId) || [];
+  const otherId = participants.find((id) => Number(id) !== Number(userId)) || participants[0];
+  const other = otherId
+    ? db.prepare('SELECT username, display_name, avatar_path FROM users WHERE id = ?').get(Number(otherId))
+    : null;
+  return {
+    name: other ? (other.display_name || other.username) : 'Чат',
+    kind: 'personal',
+    avatar_path: other?.avatar_path || null,
+  };
+}
+
+function listThreadsForUser(userId, requestedLimit = 100) {
+  const numericUserId = Number(userId);
+  const limit = Math.min(200, Math.max(1, Number(requestedLimit) || 100));
+  const rows = db.prepare(`
+    SELECT root.id AS root_id, root.chat_id,
+           root.text AS root_text, root.file_path AS root_file_path,
+           root.created_at AS root_created_at, root.sender_id AS root_sender_id,
+           ru.username AS root_username, ru.display_name AS root_display_name,
+           ru.avatar_path AS root_avatar_path,
+           latest.id AS last_reply_id, latest.text AS last_reply_text,
+           latest.file_path AS last_reply_file_path, latest.created_at AS last_reply_at,
+           latest.sender_id AS last_reply_sender_id,
+           lu.username AS last_reply_username, lu.display_name AS last_reply_display_name,
+           lu.avatar_path AS last_reply_avatar_path
+    FROM messages root
+    JOIN users ru ON ru.id = root.sender_id
+    JOIN messages latest ON latest.id = (
+      SELECT reply.id FROM messages reply
+      WHERE reply.thread_root_id = root.id AND reply.deleted = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM message_hidden mh
+          WHERE mh.message_id = reply.id AND mh.user_id = ?
+        )
+      ORDER BY reply.id DESC LIMIT 1
+    )
+    JOIN users lu ON lu.id = latest.sender_id
+    WHERE root.thread_root_id IS NULL AND root.deleted = 0
+      AND NOT EXISTS (
+        SELECT 1 FROM thread_hidden th
+        WHERE th.root_message_id = root.id AND th.user_id = ?
+      )
+      AND (
+        root.sender_id = ? OR EXISTS (
+          SELECT 1 FROM messages own_reply
+          WHERE own_reply.thread_root_id = root.id AND own_reply.sender_id = ?
+        )
+      )
+    ORDER BY latest.id DESC
+  `).all(numericUserId, numericUserId, numericUserId, numericUserId);
+
+  return rows.filter((row) => isParticipant(row.chat_id, numericUserId)).slice(0, limit).map((row) => ({
+    root_id: Number(row.root_id),
+    chat_id: row.chat_id,
+    chat: chatMeta(row.chat_id, numericUserId),
+    root: {
+      id: Number(row.root_id), text: row.root_text || '', file_path: row.root_file_path || null,
+      created_at: row.root_created_at, sender_id: Number(row.root_sender_id),
+      username: row.root_username, display_name: row.root_display_name, avatar_path: row.root_avatar_path,
+    },
+    last_reply: {
+      id: Number(row.last_reply_id), text: row.last_reply_text || '', file_path: row.last_reply_file_path || null,
+      created_at: row.last_reply_at, sender_id: Number(row.last_reply_sender_id),
+      username: row.last_reply_username, display_name: row.last_reply_display_name,
+      avatar_path: row.last_reply_avatar_path,
+    },
+    summary: threadSummary(row.root_id, numericUserId),
+  }));
+}
+
 function getThread(rootId, userId) {
   const root = sanitizeMessage(rootForUser(rootId, userId));
   const replies = db.prepare(`
@@ -155,6 +235,7 @@ module.exports = {
   rootForUser,
   threadSummary,
   attachThreadSummaries,
+  listThreadsForUser,
   getThread,
   markThreadRead,
   hideThread,

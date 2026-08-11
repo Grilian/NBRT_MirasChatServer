@@ -215,7 +215,15 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose }) => {
       // не порождает.
       onClick={onClose}
     >
-      <button type="button" className="lightbox-close" onClick={onClose} aria-label="Закрыть">
+      <button
+        type="button"
+        className="lightbox-close"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+        }}
+        aria-label="Закрыть"
+      >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
 

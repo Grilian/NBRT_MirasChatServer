@@ -32,3 +32,18 @@ test('does not allow duplicate options ignoring Russian letter case', () => {
   expect(screen.getByText('Варианты ответа не должны повторяться.')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Создать' })).toBeDisabled();
 });
+
+test('closes only after a completed backdrop click', () => {
+  const onClose = jest.fn();
+  const { container } = render(<PollCreator onClose={onClose} onCreate={jest.fn()} />);
+  const layer = container.querySelector('.poll-creator-layer') as HTMLElement;
+
+  fireEvent.mouseDown(layer);
+  expect(onClose).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('heading', { name: 'Новый опрос' }));
+  expect(onClose).not.toHaveBeenCalled();
+
+  fireEvent.click(layer);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

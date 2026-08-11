@@ -14,6 +14,7 @@ const {
   ThreadError,
   attachThreadSummaries,
   getThread,
+  listThreadsForUser,
   markThreadRead,
   rootForUser,
   threadSummary,
@@ -133,6 +134,14 @@ router.post('/upload-image', verifyToken, (req, res) => {
 
 // Ветка читается отдельно от основной истории: её ответы не должны попадать в
 // обычную пагинацию чата и отмечаться прочитанными одним открытием разговора.
+router.get('/threads', verifyToken, (req, res) => {
+  try {
+    res.json(listThreadsForUser(req.userId, req.query.limit));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/threads/:rootId', verifyToken, (req, res) => {
   try {
     res.json(getThread(req.params.rootId, req.userId));

@@ -16,6 +16,7 @@ import {
   acquireChatKeyboardResizeMode,
   refreshMobileKeyboardResizeMode,
 } from '../utils/mobileKeyboard';
+import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
 export interface PendingImage {
   file: File;
@@ -143,10 +144,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (!attachMenuOpen) return;
     const close = (event: PointerEvent) => {
       if ((event.target as Element | null)?.closest?.('.attach-btn')) return;
-      if (!attachMenuRef.current?.contains(event.target as Node)) setAttachMenuOpen(false);
+      if (!attachMenuRef.current?.contains(event.target as Node)) {
+        dismissLayerWithoutUnderlayActivation(event, () => setAttachMenuOpen(false));
+      }
     };
-    window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
+    window.addEventListener('pointerdown', close, true);
+    return () => window.removeEventListener('pointerdown', close, true);
   }, [attachMenuOpen]);
 
   // Один и тот же rich-композер на desktop и mobile: только contentEditable

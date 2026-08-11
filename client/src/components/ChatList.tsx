@@ -42,6 +42,9 @@ interface ChatListProps {
   chats: Chat[];
   recentChats: Chat[];
   activeChat: string | null;
+  threadsActive?: boolean;
+  threadUnreadCount?: number;
+  onOpenThreads?: () => void;
   onSelectChat: (chatId: string) => void;
   onOpenDirectory: () => void;
   searchQuery: string;
@@ -91,7 +94,8 @@ function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOp
 }
 
 const ChatList: React.FC<ChatListProps> = ({
-  chats, recentChats, activeChat, onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
+  chats, recentChats, activeChat, threadsActive = false, threadUnreadCount = 0, onOpenThreads = () => {},
+  onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite,
   onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings,
   resizeHandle,
@@ -101,7 +105,7 @@ const ChatList: React.FC<ChatListProps> = ({
   const recentStripRef = React.useRef<HTMLDivElement>(null);
   const [searchFocused, setSearchFocused] = React.useState(false);
   const [mobileSearchCollapsed, setMobileSearchCollapsed] = React.useState(false);
-  const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+  const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0) + threadUnreadCount;
   const ownStatus = describeStatus(statusPreset, statusCustom);
   // Ищем и по комментарию к имени — он больше не часть name (см. row-comment).
   const needle = searchQuery.toLowerCase();
@@ -247,6 +251,25 @@ const ChatList: React.FC<ChatListProps> = ({
       </div>
 
       <div className="roster-list" onScroll={handleRosterScroll}>
+        <div
+          tabIndex={0}
+          role="button"
+          aria-current={threadsActive}
+          className={'row threads-roster-row' + (threadsActive ? ' is-active' : '')}
+          onClick={onOpenThreads}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenThreads(); } }}
+        >
+          <span className="threads-roster-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" /></svg>
+          </span>
+          <div className="row-body">
+            <div className="row-top"><div className="row-name"><span>Ветки</span></div></div>
+            <div className="row-bottom">
+              <div className="row-preview">Все обсуждения</div>
+              {threadUnreadCount > 0 && <span className="row-unread">{threadUnreadCount}</span>}
+            </div>
+          </div>
+        </div>
         {filtered.length === 0 && <div className="roster-empty">Ничего не найдено</div>}
         {filtered.map((chat) => {
           const last = lastMessages[chat.id];

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { captureScrollAnchor, didAppendNewestMessage, restoreScrollAnchor, ScrollAnchorSnapshot } from '../utils/scrollAnchor';
 import { nameFor } from '../utils/user';
 import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKey } from '../utils/time';
 import { isNativeMobile } from '../utils/mobileNotify';
@@ -237,6 +238,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // ошибочно принят за ручную прокрутку пользователя к старым сообщениям.
   const initialPinRef = useRef(false);
   const initialPinTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const prevLastMessageIdRef = useRef<number | null>(null);
 
   const [menuFor, setMenuFor] = useState<{
     id: number;
@@ -263,7 +265,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   // Позиция прокрутки на момент запроса следующей страницы истории —
   // подробности в useLayoutEffect ниже.
-  const pendingRestoreRef = useRef<{ height: number; top: number } | null>(null);
+  const pendingRestoreRef = useRef<ScrollAnchorSnapshot | null>(null);
 
   // Читается внутри эффектов вместо state — по значению из замыкания.
   // Обновляется в теле рендера, а не в отдельном эффекте, поэтому к моменту,
@@ -342,12 +344,19 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
 
     const chatJustOpened = prevChatIdRef.current !== chatId;
-    const grew = messages.length > prevMessagesLengthRef.current;
+    const currentLastId = messages[messages.length - 1]?.id ?? null;
+    const appendedNewest = didAppendNewestMessage(
+      prevMessagesLengthRef.current,
+      messages.length,
+      prevLastMessageIdRef.current,
+      currentLastId,
+      chatJustOpened,
+    );
     // Последнее добавленное — моё собственное: после отправки своего
     // сообщения лента уходит вниз всегда, даже если до этого читали историю
     // выше, — как и ожидается от «отправил и увидел, что ушло».
-    const lastIsMine = grew && messages[messages.length - 1]?.sender_id === currentUserId;
-    const mustStickToBottom = chatJustOpened || lastIsMine || (grew && shouldScrollRef.current);
+    const lastIsMine = appendedNewest && messages[messages.length - 1]?.sender_id === currentUserId;
+    const mustStickToBottom = chatJustOpened || lastIsMine || (appendedNewest && shouldScrollRef.current);
 
     if (mustStickToBottom) {
       // Первый проход — до показа кадра. При открытии чата делаем ещё две
@@ -359,6 +368,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
 
     prevMessagesLengthRef.current = messages.length;
+    prevLastMessageIdRef.current = currentLastId;
     prevChatIdRef.current = chatId;
   }, [messages, chatId, currentUserId, scrollContainerToBottom, startInitialPin]);
 
@@ -414,14 +424,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     const pending = pendingRestoreRef.current;
     const container = messagesContainerRef.current;
     if (!pending || !container) return;
-    if (container.scrollHeight <= pending.height) return;
-
-    container.scrollTop = container.scrollHeight - pending.height + pending.top;
-    pendingRestoreRef.current = null;
+    if (restoreScrollAnchor(container, pending)) pendingRestoreRef.current = null;
   }, [messages]);
 
   useEffect(() => {
     setShouldScrollToBottom(true);
+    shouldScrollRef.current = true;
     setShowJumpButton(false);
     prevMessagesLengthRef.current = 0;
     pendingRestoreRef.current = null;
@@ -514,18 +522,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    shouldScrollRef.current = isAtBottom;
     setShouldScrollToBottom(isAtBottom);
     // Порог был 300px — на коротком экране до него попросту не долистать, и
     // кнопка не появлялась вовсе. Хватает одного «экранчика» отступа от низа.
     setShowJumpButton(scrollHeight - scrollTop - clientHeight > 120);
 
     if (!initialPinRef.current && scrollTop < 150 && onScrollTop && hasMore && !loadingMore) {
-      pendingRestoreRef.current = { height: scrollHeight, top: scrollTop };
+      pendingRestoreRef.current = captureScrollAnchor(messagesContainerRef.current);
       onScrollTop();
     }
   };
 
   const jumpToBottom = () => {
+    shouldScrollRef.current = true;
     setShouldScrollToBottom(true);
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -943,6 +953,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           </button>
         </div>
       )}
+      {loadingMore && <div className="load-more-hint">Загрузка…</div>}
       <div
         ref={messagesContainerRef}
         className={'conv-body' + (touchSelecting || selectMode ? ' is-touch-selecting' : '') + (initialPositioning ? ' is-initial-positioning' : '')}
@@ -954,7 +965,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           closeMobileInputSurface();
         }}
       >
-        {loadingMore && <div className="load-more-hint">Загрузка…</div>}
         {messages.length === 0 && !loadingMore && (
           <div className="conv-empty-inline">
             <div className="conv-empty-badge">Сообщений пока нет</div>

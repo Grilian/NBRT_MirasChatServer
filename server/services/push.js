@@ -81,7 +81,8 @@ const CHANNEL_ID = 'messages_v2';
  * то есть ровно в том случае, ради которого пуш и нужен.
  */
 async function notifyNewMessage(userId, {
-  chatId, messageId, senderName, chatLabel, forceNotification = false, requiredFeature = null
+  chatId, messageId, senderName, chatLabel, forceNotification = false, requiredFeature = null,
+  threadRootId = null
 }) {
   if (!messaging) return;
 
@@ -102,14 +103,15 @@ async function notifyNewMessage(userId, {
     const response = await messaging.sendEachForMulticast({
       tokens,
       data: {
-        type: 'new_message',
+        type: threadRootId ? 'thread_message' : 'new_message',
         chatId: String(chatId),
         messageId: String(messageId),
+        ...(threadRootId ? { threadRootId: String(threadRootId) } : {}),
         forceNotification: forceNotification ? '1' : '0'
       },
       notification: {
         title,
-        body: 'Новое сообщение'
+        body: threadRootId ? 'Сообщение в ветке' : 'Новое сообщение'
       },
       android: {
         priority: 'high',
@@ -118,7 +120,7 @@ async function notifyNewMessage(userId, {
           icon: 'ic_launcher_foreground',
           // Уведомления одного чата складываются в стопку, а не сыплются
           // отдельными карточками — так же, как у локальных уведомлений.
-          tag: 'chat_' + chatId
+          tag: threadRootId ? `thread_${threadRootId}` : 'chat_' + chatId
         }
       }
     });

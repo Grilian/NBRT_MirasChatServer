@@ -28,8 +28,9 @@ import { WritePolicy, WRITE_BLOCKED_HINT } from '../utils/writePolicy';
 import StatusSheet from '../components/StatusSheet';
 import PollCreator from '../components/PollCreator';
 import ThreadPanel from '../components/ThreadPanel';
+import ThreadInbox from '../components/ThreadInbox';
 import { Poll, PollDraft } from '../types/poll';
-import { ThreadSummary } from '../types/thread';
+import { ThreadInboxItem, ThreadSummary } from '../types/thread';
 import { CustomEmojiMap, buildEmojiMap, toPlainText } from '../utils/customEmoji';
 import { invalidateEmojiPackCache } from '../components/EmojiPicker';
 import {
@@ -292,11 +293,33 @@ const Chat: React.FC = () => {
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeThread, setActiveThread] = useState<{ rootId: number; autoFocus: boolean } | null>(null);
+  const [threadInboxOpen, setThreadInboxOpen] = useState(false);
+  const [threadInboxItems, setThreadInboxItems] = useState<ThreadInboxItem[]>([]);
+  const [threadInboxLoading, setThreadInboxLoading] = useState(false);
+  const openThreadInboxRef = useRef<(rootId?: number) => void>(() => {});
+  const loadThreadInbox = useCallback(async () => {
+    setThreadInboxLoading(true);
+    try {
+      const { data } = await api.get<ThreadInboxItem[]>('/messages/threads');
+      setThreadInboxItems(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setThreadInboxLoading(false);
+    }
+  }, []);
   const updateThreadSummary = useCallback((rootId: number, summary: ThreadSummary) => {
     setMessages((previous) => previous.map((message) => (
       message.id === rootId ? { ...message, thread: summary } : message
     )));
+    setThreadInboxItems((previous) => previous.map((item) => (
+      item.root_id === rootId ? { ...item, summary } : item
+    )));
   }, []);
+  useEffect(() => { void loadThreadInbox(); }, [loadThreadInbox]);
+  useEffect(() => {
+    if (socketAuthenticated) void loadThreadInbox();
+  }, [socketAuthenticated, loadThreadInbox]);
   const [onlineUsers, setOnlineUsers] = useState<number[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const [lastMessages, setLastMessages] = useState<Record<string, LastMessage>>({});
@@ -517,6 +540,7 @@ const Chat: React.FC = () => {
   const liveRef = useRef({
     activeChat: null as string | null,
     activeThreadRootId: null as number | null,
+    threadInboxOpen: false,
     allUsers: [] as AllUser[],
     chatGroups: [] as ChatGroupSummary[],
     windowFocused: true,
@@ -537,9 +561,12 @@ const Chat: React.FC = () => {
   // как стопка уведомлений в Telegram.
   const pushToast = useCallback((incoming: Omit<ToastNotification, 'count' | 'revision'>) => {
     setToasts(prev => {
-      const existing = prev.find(t => t.chatId === incoming.chatId);
+      const sameTarget = (toast: Pick<ToastNotification, 'chatId' | 'threadRootId'>) => (
+        toast.chatId === incoming.chatId && toast.threadRootId === incoming.threadRootId
+      );
+      const existing = prev.find(sameTarget);
       if (existing) {
-        return prev.map(t => t.chatId === incoming.chatId
+        return prev.map(t => sameTarget(t)
           ? { ...t, ...incoming, count: t.count + 1, revision: t.revision + 1 }
           : t);
       }
@@ -547,9 +574,9 @@ const Chat: React.FC = () => {
     });
   }, []);
 
-  const dismissToast = useCallback((chatId: string) => {
-    setToasts(prev => prev.filter(t => t.chatId !== chatId));
-    dismissDesktopNotification(chatId);
+  const dismissToast = useCallback((chatId: string, threadRootId?: number) => {
+    setToasts(prev => prev.filter(t => !(t.chatId === chatId && t.threadRootId === threadRootId)));
+    dismissDesktopNotification(threadRootId ? `thread_${threadRootId}` : chatId);
   }, []);
 
   // Стейт, а не просто чтение localStorage на каждый рендер — иначе смену
@@ -695,7 +722,8 @@ const Chat: React.FC = () => {
   // Красная точка в трее/оверлей на таскбаре (desktop) и счётчик в заголовке
   // вкладки (веб) — пока есть непрочитанное. Заголовок вкладки для веб-версии
   // единственный индикатор, который виден, когда вкладка не активна.
-  const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+  const threadUnreadTotal = threadInboxItems.reduce((sum, item) => sum + item.summary.unread_count, 0);
+  const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0) + threadUnreadTotal;
   useEffect(() => {
     // Картинку оверлея рисуем здесь: в main-процессе нечем (см. badgeIcon.ts).
     window.electronAPI?.setUnreadBadge(totalUnread, renderUnreadBadge(totalUnread) || undefined);
@@ -717,8 +745,8 @@ const Chat: React.FC = () => {
   // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
   // тот же открытый чат, "назад" снова сворачивает, и так до полного
   // закрытия приложения.
-  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen, activeThread });
-  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen, activeThread };
+  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen, activeThread, threadInboxOpen });
+  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen, activeThread, threadInboxOpen };
 
   useEffect(() => watchMobileKeyboard(), []);
 
@@ -757,11 +785,17 @@ const Chat: React.FC = () => {
   const leaveConversation = useCallback(() => {
     closeKeyboard();
     setActiveThread(null);
+    setThreadInboxOpen(false);
     setView(VIEW_CHAT_LIST);
   }, [closeKeyboard]);
 
   const goToSection = useCallback((id: SectionId) => {
     closeKeyboard();
+    // Ветка принадлежит текущей переписке, а не оболочке приложения. Сбрасываем
+    // её в том же обновлении React, что и раздел, чтобы новый экран даже на один
+    // кадр не унаследовал колонку ветки.
+    setActiveThread(null);
+    setThreadInboxOpen(false);
     // Раздел всегда открывается «сначала»: «Чаты» — списком, а не последней
     // перепиской, «Настройки» — списком настроек, а не подэкраном профиля, на
     // котором человек был в прошлый раз.
@@ -799,6 +833,7 @@ const Chat: React.FC = () => {
       if (nav.profileOpen) { setProfileOpen(false); return; }
       if (nav.peopleOpen) { setPeopleOpen(false); return; }
       if (nav.activeThread) { setActiveThread(null); return; }
+      if (nav.threadInboxOpen) { leaveConversation(); return; }
       // Тот же сброс, что и в goToSection: аппаратная кнопка «назад» возвращает
       // к списку чатов, а не в переписку, открытую до ухода в другой раздел.
       if (nav.view.section !== 'chats') { setView(VIEW_CHAT_LIST); return; }
@@ -1397,9 +1432,11 @@ const Chat: React.FC = () => {
         };
       }));
       if (message.sender_id !== currentUserId) refetchUnread();
+      void loadThreadInbox();
     };
     const onThreadSummary = (event: { root_id: number }) => {
       const rootId = Number(event.root_id);
+      void loadThreadInbox();
       api.get<ThreadSummary>(`/messages/threads/${rootId}/summary`)
         .then(({ data }) => updateThreadSummary(rootId, data))
         .catch((error) => {
@@ -1409,11 +1446,13 @@ const Chat: React.FC = () => {
     const onThreadRead = (event: { root_id: number; summary: ThreadSummary }) => {
       updateThreadSummary(Number(event.root_id), { ...event.summary, unread_count: 0 });
       refetchUnread(activeChat || undefined);
+      void loadThreadInbox();
     };
     const onThreadNotification = (message: Message & { root_id: number }) => {
       const live = liveRef.current;
       const visible = live.windowFocused && live.conversationVisible
-        && live.activeChat === message.chat_id && live.activeThreadRootId === Number(message.root_id);
+        && live.activeThreadRootId === Number(message.root_id)
+        && (live.threadInboxOpen || live.activeChat === message.chat_id);
       const forced = message.force_notification === true;
       const chatMuted = message.chat_id ? live.mutedChatIds.has(message.chat_id) : false;
       if (visible || ((!live.prefs.enabled || chatMuted) && !forced) || !message.chat_id) return;
@@ -1422,11 +1461,12 @@ const Chat: React.FC = () => {
       const isGeneral = message.chat_id === GENERAL_CHAT_ID;
       const otherUser = live.allUsers.find((user) => chatIdFor(currentUserId, user.id) === message.chat_id);
       const chatName = isGeneral ? 'Общий чат' : group ? group.name : (otherUser ? nameFor(otherUser) : 'Чат');
-      const body = `${nameFor(message)}: ответ в ветке`;
+      const body = `${nameFor(message)}: Сообщение в ветке`;
 
       if ((live.prefs.sound || forced) && (!isNativeMobile || live.windowFocused)) playIncomingSound();
       pushToast({
         chatId: message.chat_id,
+        threadRootId: Number(message.root_id),
         title: `Ветка · ${chatName}`,
         body,
         avatarPath: otherUser?.avatarPath ?? null,
@@ -1434,7 +1474,7 @@ const Chat: React.FC = () => {
         isGroup: !!group,
       });
       if (!live.windowFocused) {
-        if (isNativeMobile) showMobileNotification(message.id, `MirasChat — Ветка · ${chatName}`, body, message.chat_id);
+        if (isNativeMobile) showMobileNotification(message.id, `MirasChat — Ветка · ${chatName}`, body, message.chat_id, Number(message.root_id));
         else if (live.prefs.system || forced) {
           showDesktopNotification({
             title: `Ветка · ${chatName}`,
@@ -1443,24 +1483,31 @@ const Chat: React.FC = () => {
             onClick: () => {
               window.electronAPI?.focusWindow?.();
               window.focus();
-              handleSelectChatRef.current(message.chat_id!);
+              openThreadInboxRef.current(Number(message.root_id));
             },
           });
         }
         window.electronAPI?.flashWindow?.();
       }
     };
+    const onThreadListChanged = () => { void loadThreadInbox(); };
     socket.on('thread_message', onThreadMessage);
     socket.on('thread_summary_changed', onThreadSummary);
     socket.on('thread_read', onThreadRead);
     socket.on('thread_notification', onThreadNotification);
+    socket.on('thread_hidden', onThreadListChanged);
+    socket.on('message_deleted', onThreadListChanged);
+    socket.on('messages_deleted', onThreadListChanged);
     return () => {
       socket.off('thread_message', onThreadMessage);
       socket.off('thread_summary_changed', onThreadSummary);
       socket.off('thread_read', onThreadRead);
       socket.off('thread_notification', onThreadNotification);
+      socket.off('thread_hidden', onThreadListChanged);
+      socket.off('message_deleted', onThreadListChanged);
+      socket.off('messages_deleted', onThreadListChanged);
     };
-  }, [activeChat, activeThread?.rootId, currentUserId, pushToast, refetchUnread, socket, updateThreadSummary]);
+  }, [activeChat, activeThread?.rootId, currentUserId, loadThreadInbox, pushToast, refetchUnread, socket, updateThreadSummary]);
 
   useEffect(() => { setActiveThread(null); }, [activeChat]);
 
@@ -1610,6 +1657,17 @@ const Chat: React.FC = () => {
   const handleMarkAllRead = () => {
     if (!socket) return;
     socket.emit('mark_all_read');
+    const unreadRoots = threadInboxItems
+      .filter((item) => item.summary.unread_count > 0)
+      .map((item) => item.root_id);
+    if (unreadRoots.length > 0) {
+      setThreadInboxItems((previous) => previous.map((item) => ({
+        ...item, summary: { ...item.summary, unread_count: 0 },
+      })));
+      void Promise.all(unreadRoots.map((rootId) => api.post(`/messages/threads/${rootId}/read`)))
+        .then(() => loadThreadInbox())
+        .catch(console.error);
+    }
     setUnreadCounts({});
     setToasts([]);
     dismissAllMobileNotifications();
@@ -1673,6 +1731,7 @@ const Chat: React.FC = () => {
   liveRef.current = {
     activeChat,
     activeThreadRootId: activeThread?.rootId || null,
+    threadInboxOpen,
     allUsers,
     chatGroups,
     windowFocused,
@@ -1683,6 +1742,8 @@ const Chat: React.FC = () => {
   };
 
   const handleSelectChat = (chatId: string) => {
+    setThreadInboxOpen(false);
+    setActiveThread(null);
     // Сначала выясняем, знаем ли мы вообще такой чат. Раньше проверка стояла
     // только вокруг setActiveChat, а панель переключалась на переписку в любом
     // случае — и при неизвестном chat_id (тап по уведомлению от человека,
@@ -1718,6 +1779,16 @@ const Chat: React.FC = () => {
     setView(VIEW_CONVERSATION);
   };
 
+  const openThreadInbox = useCallback((rootId?: number) => {
+    closeKeyboard();
+    setThreadInboxOpen(true);
+    setActiveThread(rootId ? { rootId, autoFocus: false } : null);
+    setView(VIEW_CONVERSATION);
+    void loadThreadInbox();
+  }, [closeKeyboard, loadThreadInbox]);
+
+  openThreadInboxRef.current = openThreadInbox;
+
   // Тап по системному уведомлению на Android — открыть тот же чат, откуда
   // пришло сообщение. handleSelectChat пересоздаётся на каждый рендер, поэтому
   // держим актуальную версию в ref и подписываемся на нативное событие один раз.
@@ -1726,14 +1797,15 @@ const Chat: React.FC = () => {
 
   // Тап по уведомлению: у задачи переписки нет, поэтому её карточка ведёт в
   // раздел, а не в чат.
-  const openFromNotificationRef = useRef((chatId: string) => {
+  const openFromNotificationRef = useRef((chatId: string, threadRootId?: number) => {
+    if (threadRootId) { openThreadInboxRef.current(threadRootId); return; }
     if (chatId === TASKS_TOAST_ID) goToSectionRef.current('tasks');
     else handleSelectChatRef.current(chatId);
   });
 
   useEffect(() => {
-    return onMobileNotificationTap((chatId) => {
-      openFromNotificationRef.current(chatId);
+    return onMobileNotificationTap((chatId, threadRootId) => {
+      openFromNotificationRef.current(chatId, threadRootId);
     });
   }, []);
 
@@ -1741,8 +1813,8 @@ const Chat: React.FC = () => {
   // выгруженное приложение. Регистрируем токен при каждом запуске, а тап по
   // карточке из шторки ведёт в тот же чат, что и локальное уведомление.
   useEffect(() => {
-    return initMobilePush((chatId) => {
-      openFromNotificationRef.current(chatId);
+    return initMobilePush((chatId, threadRootId) => {
+      openFromNotificationRef.current(chatId, threadRootId);
     });
   }, []);
 
@@ -2408,24 +2480,27 @@ const Chat: React.FC = () => {
   // композитора оставалась поверх списка и запирала экран — см. useNarrowLayout.
   const showRoster = isChats && (!narrowLayout || !conversationOpen);
   const showConversation = isChats && (!narrowLayout || conversationOpen);
+  // Защита раскладки: устаревшее состояние чата не должно влиять на другие разделы.
+  const threadPaneOpen = showConversation && activeThread !== null;
 
   return (
     <div
       className={'chat-layout'
         + (isChats ? '' : ' is-single-pane')
         + (conversationOpen ? ' is-conversation-view' : '')
-        + (activeThread ? ' is-thread-open' : '')
+        + (threadPaneOpen ? ' is-thread-open' : '')
         + (skipPaneAnim ? ' is-no-pane-anim' : '')}
       style={{ ['--roster-w' as string]: `${uiPrefs.rosterWidth}px` }}
     >
       <NotificationStack
         toasts={toasts}
         durationMs={notificationPrefs.durationMs}
-        onOpen={(chatId) => {
+        onOpen={(chatId, threadRootId) => {
           // Уведомление о задаче ведёт в раздел «Задачи»: переписки за ним нет.
-          if (chatId === TASKS_TOAST_ID) goToSection('tasks');
+          if (threadRootId) openThreadInbox(threadRootId);
+          else if (chatId === TASKS_TOAST_ID) goToSection('tasks');
           else handleSelectChat(chatId);
-          dismissToast(chatId);
+          dismissToast(chatId, threadRootId);
         }}
         onDismiss={dismissToast}
       />
@@ -2456,7 +2531,10 @@ const Chat: React.FC = () => {
         customEmoji={customEmoji}
         chats={chats}
         recentChats={recentChats}
-        activeChat={activeChat}
+        activeChat={threadInboxOpen ? null : activeChat}
+        threadsActive={threadInboxOpen}
+        threadUnreadCount={threadUnreadTotal}
+        onOpenThreads={() => openThreadInbox()}
         onSelectChat={handleSelectChat}
         onOpenDirectory={() => setDirectoryOpen(true)}
         searchQuery={searchQuery}
@@ -2687,7 +2765,16 @@ const Chat: React.FC = () => {
         </main>
       )}
 
-      {showConversation && (
+      {showConversation && (threadInboxOpen ? (
+        <ThreadInbox
+          items={threadInboxItems}
+          loading={threadInboxLoading}
+          activeRootId={activeThread?.rootId}
+          customEmoji={customEmoji}
+          onBack={leaveConversation}
+          onOpen={(rootId) => setActiveThread({ rootId, autoFocus: false })}
+        />
+      ) : (
         <main className="conversation">
           <div className="conv-head">
             <button type="button" className="icon-btn back-btn" onClick={leaveConversation} aria-label="Назад к списку">
@@ -2828,7 +2915,7 @@ const Chat: React.FC = () => {
             }}
           />
         </main>
-      )}
+      ))}
       {showConversation && activeThread && socket && (
         <ThreadPanel
           key={activeThread.rootId}
@@ -2838,7 +2925,7 @@ const Chat: React.FC = () => {
           customEmoji={customEmoji}
           reactionEmoji={reactionEmoji}
           autoFocus={activeThread.autoFocus}
-          disabled={muted || activeChatMeta?.canPostHere === false}
+          disabled={muted || (!threadInboxOpen && activeChatMeta?.canPostHere === false)}
           onClose={() => {
             closeKeyboard();
             setActiveThread(null);

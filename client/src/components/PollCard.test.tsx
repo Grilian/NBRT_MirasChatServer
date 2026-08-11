@@ -65,3 +65,27 @@ test('hides participant input at the 12-option limit and keeps anonymous voters 
   expect(screen.queryByRole('button', { name: /Посмотреть голоса/ })).not.toBeInTheDocument();
   expect(screen.getByText('1 голос')).toBeInTheDocument();
 });
+
+test('keeps the voters window open during mousedown and closes it on backdrop click', () => {
+  const { container } = render(<PollCard
+    poll={pollFixture({
+      has_voted: true,
+      total_voters: 1,
+      user_option_ids: [1],
+      options: [
+        { id: 1, text: 'Москва', position: 0, created_by: 1, vote_count: 1, percentage: 100, is_winner: true, voters: [{ id: 2, display_name: 'Тест', username: 'test', avatar_path: null, voted_at: Date.now() }] },
+        { id: 2, text: 'Казань', position: 1, created_by: 1, vote_count: 0, percentage: 0, is_winner: false, voters: [] },
+      ],
+    })}
+    onVote={jest.fn()}
+    onAddOption={jest.fn()}
+  />);
+
+  fireEvent.click(screen.getByRole('button', { name: /Посмотреть голоса/ }));
+  const layer = container.querySelector('.poll-voters-layer') as HTMLElement;
+  fireEvent.mouseDown(layer);
+  expect(screen.getByRole('dialog', { name: 'Голоса в опросе' })).toBeInTheDocument();
+
+  fireEvent.click(layer);
+  expect(screen.queryByRole('dialog', { name: 'Голоса в опросе' })).not.toBeInTheDocument();
+});

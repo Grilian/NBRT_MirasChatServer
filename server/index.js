@@ -804,6 +804,7 @@ io.on('connection', (socket) => {
           chatLabel,
           forceNotification,
           requiredFeature: 'threads',
+          threadRootId: Number(root.id),
         });
       }
 

@@ -31,7 +31,7 @@ async function registerToken(token: string) {
  *
  * Возвращает функцию отписки.
  */
-export function initMobilePush(onOpenChat: (chatId: string) => void): () => void {
+export function initMobilePush(onOpenChat: (chatId: string, threadRootId?: number) => void): () => void {
   if (!isNativeMobile) return () => {};
 
   const handles: Promise<{ remove: () => Promise<void> }>[] = [];
@@ -49,7 +49,8 @@ export function initMobilePush(onOpenChat: (chatId: string) => void): () => void
 
   handles.push(PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
     const chatId = action.notification?.data?.chatId;
-    if (chatId) onOpenChat(chatId);
+    const threadRootId = Number(action.notification?.data?.threadRootId) || undefined;
+    if (chatId) onOpenChat(chatId, threadRootId);
   }));
 
   // Пуш при живом приложении. Сервер шлёт его только тем, у кого нет сокета,

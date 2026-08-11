@@ -159,7 +159,7 @@ const PollCard: React.FC<PollCardProps> = ({ poll, onVote, onAddOption, selectio
       )}
 
       {votersOpen && (
-        <div className="poll-voters-layer" onMouseDown={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) setVotersOpen(false); }}>
+        <div className="poll-voters-layer" onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) setVotersOpen(false); }}>
           <div className="poll-voters-sheet" role="dialog" aria-modal="true" aria-label="Голоса в опросе">
             <div className="poll-voters-head">
               <div><strong>{poll.question}</strong><span>{poll.total_voters} голосов</span></div>

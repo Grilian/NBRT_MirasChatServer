@@ -93,7 +93,7 @@ const PollCreator: React.FC<PollCreatorProps> = ({ onClose, onCreate, submitting
   };
 
   return (
-    <div className="poll-creator-layer" role="dialog" aria-modal="true" aria-label="Новый опрос" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="poll-creator-layer" role="dialog" aria-modal="true" aria-label="Новый опрос" onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}>
       <form className="poll-creator" onSubmit={submit}>
         <header className="poll-creator-head">
           <button type="button" className="poll-creator-back" onClick={onClose} aria-label="Закрыть" disabled={submitting}>

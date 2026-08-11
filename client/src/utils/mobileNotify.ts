@@ -41,7 +41,7 @@ function toNotificationId(messageId: number) {
   return messageId % 2147483647;
 }
 
-export async function showMobileNotification(messageId: number, title: string, body: string, chatId: string) {
+export async function showMobileNotification(messageId: number, title: string, body: string, chatId: string, threadRootId?: number) {
   if (!isNativeMobile) return;
   try {
     await LocalNotifications.schedule({
@@ -54,14 +54,14 @@ export async function showMobileNotification(messageId: number, title: string, b
           channelId: MESSAGE_CHANNEL_ID,
           // Уведомления одного чата Android складывает в одну стопку, а не
           // сыплет отдельными карточками на каждое сообщение — как в Telegram.
-          group: `chat_${chatId}`,
+          group: threadRootId ? `thread_${threadRootId}` : `chat_${chatId}`,
           // Тап по уведомлению убирает его из шторки (мы всё равно открываем
           // этот чат). Без autoCancel карточка остаётся висеть после перехода.
           autoCancel: true,
           // ongoing: false — уведомление можно смахнуть. Явно, потому что по
           // умолчанию поведение зависит от версии плагина.
           ongoing: false,
-          extra: { chatId }
+          extra: { chatId, threadRootId }
         }
       ]
     });
@@ -72,12 +72,13 @@ export async function showMobileNotification(messageId: number, title: string, b
 
 // Тап по уведомлению в шторке — переходим в нужный чат. Возвращает функцию
 // отписки; вызывающий должен снять слушатель при размонтировании.
-export function onMobileNotificationTap(callback: (chatId: string) => void): () => void {
+export function onMobileNotificationTap(callback: (chatId: string, threadRootId?: number) => void): () => void {
   if (!isNativeMobile) return () => {};
 
   const listenerPromise = LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
     const chatId = action.notification?.extra?.chatId;
-    if (chatId) callback(chatId);
+    const threadRootId = Number(action.notification?.extra?.threadRootId) || undefined;
+    if (chatId) callback(chatId, threadRootId);
   });
 
   return () => { listenerPromise.then((h) => h.remove()); };
