@@ -13,7 +13,8 @@ import {
   onKeyboardWillHide,
   onKeyboardWillShow,
   registerMobileInputSurfaceCloser,
-  setChatKeyboardResizeMode,
+  acquireChatKeyboardResizeMode,
+  refreshMobileKeyboardResizeMode,
 } from '../utils/mobileKeyboard';
 
 export interface PendingImage {
@@ -126,6 +127,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (!autoFocus || disabled) return;
@@ -177,18 +179,18 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // уезжают от клавиатуры на штатном ресайзе.
   useEffect(() => {
     if (!isNativeMobile) return undefined;
-    setChatKeyboardResizeMode(true);
+    const releaseResizeMode = acquireChatKeyboardResizeMode();
     // После блокировки/разблокировки Android может восстановить manifest resize mode уже после
     // onResume. Повторяем overlay-команду из JS; нативный плагин дополнительно делает то же сам.
     const listenerPromise = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) setChatKeyboardResizeMode(true);
+      if (isActive) refreshMobileKeyboardResizeMode();
     });
-    const restoreOverlayAfterRotation = () => setChatKeyboardResizeMode(true);
+    const restoreOverlayAfterRotation = () => refreshMobileKeyboardResizeMode();
     window.addEventListener('orientationchange', restoreOverlayAfterRotation);
     return () => {
       window.removeEventListener('orientationchange', restoreOverlayAfterRotation);
       listenerPromise.then((handle) => handle.remove()).catch(() => {});
-      setChatKeyboardResizeMode(false);
+      releaseResizeMode();
     };
   }, []);
 
@@ -206,7 +208,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
       applyNativeHeight(height);
       // IME разрешено появляться только после явного запроса режима keyboard:
       // тап по закрытому полю либо кнопка клавиатуры из emoji-панели.
-      if (mobileInputModeRef.current !== 'keyboard') hideMobileKeyboard();
+      // Событие глобальное для Activity: основной composer не должен закрывать
+      // клавиатуру поля ветки или редактора опроса, расположенного поверх него.
+      const active = document.activeElement;
+      const ownsFocusedField = !!active && !!composerRef.current?.contains(active);
+      if (ownsFocusedField && mobileInputModeRef.current !== 'keyboard') hideMobileKeyboard();
     });
     const removeDidShow = onKeyboardShow((height) => {
       applyNativeHeight(height);
@@ -642,6 +648,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   return (
     <form
+      ref={composerRef}
       onSubmit={handleSubmit}
       className={'composer' + (dragActive ? ' is-drag-over' : '') + (surfaceActive ? ' has-mobile-input-surface' : '')}
       style={{ '--mobile-emoji-height': `${emojiPanelHeight}px` } as React.CSSProperties}

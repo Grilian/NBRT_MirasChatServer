@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PollDraft } from '../types/poll';
+import { acquireStandardKeyboardResizeMode } from '../utils/mobileKeyboard';
 
 interface PollCreatorProps {
   onClose: () => void;
@@ -49,6 +50,10 @@ const PollCreator: React.FC<PollCreatorProps> = ({ onClose, onCreate, submitting
   const [limited, setLimited] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(24 * 60);
   const optionRefs = useRef<Array<HTMLInputElement | null>>([]);
+
+  // Под перепиской остаётся MessageInput с Android adjustNothing. Редактору
+  // опроса нужен штатный adjustResize, иначе нижние варианты закрывает IME.
+  useEffect(() => acquireStandardKeyboardResizeMode(), []);
 
   const cleanOptions = useMemo(() => options.map((option) => option.trim()).filter(Boolean), [options]);
   const duplicateOptions = useMemo(() => {

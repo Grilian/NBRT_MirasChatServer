@@ -35,6 +35,12 @@ function readStoredKeyboardHeight(): number {
 const storedKeyboardHeight = readStoredKeyboardHeight();
 let lastKeyboardHeight = storedKeyboardHeight >= 120 ? storedKeyboardHeight : 300;
 let closeInputSurface: (() => boolean) | null = null;
+// Ветка монтирует второй MessageInput поверх основного, а редактор опроса —
+// обычные поля поверх обоих. Прямые setOverlay(true/false) от каждого экрана
+// конфликтовали: размонтирование одного composer выключало overlay у другого.
+// Счётчики превращают режим окна в совместно используемый ресурс.
+let chatOverlayOwners = 0;
+let standardResizeOwners = 0;
 
 function visibleKeyboardHeight(nativeHeight = 0): number {
   return Math.max(0, Math.round(nativeHeight - navigationBarHeight));
@@ -210,8 +216,9 @@ export function showMobileKeyboard(): void {
  * Ничего не ждём и не бросаем — тот же принцип, что и в hideMobileKeyboard:
  * нативный мост может быть недоступен, рендер от него зависеть не должен.
  */
-export function setChatKeyboardResizeMode(active: boolean): void {
+function applyKeyboardResizeMode(): void {
   if (!isNativeMobile) return;
+  const active = chatOverlayOwners > 0 && standardResizeOwners === 0;
   try {
     ChatKeyboard.setOverlay({ active }).then((result) => {
       if (typeof result.navigationBarHeight === 'number') {
@@ -221,4 +228,40 @@ export function setChatKeyboardResizeMode(active: boolean): void {
   } catch {
     // Плагин недоступен — не наша забота, экран продолжает жить как есть.
   }
+}
+
+/** Удерживать overlay-режим, пока смонтирован composer переписки. */
+export function acquireChatKeyboardResizeMode(): () => void {
+  if (!isNativeMobile) return () => {};
+  chatOverlayOwners += 1;
+  applyKeyboardResizeMode();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    chatOverlayOwners = Math.max(0, chatOverlayOwners - 1);
+    applyKeyboardResizeMode();
+  };
+}
+
+/**
+ * Модальные формы с обычными input/textarea должны использовать adjustResize,
+ * даже если под ними остаётся смонтированная переписка.
+ */
+export function acquireStandardKeyboardResizeMode(): () => void {
+  if (!isNativeMobile) return () => {};
+  standardResizeOwners += 1;
+  applyKeyboardResizeMode();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    standardResizeOwners = Math.max(0, standardResizeOwners - 1);
+    applyKeyboardResizeMode();
+  };
+}
+
+/** Повторно применить выбранный владельцами режим после resume/rotation. */
+export function refreshMobileKeyboardResizeMode(): void {
+  applyKeyboardResizeMode();
 }

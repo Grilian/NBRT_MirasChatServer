@@ -63,7 +63,7 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
   const coverUrl = resolveUploadUrl(user.avatarPath);
 
   // Подсказка о неготовом разделе гаснет сама через пару секунд.
-  const [soonNote, setSoonNote] = useState<string | null>(null);
+  const [soonNote, setSoonNote] = useState<{ text: string; planned: boolean } | null>(null);
   useEffect(() => {
     if (!soonNote) return;
     const t = setTimeout(() => setSoonNote(null), 2200);
@@ -96,16 +96,23 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
   };
 
   const runProfileAction = async (key: string, label: string) => {
-    if (key !== 'mute' || !onToggleNotifications) {
-      setSoonNote(label);
+    if (key !== 'mute') {
+      setSoonNote({ text: label, planned: true });
+      return;
+    }
+    if (!onToggleNotifications) {
+      setSoonNote({ text: 'Не удалось изменить уведомления', planned: false });
       return;
     }
     setNotificationBusy(true);
     try {
       await onToggleNotifications(!notificationsMuted);
-      setSoonNote(notificationsMuted ? 'Уведомления включены' : 'Уведомления отключены');
+      setSoonNote({
+        text: notificationsMuted ? 'Уведомления включены' : 'Уведомления отключены',
+        planned: false,
+      });
     } catch (error: any) {
-      setSoonNote(error.response?.data?.error || 'Не удалось изменить уведомления');
+      setSoonNote({ text: error.response?.data?.error || 'Не удалось изменить уведомления', planned: false });
     } finally {
       setNotificationBusy(false);
     }
@@ -337,7 +344,7 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
                   key={tab}
                   type="button"
                   className={'user-info-files-tab' + (i === 0 ? ' is-active' : '')}
-                  onClick={() => setSoonNote(tab)}
+                  onClick={() => setSoonNote({ text: tab, planned: true })}
                 >
                   {tab}
                 </button>
@@ -349,7 +356,11 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
 
         {/* Ответ на нажатие того, что ещё не сделано. Само пропадает — просить
             закрыть подсказку, которая ничего не сообщила, незачем. */}
-        {soonNote && <div className="user-info-soon" role="status">{soonNote} — в разработке</div>}
+        {soonNote && (
+          <div className="user-info-soon" role="status">
+            {soonNote.text}{soonNote.planned ? ' — в разработке' : ''}
+          </div>
+        )}
       </div>
     </div>
   );

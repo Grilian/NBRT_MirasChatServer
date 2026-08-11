@@ -121,4 +121,26 @@ describe('ChatWindow threads', () => {
     fireEvent.click(getByRole('button', { name: 'Ответить в ветке' }));
     expect(onOpenThread).toHaveBeenCalledWith(1, true);
   });
+
+  test('shows an existing thread inline in a personal chat', () => {
+    const onOpenThread = jest.fn();
+    const { getByRole } = render(
+      <ChatWindow
+        chatId="1_2"
+        messages={[{ ...message, file_path: null, thread: {
+          reply_count: 2,
+          unread_count: 0,
+          last_reply_at: '2026-08-09T10:05:00.000Z',
+          recent_authors: [{ id: 2, username: 'user' }],
+        } }]}
+        currentUserId={1}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+        onOpenThread={onOpenThread}
+      />,
+    );
+
+    fireEvent.click(getByRole('button', { name: /2 ответа/ }));
+    expect(onOpenThread).toHaveBeenCalledWith(1, false);
+  });
 });
