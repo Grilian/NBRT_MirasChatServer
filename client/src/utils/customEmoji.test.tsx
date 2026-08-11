@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { renderMessageText } from './customEmoji';
 
@@ -29,5 +29,30 @@ describe('renderMessageText', () => {
 
     expect(container.querySelector('img.custom-emoji')).toBeInTheDocument();
     expect(screen.getByRole('link')).toHaveAttribute('href', 'https://example.com');
+  });
+
+  // На слабой связи анимированный webp приезжает заметно позже текста. Пока он
+  // в пути, место держит базовый эмодзи — иначе в предложении зияла бы дыра.
+  test('пока картинка смайлика не пришла, на её месте базовый эмодзи', () => {
+    const map = { cat: { filePath: '/uploads/emoji/cat_ab12.webp', fallback: '🐱' } };
+    const { container } = render(<div>{renderMessageText('Привет :cat:', map)}</div>);
+
+    const image = container.querySelector('img.custom-emoji');
+    expect(image).toHaveClass('is-loading');
+    expect(container.querySelector('.custom-emoji-fallback.is-placeholder')).toHaveTextContent('🐱');
+
+    // Картинка приехала — заглушка уходит, остаётся только она.
+    fireEvent.load(image!);
+    expect(container.querySelector('.custom-emoji-fallback')).not.toBeInTheDocument();
+    expect(container.querySelector('img.custom-emoji')).not.toHaveClass('is-loading');
+  });
+
+  test('пропавший файл заменяется базовым эмодзи, а не битой картинкой', () => {
+    const map = { dog: { filePath: '/uploads/emoji/dog_cd34.webp', fallback: '🐶' } };
+    const { container } = render(<div>{renderMessageText(':dog:', map)}</div>);
+
+    fireEvent.error(container.querySelector('img.custom-emoji')!);
+    expect(container.querySelector('img.custom-emoji')).not.toBeInTheDocument();
+    expect(container.querySelector('.custom-emoji-fallback')).toHaveTextContent('🐶');
   });
 });

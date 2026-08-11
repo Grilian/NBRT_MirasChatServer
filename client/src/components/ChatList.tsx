@@ -57,6 +57,7 @@ interface ChatListProps {
   onRemoveContact: (userId: number) => void;
   onOpenUserInfo: (userId: number) => void;
   onOpenGroupInfo: (chatGroupId: number) => void;
+  onOpenGeneralInfo?: () => void;
   onCreateGroup: () => void;
   /** Только для узкого экрана — на нём в нижней панели «Настройкам» не хватило
       места (см. .rail-item-settings в theme.css), поэтому вход туда здесь. */
@@ -65,7 +66,12 @@ interface ChatListProps {
   resizeHandle?: React.ReactNode;
 }
 
-function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOpenGroupInfo: (chatGroupId: number) => void) {
+function renderAvatar(
+  chat: Chat,
+  onOpenUserInfo: (userId: number) => void,
+  onOpenGroupInfo: (chatGroupId: number) => void,
+  onOpenGeneralInfo?: () => void,
+) {
   const avatar = (
     <Avatar
       name={chat.name}
@@ -90,6 +96,14 @@ function renderAvatar(chat: Chat, onOpenUserInfo: (userId: number) => void, onOp
       </button>
     );
   }
+  // У общего чата нет ни собеседника, ни строки в chat_groups — своя ветка.
+  if (chat.section === 'general' && onOpenGeneralInfo) {
+    return (
+      <button type="button" className="row-avatar-btn" onClick={(e) => { e.stopPropagation(); onOpenGeneralInfo(); }} aria-label="Об общем чате">
+        {avatar}
+      </button>
+    );
+  }
   return avatar;
 }
 
@@ -97,7 +111,7 @@ const ChatList: React.FC<ChatListProps> = ({
   chats, recentChats, activeChat, threadsActive = false, threadUnreadCount = 0, onOpenThreads = () => {},
   onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite,
-  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onCreateGroup, onOpenSettings,
+  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo, onCreateGroup, onOpenSettings,
   resizeHandle,
   selfName, selfAvatarPath, statusPreset, statusCustom, onOpenStatus, customEmoji = {},
 }) => {
@@ -291,7 +305,7 @@ const ChatList: React.FC<ChatListProps> = ({
                 onClick={() => onSelectChat(chat.id)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChat(chat.id); } }}
               >
-                {renderAvatar(chat, onOpenUserInfo, onOpenGroupInfo)}
+                {renderAvatar(chat, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo)}
                 <div className="row-body">
                   <div className="row-top">
                     <div className="row-name">

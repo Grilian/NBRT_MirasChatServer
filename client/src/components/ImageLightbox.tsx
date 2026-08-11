@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { registerBackInterceptor } from '../utils/backInterceptors';
 
 interface ImageLightboxProps {
   url: string;
@@ -91,6 +92,11 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose }) => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // Escape есть только на ПК. На Android то же самое делает аппаратный Back —
+  // иначе он закрывал переписку под открытой картинкой, а картинка оставалась
+  // висеть уже поверх списка чатов.
+  useEffect(() => registerBackInterceptor(onClose), [onClose]);
 
   useEffect(() => {
     const box = overlayRef.current;

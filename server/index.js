@@ -54,7 +54,6 @@ const { listRecentChats } = require('./services/recentChats');
 const {
   ThreadError,
   rootForUser,
-  threadSummary,
   hideThread,
   softDeleteThread,
 } = require('./services/threads');
@@ -184,7 +183,22 @@ app.use('/api/notification-settings', notificationSettingsRoutes);
 // Смонтировано под /api/uploads (а не просто /uploads): в проде reverse-proxy
 // проксирует на бэкенд только префикс /api — отдельного правила для /uploads
 // нет, и файлы отдавались бы SPA-фолбэком (index.html) вместо самой картинки.
-app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
+// Кэш навсегда: по умолчанию express.static шлёт `max-age=0`, и браузер
+// перепроверяет КАЖДЫЙ файл при каждом открытии — пусть ответом и будет 304,
+// но на слабой связи это лишний круговой обход на каждый смайлик, аватар и
+// картинку. Именно это делало открытие группы заметно медленнее личного чата:
+// в группе под каждым сообщением аватар, и таких перепроверок десятки.
+//
+// immutable здесь не допущение, а свойство схемы имён: содержимое по одному и
+// тому же пути не меняется НИКОГДА. Аватар — `user_<id>_<время>.jpg` (новая
+// загрузка = новое имя, старый файл удаляется), картинка сообщения —
+// `msg_<id>_<время>_<случайное>.webp`, смайлик — `emoji_<имя>_<случайное>.webp`
+// (замена картинки под тем же кодом пишет НОВЫЙ файл и удаляет прежний).
+// Заводя загрузку с предсказуемым именем, это правило придётся пересмотреть.
+app.use('/api/uploads', express.static(path.join(__dirname, 'uploads'), {
+  maxAge: '365d',
+  immutable: true,
+}));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -761,10 +775,12 @@ io.on('connection', (socket) => {
       };
 
       emitToChat(root.chat_id, 'thread_message', message, senderId);
-      emitToChat(root.chat_id, 'thread_summary_changed', {
-        root_id: Number(root.id),
-        summary: threadSummary(root.id, senderId),
-      }, senderId);
+      // Только сигнал «сводка ветки изменилась», без самой сводки: unread в ней
+      // считается под конкретного зрителя, а событие одно на всех. Раньше сюда
+      // клалась сводка отправителя (unread всегда 0) — по ней у остальных
+      // непрочитанное обнулялось бы. Актуальную каждый клиент берёт сам через
+      // /threads/:id/summary — как это и делается, см. onThreadSummary.
+      emitToChat(root.chat_id, 'thread_summary_changed', { root_id: Number(root.id) }, senderId);
       respond({ ok: true, messageId: message.id, createdAt: message.created_at, pollId });
 
       // Уведомления ветки получают автор корня и уже участвовавшие в ней люди.
@@ -1060,7 +1076,6 @@ io.on('connection', (socket) => {
         }, row.sender_id);
         emitToChat(row.chat_id, 'thread_summary_changed', {
           root_id: Number(row.thread_root_id),
-          summary: threadSummary(row.thread_root_id, userId),
         }, row.sender_id);
       }
     } catch (e) {

@@ -1073,7 +1073,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         }}
                         title={msg.status === 'failed' ? 'Не отправлено. Нажмите, чтобы повторить' : undefined}
                       >
-                        <img src={imageUrl} alt="" />
+                        {/* Ленивая загрузка безопасна именно здесь: у обёртки
+                            задан aspectRatio из сохранённых file_width/height,
+                            то есть место под картинку известно до её прихода и
+                            лента не дёргается. Без этого на слабой связи вся
+                            история тянула изображения разом, конкурируя за
+                            канал с текстом, который человеку нужен раньше. */}
+                        <img src={imageUrl} alt="" loading="lazy" decoding="async" />
                         {msg.status === 'failed' && (
                           <span className="image-send-retry" aria-hidden="true">!</span>
                         )}

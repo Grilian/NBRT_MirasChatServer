@@ -5,6 +5,7 @@ import { nameFor } from '../utils/user';
 import { formatDate } from '../utils/time';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 import { resolveUploadUrl } from '../utils/uploads';
+import { acquireStandardKeyboardResizeMode } from '../utils/mobileKeyboard';
 
 interface UserInfoModalProps {
   user: {
@@ -61,6 +62,11 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
 }) => {
   const name = nameFor(user);
   const coverUrl = resolveUploadUrl(user.avatarPath);
+
+  // Профиль открывается и из шапки переписки, где под ним остаётся
+  // смонтированный MessageInput с Android adjustNothing — тогда поле
+  // комментария оказывается под клавиатурой. См. тот же приём в PollCreator.
+  useEffect(() => acquireStandardKeyboardResizeMode(), []);
 
   // Подсказка о неготовом разделе гаснет сама через пару секунд.
   const [soonNote, setSoonNote] = useState<{ text: string; planned: boolean } | null>(null);

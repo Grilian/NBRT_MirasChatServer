@@ -119,4 +119,13 @@ test('thread inbox contains only accessible discussions the user participated in
 
   hideThread(joinedRoot, alice);
   assert.ok(!listThreadsForUser(alice).some((item) => item.root_id === joinedRoot));
+
+  // «Ветки» — это общий список участия, а не молча обрезанные первые 100
+  // элементов. Явный limit оставляем для служебных/старых клиентов.
+  for (let index = 0; index < 101; index += 1) {
+    const rootId = insertMessage(chatId, alice, `Массовая ветка ${index}`);
+    insertMessage(chatId, bob, `Ответ ${index}`, rootId);
+  }
+  assert.ok(listThreadsForUser(alice).length > 100);
+  assert.equal(listThreadsForUser(alice, 25).length, 25);
 });

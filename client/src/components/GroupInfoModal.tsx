@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
 import MemberPicker from './MemberPicker';
+import { acquireStandardKeyboardResizeMode } from '../utils/mobileKeyboard';
 import { nameFor } from '../utils/user';
 import {
   WritePolicy, WRITE_POLICY_ORDER, WRITE_POLICY_LABELS, WRITE_BLOCKED_HINT,
@@ -37,6 +38,12 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
   groupId, currentUserId, notificationsMuted = false, onToggleNotifications,
   onClose, onUpdated, onGone,
 }) => {
+  // Карточка группы открывается из шапки переписки, под ней остаётся
+  // смонтированный MessageInput с Android adjustNothing — иначе переименование
+  // группы и поиск в «Добавить участников» уходят под клавиатуру. См. тот же
+  // приём в PollCreator.
+  useEffect(() => acquireStandardKeyboardResizeMode(), []);
+
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [nameDraft, setNameDraft] = useState('');

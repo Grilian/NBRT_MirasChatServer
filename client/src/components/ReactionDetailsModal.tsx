@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { registerBackInterceptor } from '../utils/backInterceptors';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
 import { formatMoscowDateTime } from '../utils/time';
@@ -25,7 +26,11 @@ interface ReactionDetailsModalProps {
 
 const ReactionDetailsModal: React.FC<ReactionDetailsModalProps> = ({
   reactions, canRemoveOthers, currentUserId, onClose, onRemove,
-}) => (
+}) => {
+  // Аппаратный Back на Android закрывает это окно, а не экран под ним.
+  useEffect(() => registerBackInterceptor(onClose), [onClose]);
+
+  return (
   <div className="modal-overlay" onClick={onClose}>
     <div className="modal-card directory-modal reactions-modal" onClick={(e) => e.stopPropagation()}>
       <div className="conv-head">
@@ -70,6 +75,7 @@ const ReactionDetailsModal: React.FC<ReactionDetailsModalProps> = ({
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default ReactionDetailsModal;

@@ -8,11 +8,19 @@ const router = express.Router();
 router.get('/', verifyToken, (req, res) => {
   try {
     const currentUserId = req.userId;
-    const supportsThreads = String(req.get('x-miras-features') || '')
-      .split(',')
-      .map((item) => item.trim())
-      .includes('threads');
-    const threadVisibilityClause = supportsThreads ? '' : 'AND m.thread_root_id IS NULL';
+
+    // Счётчик чата — только то, что человек прочитает, открыв сам чат. Ответы
+    // веток в ленту чата не попадают (см. thread_root_id IS NULL в истории),
+    // поэтому открытие чата их не гасит: клиент шлёт message_read по тем id,
+    // что реально есть в ленте. Пока ответы веток входили сюда, бейдж чата
+    // после прочтения всей переписки оставался висеть навсегда — снять его
+    // можно было, только открыв конкретную ветку, а участник чата, который в
+    // этой ветке не отвечал, не видит её даже в списке «Ветки».
+    // Непрочитанное веток — отдельный сигнал: плашка под корневым сообщением
+    // и раздел «Ветки». Клиент прибавляет его к общему бейджу сам
+    // (threadUnreadTotal), поэтому здесь оно учитываться и не должно — иначе
+    // одни и те же ответы считались бы дважды.
+    const threadVisibilityClause = 'AND m.thread_root_id IS NULL';
 
     // Непрочитанное — это всё чужое, что не в статусе 'read'. Раньше здесь
     // стояло status = 'delivered', и это молча ломало счётчики в самом важном

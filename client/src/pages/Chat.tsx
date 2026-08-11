@@ -5,6 +5,7 @@ import ChatList, { Chat as RosterChat, ChatSection } from '../components/ChatLis
 import ChatWindow from '../components/ChatWindow';
 import MessageInput, { EditingMessage, PendingImage, ReplyingMessage, SendResult } from '../components/MessageInput';
 import ForwardModal, { ForwardPreviewItem, ForwardTarget } from '../components/ForwardModal';
+import { runTopBackInterceptor } from '../utils/backInterceptors';
 import DeleteMessagesModal, { DeleteRequest } from '../components/DeleteMessagesModal';
 import { MessageReaction } from '../components/ReactionDetailsModal';
 import SettingsPanel from '../components/SettingsPanel';
@@ -13,6 +14,7 @@ import DirectoryModal from '../components/DirectoryModal';
 import UserInfoModal from '../components/UserInfoModal';
 import CreateGroupModal, { CreatedGroup } from '../components/CreateGroupModal';
 import GroupInfoModal from '../components/GroupInfoModal';
+import GeneralChatInfoModal from '../components/GeneralChatInfoModal';
 import Avatar from '../components/Avatar';
 import NavRail, { SectionId, isSectionAllowedFor, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
@@ -348,8 +350,11 @@ const Chat: React.FC = () => {
       .catch(console.error);
   }, []);
   const handleThreadRead = useCallback(() => {
-    refetchUnread(activeChat || undefined);
-  }, [activeChat, refetchUnread]);
+    // Ответы веток не входят в обычный счётчик чата. Ветка из общего списка
+    // может принадлежать не activeChat, поэтому нельзя оптимистично обнулять
+    // бейдж ранее открытой переписки.
+    refetchUnread();
+  }, [refetchUnread]);
   // Счётчик «задачи изменились»: сервер шлёт tasks_changed, панель задач по
   // изменению этого числа перечитывает список.
   const [tasksChangeToken, setTasksChangeToken] = useState(0);
@@ -415,6 +420,7 @@ const Chat: React.FC = () => {
   const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
   const [pollSubmitting, setPollSubmitting] = useState(false);
   const [groupInfoId, setGroupInfoId] = useState<number | null>(null);
+  const [generalInfoOpen, setGeneralInfoOpen] = useState(false);
   // Свой профиль — модальное окно поверх любого раздела, а не подэкран
   // настроек: он открывается по аватару с рельса, откуда бы ни нажали, и
   // возвращать после него в настройки (где человек не был) неправильно.
@@ -745,8 +751,8 @@ const Chat: React.FC = () => {
   // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
   // тот же открытый чат, "назад" снова сворачивает, и так до полного
   // закрытия приложения.
-  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen, activeThread, threadInboxOpen });
-  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, profileOpen, peopleOpen, activeThread, threadInboxOpen };
+  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, generalInfoOpen, profileOpen, peopleOpen, activeThread, threadInboxOpen, forwardOpen: forwardIds !== null, deleteRequestOpen: deleteRequest !== null, statusSheetOpen });
+  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, generalInfoOpen, profileOpen, peopleOpen, activeThread, threadInboxOpen, forwardOpen: forwardIds !== null, deleteRequestOpen: deleteRequest !== null, statusSheetOpen };
 
   useEffect(() => watchMobileKeyboard(), []);
 
@@ -825,7 +831,15 @@ const Chat: React.FC = () => {
       if (closeMobileInputSurface()) return;
       // Модалки поверх всего — закрываются первыми, иначе "назад" уводил
       // экран из-под открытого окна, а само окно оставалось висеть.
+      // Оверлеи, живущие внутри ChatWindow (просмотр картинки, список
+      // поставивших реакцию), в это состояние не поднимаются — они сами
+      // подписываются на перехват и закрываются первыми, последний открытый.
+      if (runTopBackInterceptor()) return;
+      if (nav.forwardOpen) { setForwardIds(null); return; }
+      if (nav.deleteRequestOpen) { setDeleteRequest(null); return; }
+      if (nav.statusSheetOpen) { setStatusSheetOpen(false); return; }
       if (nav.groupInfoId !== null) { setGroupInfoId(null); return; }
+      if (nav.generalInfoOpen) { setGeneralInfoOpen(false); return; }
       if (nav.pollCreatorOpen) { setPollCreatorOpen(false); return; }
       if (nav.createGroupOpen) { setCreateGroupOpen(false); return; }
       if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
@@ -1436,7 +1450,9 @@ const Chat: React.FC = () => {
     };
     const onThreadSummary = (event: { root_id: number }) => {
       const rootId = Number(event.root_id);
-      void loadThreadInbox();
+      // Список веток здесь не перечитываем: сервер шлёт это событие вместе с
+      // thread_message, а тот уже дёргает loadThreadInbox. Два перезапроса
+      // полного списка на каждый ответ — и так у каждого участника чата.
       api.get<ThreadSummary>(`/messages/threads/${rootId}/summary`)
         .then(({ data }) => updateThreadSummary(rootId, data))
         .catch((error) => {
@@ -1445,7 +1461,9 @@ const Chat: React.FC = () => {
     };
     const onThreadRead = (event: { root_id: number; summary: ThreadSummary }) => {
       updateThreadSummary(Number(event.root_id), { ...event.summary, unread_count: 0 });
-      refetchUnread(activeChat || undefined);
+      // Прочтение ответа в ветке не означает прочтение основной переписки и
+      // не должно оптимистично гасить её бейдж.
+      refetchUnread();
       void loadThreadInbox();
     };
     const onThreadNotification = (message: Message & { root_id: number }) => {
@@ -1498,6 +1516,9 @@ const Chat: React.FC = () => {
     socket.on('thread_hidden', onThreadListChanged);
     socket.on('message_deleted', onThreadListChanged);
     socket.on('messages_deleted', onThreadListChanged);
+    // Удаление ответа меняет и превью последнего ответа в списке веток —
+    // одной сводки для этого мало.
+    socket.on('thread_message_deleted', onThreadListChanged);
     return () => {
       socket.off('thread_message', onThreadMessage);
       socket.off('thread_summary_changed', onThreadSummary);
@@ -1506,8 +1527,9 @@ const Chat: React.FC = () => {
       socket.off('thread_hidden', onThreadListChanged);
       socket.off('message_deleted', onThreadListChanged);
       socket.off('messages_deleted', onThreadListChanged);
+      socket.off('thread_message_deleted', onThreadListChanged);
     };
-  }, [activeChat, activeThread?.rootId, currentUserId, loadThreadInbox, pushToast, refetchUnread, socket, updateThreadSummary]);
+  }, [activeThread?.rootId, currentUserId, loadThreadInbox, pushToast, refetchUnread, socket, updateThreadSummary]);
 
   useEffect(() => { setActiveThread(null); }, [activeChat]);
 
@@ -2547,6 +2569,7 @@ const Chat: React.FC = () => {
         onRemoveContact={handleRemoveContact}
         onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
         onOpenGroupInfo={(chatGroupId) => setGroupInfoId(chatGroupId)}
+        onOpenGeneralInfo={() => setGeneralInfoOpen(true)}
         onCreateGroup={() => setCreateGroupOpen(true)}
         onOpenSettings={() => goToSection('settings')}
         resizeHandle={!narrowLayout && (
@@ -2586,6 +2609,17 @@ const Chat: React.FC = () => {
             recordRecentOpening(group.chat_id);
             setView(VIEW_CONVERSATION);
           }}
+        />
+      )}
+      {generalInfoOpen && (
+        <GeneralChatInfoModal
+          currentUserId={currentUserId}
+          currentUserName={currentDisplayName}
+          currentUserAvatarPath={currentAvatarPath}
+          notificationsMuted={mutedChatIds.has(GENERAL_CHAT_ID)}
+          onToggleNotifications={(muted) => updateChatNotificationMute(GENERAL_CHAT_ID, muted)}
+          onOpenUserInfo={(userId) => { setGeneralInfoOpen(false); setInfoModalUserId(userId); }}
+          onClose={() => setGeneralInfoOpen(false)}
         />
       )}
       {groupInfoId !== null && (
@@ -2788,8 +2822,13 @@ const Chat: React.FC = () => {
                 onClick={() => {
                   if (activeChatMeta.userId) setInfoModalUserId(activeChatMeta.userId);
                   else if (activeChatMeta.chatGroupId) setGroupInfoId(activeChatMeta.chatGroupId);
+                  else if (activeChatMeta.section === 'general') setGeneralInfoOpen(true);
                 }}
-                disabled={!activeChatMeta.userId && !activeChatMeta.chatGroupId}
+                disabled={
+                  !activeChatMeta.userId
+                  && !activeChatMeta.chatGroupId
+                  && activeChatMeta.section !== 'general'
+                }
               >
                 <Avatar
                   name={activeChatMeta.name}
@@ -2926,6 +2965,7 @@ const Chat: React.FC = () => {
           reactionEmoji={reactionEmoji}
           autoFocus={activeThread.autoFocus}
           disabled={muted || (!threadInboxOpen && activeChatMeta?.canPostHere === false)}
+          readActive={windowFocused}
           onClose={() => {
             closeKeyboard();
             setActiveThread(null);

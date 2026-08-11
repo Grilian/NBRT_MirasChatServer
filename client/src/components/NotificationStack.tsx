@@ -79,7 +79,7 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
     // бы чат, хотя уведомление именно что убирали.
     if (-dragY > TAP_SLOP_PX) e.preventDefault();
 
-    if (-dragY > SWIPE_DISMISS_PX) onDismiss(toast.chatId);
+    if (-dragY > SWIPE_DISMISS_PX) onDismiss(toast.chatId, toast.threadRootId);
     else setDragY(0);
   };
 
@@ -95,7 +95,10 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
     if (paused) return;
 
     startedAtRef.current = Date.now();
-    const timer = setTimeout(() => onDismiss(toast.chatId), remainingRef.current);
+    // threadRootId обязателен и здесь: получатель ищет тост по паре
+    // (chatId, threadRootId), и без него автоскрытие/смахивание тоста ветки
+    // не находило бы его вовсе — закрыть можно было бы только крестиком.
+    const timer = setTimeout(() => onDismiss(toast.chatId, toast.threadRootId), remainingRef.current);
 
     return () => {
       clearTimeout(timer);
@@ -103,7 +106,7 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
       // чтобы после ухода курсора досчитать остаток, а не начать сначала.
       remainingRef.current = Math.max(0, remainingRef.current - (Date.now() - startedAtRef.current));
     };
-  }, [toast.revision, toast.chatId, durationMs, paused, onDismiss]);
+  }, [toast.revision, toast.chatId, toast.threadRootId, durationMs, paused, onDismiss]);
 
   return (
     <div

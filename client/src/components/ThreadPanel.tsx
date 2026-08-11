@@ -53,6 +53,8 @@ interface ThreadPanelProps {
   reactionEmoji?: string[];
   autoFocus?: boolean;
   disabled?: boolean;
+  /** Ответы считаются прочитанными только когда окно приложения действительно видно. */
+  readActive?: boolean;
   onClose: () => void;
   onSummary: (rootId: number, summary: ThreadSummary) => void;
   onRead?: () => void;
@@ -79,7 +81,8 @@ function makeClientMessageId(): string {
 }
 
 const ThreadPanel: React.FC<ThreadPanelProps> = ({
-  rootId, currentUserId, socket, customEmoji, reactionEmoji, autoFocus, disabled, onClose, onSummary, onRead,
+  rootId, currentUserId, socket, customEmoji, reactionEmoji, autoFocus, disabled, readActive = true,
+  onClose, onSummary, onRead,
   onRequestDelete, onRemoveReaction,
 }) => {
   const [data, setData] = useState<ThreadResponse | null>(null);
@@ -90,6 +93,24 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
   const [pollOpen, setPollOpen] = useState(false);
   const [pollSubmitting, setPollSubmitting] = useState(false);
   const aliveRef = useRef(true);
+  const readActiveRef = useRef(readActive);
+  const lastMarkedReplyIdRef = useRef<number | null>(null);
+  readActiveRef.current = readActive;
+
+  const markRead = useCallback(async (): Promise<boolean> => {
+    // Открытая вкладка Electron/браузера может оставаться смонтированной под
+    // другим окном или при заблокированном телефоне. В таком состоянии ответ
+    // ещё не был увиден и не должен исчезать из непрочитанных.
+    if (!readActiveRef.current) return false;
+    try {
+      await api.post(`/messages/threads/${rootId}/read`);
+      onRead?.();
+      return true;
+    } catch (error) {
+      console.error(error);
+      return false;
+    }
+  }, [onRead, rootId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,21 +122,32 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
       const response = await api.get<ThreadResponse>(`/messages/threads/${rootId}`);
       if (!aliveRef.current) return;
       setData(response.data);
-      onSummary(rootId, { ...response.data.summary, unread_count: 0 });
-      api.post(`/messages/threads/${rootId}/read`).then(() => onRead?.()).catch(console.error);
     } catch (requestError: any) {
       if (!aliveRef.current) return;
       setError(requestError.response?.status === 404 ? 'Ветка удалена или скрыта' : 'Не удалось открыть ветку');
     } finally {
       if (aliveRef.current) setLoading(false);
     }
-  }, [onRead, onSummary, rootId]);
+  }, [rootId]);
 
   useEffect(() => {
     aliveRef.current = true;
     void load();
     return () => { aliveRef.current = false; };
   }, [load]);
+
+  useEffect(() => {
+    // Если ветка загрузилась в фоне, гасим её счётчик только после реального
+    // возврата пользователя в видимое окно.
+    if (!readActive || !data) return;
+    const newestReplyId = data.replies.length
+      ? data.replies[data.replies.length - 1].id
+      : data.root.id;
+    if (lastMarkedReplyIdRef.current === newestReplyId) return;
+    void markRead().then((marked) => {
+      if (marked) lastMarkedReplyIdRef.current = newestReplyId;
+    });
+  }, [data, markRead, readActive]);
 
   useEffect(() => {
     const incoming = (message: ThreadMessage) => {
@@ -125,7 +157,6 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
         const replies = [...previous.replies, message];
         return { ...previous, replies };
       });
-      api.post(`/messages/threads/${rootId}/read`).then(() => onRead?.()).catch(console.error);
     };
     const edited = (message: { id: number; text: string; edited_at: string }) => {
       setData((previous) => previous ? {
@@ -205,10 +236,13 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
       socket.off('thread_hidden', threadHidden);
       socket.off('message_hidden', messageHidden);
     };
-  }, [onClose, onRead, rootId, socket]);
+  }, [onClose, rootId, socket]);
 
   useEffect(() => {
-    if (!data) return;
+    // Фоновая панель не должна локально затирать серверный unread_count. Для
+    // неё сводку обновляет общий socket-обработчик; здесь пересчитываем её
+    // только когда пользователь действительно видит ветку.
+    if (!data || !readActive) return;
     const visible = data.replies.filter((item) => !item.deleted);
     const authors = [] as ThreadSummary['recent_authors'];
     const seen = new Set<number>();
@@ -229,7 +263,7 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
       last_reply_at: visible.length ? visible[visible.length - 1].created_at : null,
       recent_authors: authors,
     });
-  }, [data, onSummary, rootId]);
+  }, [data, onSummary, readActive, rootId]);
 
   const emitThreadMessage = useCallback((payload: Record<string, unknown>) => new Promise<SendResult>((resolve) => {
     socket.timeout(15_000).emit('thread_message', { rootId, clientMessageId: makeClientMessageId(), ...payload },

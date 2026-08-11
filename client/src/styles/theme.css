@@ -1065,6 +1065,23 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Базовый эмодзи вместо пропавшего файла — на месте картинки, а не мельче:
    иначе подмена бросалась бы в глаза сильнее самой пропажи. */
 .custom-emoji-fallback { display: inline-block; font-size: 1.5em; line-height: 1; vertical-align: -0.2em; margin: 0 1px; }
+/* Базовый эмодзи на месте ещё не приехавшей картинки. Бокс повторяет
+   `.custom-emoji` до пикселя, иначе подмена после загрузки сдвигала бы строку;
+   font-size: inherit обязателен — без него 2em считались бы от собственного
+   кегля заглушки (1.5em), и место вышло бы в полтора раза больше. */
+/* overflow: hidden здесь не про обрезку, а про выравнивание: у inline-block с
+   видимым содержимым базовой линией считается базовая линия его ПОСЛЕДНЕЙ
+   строки, а у картинки — нижний край. Из-за этого заглушка с эмодзи внутри
+   вставала на 9px ниже картинки, и подмена дёргала строку по вертикали, хотя
+   размеры совпадали. С overflow: hidden базовой линией становится нижний край
+   — как у картинки. */
+.custom-emoji-fallback.is-placeholder {
+  width: 2em; height: 2em; font-size: inherit; line-height: 2em;
+  text-align: center; vertical-align: -0.55em; margin: 0 1px; opacity: .5;
+  overflow: hidden;
+}
+/* Скрытая картинка всё равно загружается — этим и держится подмена. */
+.custom-emoji.is-loading { display: none; }
 /* В панели выбора — по размеру ячейки, а не строки текста. */
 .emoji-cell .custom-emoji { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
 

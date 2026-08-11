@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Avatar from './Avatar';
 import { ChatSection } from './ChatList';
 import { AUTOFOCUS_ON_OPEN } from '../utils/autoFocus';
+import { acquireStandardKeyboardResizeMode } from '../utils/mobileKeyboard';
 import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 
 export interface ForwardTarget {
@@ -31,6 +32,14 @@ interface ForwardModalProps {
 
 const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, onConfirm, customEmoji = {} }) => {
   const [query, setQuery] = useState('');
+
+  // Окно с полем ввода поверх переписки. Под ним остаётся смонтированный
+  // MessageInput, держащий Android в overlay-режиме (adjustNothing): WebView под
+  // клавиатуру не сжимается, а `.modal-overlay` растянут на `inset: 0`, поэтому
+  // центрированная карточка остаётся по центру ВСЕГО экрана и её низ уходит под
+  // IME — а поиск «Куда переслать» тут как раз внизу. Тот же приём, что в
+  // PollCreator: на время окна берём штатный adjustResize.
+  useEffect(() => acquireStandardKeyboardResizeMode(), []);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();

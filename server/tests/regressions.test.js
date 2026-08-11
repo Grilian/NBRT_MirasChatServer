@@ -23,6 +23,7 @@ const superadminRoutes = require('../routes/superadmin');
 const unreadRoutes = require('../routes/unread');
 const notificationSettingsRoutes = require('../routes/notificationSettings');
 const { isValidBirthDate } = require('../utils/validators');
+const { markRead } = require('../services/readReceipts');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 
 const emitted = [];
@@ -70,7 +71,10 @@ async function request(route, { token, method = 'GET', body, headers: extraHeade
   return { response, data };
 }
 
-test('legacy clients do not receive unread counts for thread-only replies', async () => {
+// Бейдж чата обязан гаснуть от прочтения самого чата. Ответы веток в его ленту
+// не попадают, значит и в его счётчик идти не могут — иначе он застревает
+// навсегда: снять его нечем, ленту человек уже прочитал целиком.
+test('chat unread counter covers only what opening the chat marks read', async () => {
   const authorId = createUser('unread_thread_author');
   const recipientId = createUser('unread_thread_recipient');
   const chatId = `chat_${Math.min(authorId, recipientId)}_${Math.max(authorId, recipientId)}`;
@@ -91,7 +95,15 @@ test('legacy clients do not receive unread counts for thread-only replies', asyn
   assert.equal(legacy.response.status, 200);
   assert.equal(modern.response.status, 200);
   assert.equal(legacy.data[chatId], 1);
-  assert.equal(modern.data[chatId], 2);
+  assert.equal(modern.data[chatId], 1);
+
+  // Прочитано всё, что видно в ленте чата, — бейдж должен исчезнуть целиком.
+  markRead(recipientId, chatId, [rootId]);
+  const afterReading = await request('/api/unread', {
+    token,
+    headers: { 'X-Miras-Features': 'threads,notification-policy' },
+  });
+  assert.equal(afterReading.data[chatId], undefined);
 });
 
 test('notification settings can mute only a chat available to the current user', async () => {

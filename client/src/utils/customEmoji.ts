@@ -190,20 +190,46 @@ export function renderMessageText(
   return nodes;
 }
 
+// Какие картинки уже приезжали за эту сессию. Нужен, чтобы уже показанный
+// смайлик не моргал заглушкой каждый раз, когда сообщение перерисовывается:
+// из кэша браузера картинка готова сразу, и лишнее промежуточное состояние
+// давало бы мелькание в спокойной обстановке ради выигрыша на первой загрузке.
+const loadedEmojiPaths = new Set<string>();
+
 /**
- * Картинка с подстановкой базового эмодзи, если файла на диске уже нет. Без
- * этого пропавший файл давал иконку «сломанное изображение» посреди фразы.
+ * Картинка с подстановкой базового эмодзи в двух случаях: файла на диске уже
+ * нет (иначе посреди фразы была бы иконка «сломанное изображение») и файл ещё
+ * не приехал. Второе — ради слабой связи: анимированный webp весит заметно
+ * больше строки текста, и без заглушки в предложении зияли бы дыры, пока он
+ * грузится. Дыр не будет и по размеру: `.custom-emoji-fallback` занимает то же
+ * место, что и картинка, поэтому подмена не двигает текст.
  */
 const CustomEmojiImage: React.FC<{ filePath: string; fallback: string }> = ({ filePath, fallback }) => {
-  const [broken, setBroken] = React.useState(false);
-  if (broken) return React.createElement('span', { className: 'custom-emoji-fallback' }, fallback);
-  return React.createElement('img', {
-    className: 'custom-emoji',
+  const [state, setState] = React.useState<'loading' | 'ready' | 'broken'>(
+    () => (loadedEmojiPaths.has(filePath) ? 'ready' : 'loading')
+  );
+
+  if (state === 'broken') return React.createElement('span', { className: 'custom-emoji-fallback' }, fallback);
+
+  const image = React.createElement('img', {
+    className: 'custom-emoji' + (state === 'loading' ? ' is-loading' : ''),
     src: resolveUploadUrl(filePath) || '',
     alt: fallback,
     draggable: false,
-    onError: () => setBroken(true),
+    decoding: 'async',
+    onLoad: () => { loadedEmojiPaths.add(filePath); setState('ready'); },
+    onError: () => setState('broken'),
   });
+
+  if (state === 'ready') return image;
+  // Заглушка и картинка живут рядом: скрытая картинка всё равно загружается,
+  // поэтому подменять src или монтировать её позже не нужно.
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement('span', { className: 'custom-emoji-fallback is-placeholder', 'aria-hidden': true }, fallback),
+    image,
+  );
 };
 
 /**
