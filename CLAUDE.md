@@ -64,7 +64,7 @@
 - `chat_groups`, `chat_group_members` → `message_reads` → `tasks`, `task_participants` → `users.status_preset`/`status_custom` → `messages.file_width`/`file_height` → `emoji_packs`, `emoji_items` (сидится стартовый пак на 60 смайликов при первом запуске) → `tasks.archived`, `chat_groups.announcements_only` → `messages.sender_ip` → `users.status_expires_at` → `messages.reply_to_id`/`forwarded_from_name`/`forwarded_from_chat` → `message_hidden` → `messages.read_at` → `message_reactions` → `chat_groups.write_policy` + `chat_group_writers` + `chat_group_writer_departments` (при добавлении колонки каналам-объявлениям разово проставляется `write_policy = 'admins'`) → `emoji_items.retired` + `emoji_items.fallback_emoji` → `thread_hidden`, `chat_notification_settings` + `messages.thread_root_id`/`deleted_at`/`deleted_by`/`force_notification` + `device_tokens.capabilities`. Все идемпотентны.
 
 **Текущая версия и деплой**
-- Прод: сервер/веб на 1.7.0. Windows/Android собраны локально под 1.7.0 (versionCode 45), но НЕ выложены — пользователь тестирует локально перед раздачей. До подтверждения на проде фактически стоит прежняя связка (Windows/Android 1.6.10, versionCode 44).
+- Прод: 1.7.0 на всех платформах (сервер/веб/Windows/Android, versionCode 45). Выложено и проверено 11.08.2026 — sha512 инсталлятора и APK совпали побайтово с локальными, `latest.yml`/`android.json` отдают YAML/JSON (не SPA-фолбэк).
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 
 **Правила деплоя**
