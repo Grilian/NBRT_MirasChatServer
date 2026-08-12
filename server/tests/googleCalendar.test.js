@@ -395,6 +395,44 @@ test('удаление события из дополнительного кал
   );
 });
 
+test('перенесённое вхождение серии остаётся в цвете слоя', () => {
+  const account = makeAccount();
+  const extra = makeSource(account, { main: false, color: 'teal' });
+  sync.applyPage(account, extra, [
+    {
+      id: 'g-extra-series',
+      status: 'confirmed',
+      updated: '2026-08-12T09:00:00.000Z',
+      summary: 'Экскурсия «Хранители»',
+      start: { dateTime: '2026-08-12T11:00:00Z' },
+      end: { dateTime: '2026-08-12T11:30:00Z' },
+      recurrence: ['RRULE:FREQ=WEEKLY'],
+    },
+    {
+      // Одно вхождение перенесли. Цвета у него в Google нет — раньше сюда
+      // подставлялся наш запасной 'blue', и экскурсия выпадала из слоя цветом.
+      id: 'g-extra-series_20260819T110000Z',
+      status: 'confirmed',
+      updated: '2026-08-12T09:10:00.000Z',
+      recurringEventId: 'g-extra-series',
+      originalStartTime: { dateTime: '2026-08-19T11:00:00Z' },
+      summary: 'Экскурсия «Хранители» (перенос)',
+      start: { dateTime: '2026-08-19T13:00:00Z' },
+      end: { dateTime: '2026-08-19T13:30:00Z' },
+    },
+  ]);
+
+  const link = db.prepare(
+    'SELECT * FROM google_calendar_links WHERE google_event_id = ?'
+  ).get('g-extra-series');
+  const exception = db.prepare(
+    'SELECT * FROM calendar_event_exceptions WHERE event_id = ?'
+  ).get(link.event_id);
+
+  assert.equal(exception.kind, 'override');
+  assert.equal(exception.color, 'teal');
+});
+
 test('в дополнительном календаре побеждает чужая правка, а не наша', () => {
   const account = makeAccount();
   const extra = makeSource(account, { main: false });

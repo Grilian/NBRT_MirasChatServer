@@ -266,6 +266,15 @@
   display: flex; flex-direction: column; gap: 1px;
 }
 .cal-event:hover { background: color-mix(in srgb, var(--cal-ink) 30%, var(--paper)); }
+/* Даже пятнадцатиминутному событию нужно место под одну строку: налезть на
+   соседний слот на пару пикселей лучше, чем показать пустой прямоугольник. */
+.cal-event { min-height: 18px; }
+/* Короткое событие: время и название в одну строку. Иначе вторая строка
+   уезжала за нижний край, и от названия оставалась полоска в пару пикселей —
+   именно так «терялся текст» у получасовых экскурсий. */
+.cal-event.is-compact { flex-direction: row; align-items: baseline; gap: 5px; }
+.cal-event.is-compact .cal-event-time { flex: 0 0 auto; }
+.cal-event.is-compact .cal-event-title { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
 .cal-event-time { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .cal-event-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 .cal-event.is-done .cal-event-title { text-decoration: line-through; opacity: .65; }

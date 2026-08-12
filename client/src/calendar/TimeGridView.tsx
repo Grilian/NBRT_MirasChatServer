@@ -26,6 +26,10 @@ const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 // позиции событий и подписи часов не разъезжались.
 const HOUR_HEIGHT = 48;
 
+// Ниже этой высоты блок не вмещает две строки (время + название) и переходит на
+// одну. 34px — это padding (4) плюс две строки по 14.4 при line-height 1.25.
+const TWO_LINE_MIN_PX = 34;
+
 // Шаг создания события кликом по пустому месту. Полчаса — как в Google
 // Calendar: минутная точность при клике всё равно недостижима.
 const SLOT_MINUTES = 30;
@@ -130,7 +134,13 @@ const TimeGridView: React.FC<TimeGridViewProps> = ({
                   <button
                     key={occurrence.id}
                     type="button"
-                    className={`cal-event cal-color-${occurrence.color}${occurrence.completed ? ' is-done' : ''}`}
+                    className={`cal-event cal-color-${occurrence.color}`
+                      + `${occurrence.completed ? ' is-done' : ''}`
+                      // Времени и названию двумя строками нужно около 34px, а
+                      // получасовому событию в сетке достаётся 24 — название
+                      // обрезалось поперёк буквы. Короткие раскладываем в
+                      // строку: лучше «11:15 Экскурсия…», чем половина буквы.
+                      + `${height * 24 * HOUR_HEIGHT < TWO_LINE_MIN_PX ? ' is-compact' : ''}`}
                     style={{
                       top: `${top * 100}%`,
                       height: `${height * 100}%`,

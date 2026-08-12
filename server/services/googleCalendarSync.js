@@ -338,7 +338,11 @@ function applyRemoteInstance(account, source, item) {
       all_day = excluded.all_day, color = excluded.color
   `).run(
     link.event_id, slot, f.title, f.description, f.location,
-    f.starts_at, f.ends_at, f.all_day, f.color
+    f.starts_at, f.ends_at, f.all_day,
+    // Тот же цвет слоя, что и у самой серии. Иначе перенесённое вхождение
+    // выпадало из слоя цветом: серия фиолетовая, а отдельная экскурсия синяя,
+    // потому что у Google цвет не задан и подставляется наш запасной.
+    source.is_main ? f.color : source.color
   );
   db.prepare('DELETE FROM calendar_reminders_sent WHERE event_id = ? AND occurrence_start = ?')
     .run(link.event_id, slot);
