@@ -332,14 +332,19 @@ const ChatList: React.FC<ChatListProps> = ({
                     </div>
                     <div className="row-actions">
                       {unreadCount > 0 && <span className="row-unread">{unreadCount}</span>}
+                      {/* Закреп, а не «избранное»: рядом в списке есть личный
+                          чат «Избранное», и звезда читалась как отправка
+                          туда. */}
                       <button
                         type="button"
                         className={'icon-btn-ghost star' + (isFavorite ? ' is-fav' : '')}
-                        title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+                        title={isFavorite ? 'Открепить' : 'Закрепить'}
+                        aria-pressed={isFavorite}
                         onClick={(e) => { e.stopPropagation(); onToggleFavorite(chat.id); }}
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
-                          <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" />
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 17v5" />
+                          <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
                         </svg>
                       </button>
                       {chat.userId && (
@@ -354,7 +359,10 @@ const ChatList: React.FC<ChatListProps> = ({
                             }
                           }}
                         >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                            <path d="M10 11v6M14 11v6" />
+                          </svg>
                         </button>
                       )}
                     </div>

@@ -55,38 +55,41 @@ function archivePackId() {
 const MAX_EMOJI_LENGTH = 32;
 const MAX_ITEMS_PER_PACK = 500;
 
-function packsWithItems({ onlyEnabled }) {
+function packsWithItems({ onlyEnabled, includeRetired = false }) {
   const packs = db.prepare(`
     SELECT id, name, position, enabled FROM emoji_packs
     ${onlyEnabled ? 'WHERE enabled = 1' : ''}
     ORDER BY position, id
   `).all();
 
-  // Убранные смайлики в паках не показываются никому, включая панель админа:
-  // вернуть их в выбор нельзя, а место они займут. Отрисовку старых сообщений
-  // они переживают через отдельную ручку /catalog.
+  // Убранные смайлики в панели ВЫБОРА не показываются никогда — на то их и
+  // убрали. Панели админа они, наоборот, нужны: уборка обратима (см. /restore),
+  // и без них смайлик пропадал бы совсем — вернуть нечего, а загрузить заново
+  // мешает навсегда занятое им имя. Отрисовку старых сообщений они переживают
+  // независимо от всего этого, через отдельную ручку /catalog.
   const items = db.prepare(
-    'SELECT id, pack_id, emoji, name, file_path, fallback_emoji FROM emoji_items WHERE retired = 0 ORDER BY position, id'
+    `SELECT id, pack_id, emoji, name, file_path, fallback_emoji, retired FROM emoji_items
+     ${includeRetired ? '' : 'WHERE retired = 0'} ORDER BY position, id`
   ).all();
   const byPack = new Map();
   for (const item of items) {
-    if (!byPack.has(item.pack_id)) byPack.set(item.pack_id, { emoji: [], custom: [] });
+    if (!byPack.has(item.pack_id)) byPack.set(item.pack_id, { emoji: [], custom: [], retired: [] });
     const bucket = byPack.get(item.pack_id);
     // Картиночный элемент узнаётся по file_path, юникодный — по emoji.
     if (item.file_path && item.name) {
-      bucket.custom.push({
+      (item.retired ? bucket.retired : bucket.custom).push({
         id: item.id,
         name: item.name,
         file_path: item.file_path,
         fallback: item.fallback_emoji || '',
       });
-    } else if (item.emoji) {
+    } else if (item.emoji && !item.retired) {
       bucket.emoji.push(item.emoji);
     }
   }
 
   return packs.map((pack) => {
-    const bucket = byPack.get(pack.id) || { emoji: [], custom: [] };
+    const bucket = byPack.get(pack.id) || { emoji: [], custom: [], retired: [] };
     return {
       id: pack.id,
       name: pack.name,
@@ -96,9 +99,18 @@ function packsWithItems({ onlyEnabled }) {
       // уже выкаченные клиенты — их ломать нельзя.
       emoji: bucket.emoji,
       custom: bucket.custom,
+      // Ключа нет вовсе, если убранные не запрашивали: пустой массив в выдаче
+      // обычного пользователя читался бы как «убранные бывают, просто сейчас их
+      // нет», а их там не бывает по определению.
+      ...(includeRetired ? { retired_custom: bucket.retired } : {}),
     };
   });
 }
+
+// Выдача для панели админа. Отдельной функцией, а не флагом по месту: включать
+// убранные обязаны ВСЕ админские ручки (иначе после любого действия они пропали
+// бы из панели до перезагрузки), а пользовательская — ни одна.
+const adminPacks = () => packsWithItems({ onlyEnabled: false, includeRetired: true });
 
 function parseEmojiList(raw) {
   if (typeof raw === 'string') {
@@ -159,7 +171,7 @@ router.get('/catalog', verifyToken, (req, res) => {
 
 router.get('/admin', verifySuperAdmin, (req, res) => {
   try {
-    res.json(packsWithItems({ onlyEnabled: false }));
+    res.json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -178,7 +190,7 @@ router.post('/admin', verifySuperAdmin, (req, res) => {
 
     replaceItems(packId, parseEmojiList(req.body.emoji));
     notifyEmojiChanged(req);
-    res.status(201).json(packsWithItems({ onlyEnabled: false }));
+    res.status(201).json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -214,7 +226,7 @@ router.put('/admin/:id', verifySuperAdmin, (req, res) => {
     }
 
     notifyEmojiChanged(req);
-    res.json(packsWithItems({ onlyEnabled: false }));
+    res.json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -236,14 +248,20 @@ router.post('/admin/:id/custom', verifySuperAdmin, (req, res) => {
     if (!EMOJI_NAME_PATTERN.test(name)) {
       return res.status(400).json({ error: 'Имя: латиница, цифры и подчёркивание, от 2 до 32 символов' });
     }
-    // Имя занято и убранным смайликом тоже: выдать его другой картинке значило
-    // бы задним числом подменить картинку в уже отправленных сообщениях.
-    const taken = db.prepare('SELECT retired FROM emoji_items WHERE name = ?').get(name);
+    // Имя занято и убранным смайликом тоже: выдать его ДРУГОЙ картинке значило
+    // бы задним числом подменить картинку в уже отправленных сообщениях. Но за
+    // именем стоит конкретный смайлик, и вернуть в оборот ЕГО — законно (это же
+    // имя, тот же смайлик, новая картинка), поэтому вместе с отказом уезжает и
+    // то, чем на него ответить: id убранного элемента.
+    const taken = db.prepare('SELECT id, pack_id, retired FROM emoji_items WHERE name = ?').get(name);
     if (taken) {
       return res.status(409).json({
         error: taken.retired
-          ? `Имя :${name}: занято ранее убранным смайликом`
+          ? `Смайлик :${name}: был убран раньше — его можно вернуть`
           : `Смайлик :${name}: уже существует`,
+        code: taken.retired ? 'name_retired' : 'name_taken',
+        itemId: taken.id,
+        packId: taken.pack_id,
       });
     }
 
@@ -266,7 +284,7 @@ router.post('/admin/:id/custom', verifySuperAdmin, (req, res) => {
         .run(packId, name, `/uploads/emoji/${filename}`, normalizeFallback(req.body.fallback), nextPosition);
 
       notifyEmojiChanged(req);
-      res.status(201).json(packsWithItems({ onlyEnabled: false }));
+      res.status(201).json(adminPacks());
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -282,7 +300,7 @@ router.put('/admin/custom/:itemId', verifySuperAdmin, (req, res) => {
     if (!changed) return res.status(404).json({ error: 'Смайлик не найден' });
 
     notifyEmojiChanged(req);
-    res.json(packsWithItems({ onlyEnabled: false }));
+    res.json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -318,7 +336,7 @@ router.post('/admin/custom/:itemId/image', verifySuperAdmin, (req, res) => {
       fs.unlink(oldPath, () => {});
 
       notifyEmojiChanged(req);
-      res.json(packsWithItems({ onlyEnabled: false }));
+      res.json(adminPacks());
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -349,7 +367,7 @@ router.put('/admin/:packId/custom/reorder', verifySuperAdmin, (req, res) => {
     applyOrder();
 
     notifyEmojiChanged(req);
-    res.json(packsWithItems({ onlyEnabled: false }));
+    res.json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -363,7 +381,46 @@ router.delete('/admin/custom/:itemId', verifySuperAdmin, (req, res) => {
   try {
     db.prepare('UPDATE emoji_items SET retired = 1 WHERE id = ? AND file_path IS NOT NULL').run(Number(req.params.itemId));
     notifyEmojiChanged(req);
-    res.json(packsWithItems({ onlyEnabled: false }));
+    res.json(adminPacks());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Возврат убранного смайлика. Уборка обязана быть обратимой: имя закреплено за
+// смайликом навсегда, поэтому «убрать и загрузить заново» — не обходной путь, а
+// тупик, и админ оставался без единого способа вернуть картинку в оборот.
+// Правило при этом не ослабляется: возвращается ТА ЖЕ строка (тот же id, то же
+// имя), а не имя, выданное другому смайлику, — старые сообщения от этого не
+// меняются. Новую картинку под тем же кодом ставит отдельная ручка /image.
+router.put('/admin/custom/:itemId/restore', verifySuperAdmin, (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const item = db.prepare('SELECT id, pack_id, name FROM emoji_items WHERE id = ? AND file_path IS NOT NULL').get(itemId);
+    if (!item) return res.status(404).json({ error: 'Смайлик не найден' });
+
+    // По умолчанию смайлик возвращается туда, где лежал. Исключение — архив:
+    // туда попадают смайлики из удалённых паков, сам архив выключен, и возврат
+    // «на место» оставил бы смайлик ровно так же невидимым. Поэтому для них пак
+    // назначения обязателен.
+    const targetId = req.body.packId === undefined ? item.pack_id : Number(req.body.packId);
+    const target = db.prepare('SELECT id, name FROM emoji_packs WHERE id = ?').get(targetId);
+    if (!target) return res.status(404).json({ error: 'Пак не найден' });
+    if (target.name === ARCHIVE_PACK_NAME) {
+      return res.status(400).json({ error: 'Выберите обычный пак: архив в панели выбора не показывается' });
+    }
+
+    const count = db.prepare('SELECT COUNT(*) AS c FROM emoji_items WHERE pack_id = ? AND retired = 0').get(target.id).c;
+    if (count >= MAX_ITEMS_PER_PACK) return res.status(400).json({ error: 'В паке слишком много элементов' });
+
+    const nextPosition = db.prepare(
+      'SELECT COALESCE(MAX(position), -1) + 1 AS p FROM emoji_items WHERE pack_id = ?'
+    ).get(target.id).p;
+    db.prepare('UPDATE emoji_items SET retired = 0, pack_id = ?, position = ? WHERE id = ?')
+      .run(target.id, nextPosition, itemId);
+
+    notifyEmojiChanged(req);
+    res.json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -393,7 +450,7 @@ router.delete('/admin/:id', verifySuperAdmin, (req, res) => {
     }
     db.prepare('DELETE FROM emoji_packs WHERE id = ?').run(packId);
     notifyEmojiChanged(req);
-    res.json(packsWithItems({ onlyEnabled: false }));
+    res.json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -837,13 +837,33 @@ function SelfChatPanel() {
   );
 }
 
+interface EmojiCustomItem {
+  id: number;
+  name: string;
+  file_path: string;
+  fallback: string;
+}
+
 interface EmojiPack {
   id: number;
   name: string;
   enabled: boolean;
   emoji: string[];
-  custom?: { id: number; name: string; file_path: string; fallback: string }[];
+  custom?: EmojiCustomItem[];
+  // Убранные смайлики пака. Приезжают только в админской выдаче — в панели
+  // выбора их нет и быть не может.
+  retired_custom?: EmojiCustomItem[];
 }
+
+// Смайлик, чьё имя занято убранным: загрузка такого файла не проходит, но
+// отказ поправимый — тот же смайлик можно вернуть, поставив ему эту картинку.
+interface RetiredConflict {
+  itemId: number;
+  name: string;
+  file: File;
+}
+
+const ARCHIVE_PACK_NAME = 'Архив смайликов';
 
 // Смайлики хранятся текстом (юникод), а не картинками, поэтому пак правится
 // одним полем: строка со смайликами через пробел. Это и «загрузить новый», и
@@ -854,6 +874,10 @@ function EmojiPacksPanel() {
   const [newName, setNewName] = useState('');
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
+  // Файлы из последней загрузки, не прошедшие из-за убранного тёзки. Держим
+  // вместе с File: вернуть смайлик мало, ему нужна та самая картинка, которую
+  // человек уже выбрал — иначе пришлось бы просить её второй раз.
+  const [conflicts, setConflicts] = useState<{ packId: number; items: RetiredConflict[] } | null>(null);
 
   const apply = (data: EmojiPack[]) => {
     setPacks(data);
@@ -907,6 +931,7 @@ function EmojiPacksPanel() {
   const uploadCustom = async (packId: number, files: File[]) => {
     setSavingId(packId);
     const failed: string[] = [];
+    const retired: RetiredConflict[] = [];
     let latest: EmojiPack[] | null = null;
     // Последовательно, а не пачкой: имена проверяются на уникальность в БД, и
     // параллельные загрузки одинаково названных файлов гонялись бы за именем.
@@ -919,13 +944,60 @@ function EmojiPacksPanel() {
         const { data } = await superAdminApi.post(`/emoji/admin/${packId}/custom`, form);
         latest = data;
       } catch (err: any) {
-        // Один занятый или негодный файл не должен ронять всю пачку.
-        failed.push(`${file.name}: ${err.response?.data?.error || 'ошибка загрузки'}`);
+        // Имя занято УБРАННЫМ смайликом — это не ошибка, а развилка: почти
+        // всегда человек как раз и хотел обновить картинку, для чего сначала
+        // убрал смайлик. Такие складываем отдельно и предлагаем вернуть.
+        const data = err.response?.data;
+        if (data?.code === 'name_retired' && data.itemId) {
+          retired.push({ itemId: data.itemId, name, file });
+        } else {
+          // Один негодный файл не должен ронять всю пачку.
+          failed.push(`${file.name}: ${data?.error || 'ошибка загрузки'}`);
+        }
       }
     }
     if (latest) apply(latest);
+    setConflicts(retired.length ? { packId, items: retired } : null);
     setError(failed.length ? `Не загружено (${failed.length}): ${failed.join('; ')}` : '');
     setSavingId(null);
+  };
+
+  // Вернуть убранный смайлик и сразу поставить ему картинку, которую человек
+  // выбрал при неудавшейся загрузке. Два запроса, а не один: возврат и замена
+  // картинки — разные операции и порознь тоже нужны.
+  const restoreWithImage = async (packId: number, items: RetiredConflict[]) => {
+    setSavingId(packId);
+    const failed: string[] = [];
+    for (const item of items) {
+      try {
+        await superAdminApi.put(`/emoji/admin/custom/${item.itemId}/restore`, { packId });
+        const form = new FormData();
+        form.append('image', item.file);
+        await superAdminApi.post(`/emoji/admin/custom/${item.itemId}/image`, form);
+      } catch (err: any) {
+        failed.push(`:${item.name}: ${err.response?.data?.error || 'не удалось вернуть'}`);
+      }
+    }
+    await load();
+    setConflicts(null);
+    setError(failed.length ? `Не вернулись (${failed.length}): ${failed.join('; ')}` : '');
+    setSavingId(null);
+  };
+
+  // Возврат без замены картинки — для смайлика, убранного по ошибке. Пак нужен
+  // отдельным доводом только для лежащих в архиве: он выключен, и возврат «на
+  // место» оставил бы смайлик невидимым.
+  const restoreCustom = async (itemId: number, packId: number) => {
+    setSavingId(itemId);
+    try {
+      const { data } = await superAdminApi.put(`/emoji/admin/custom/${itemId}/restore`, { packId });
+      apply(data);
+      setError('');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось вернуть смайлик');
+    } finally {
+      setSavingId(null);
+    }
   };
 
   const setFallback = async (itemId: number, fallback: string) => {
@@ -982,7 +1054,7 @@ function EmojiPacksPanel() {
   };
 
   const removeCustom = async (itemId: number, name: string) => {
-    if (!window.confirm(`Убрать смайлик :${name}: из панели выбора?\n\nВ уже отправленных сообщениях он останется картинкой — вставить его в новые сообщения будет нельзя.`)) return;
+    if (!window.confirm(`Убрать смайлик :${name}: из панели выбора?\n\nВ уже отправленных сообщениях он останется картинкой. Вставлять в новые будет нельзя, но смайлик можно вернуть — он попадёт в «Убранные» внизу пака.`)) return;
     try {
       const { data } = await superAdminApi.delete(`/emoji/admin/custom/${itemId}`);
       apply(data);
@@ -1008,7 +1080,9 @@ function EmojiPacksPanel() {
         Пак — это вкладка в панели смайликов у сотрудников. Смайлики вводятся
         подряд, через пробел; выключенный пак в приложении не показывается.
         Картинки грузятся набором, имя берётся из имени файла. Убранный смайлик
-        пропадает из панели выбора, но в уже отправленных сообщениях остаётся.
+        пропадает из панели выбора, но в уже отправленных сообщениях остаётся —
+        и его можно вернуть. Чтобы поменять картинку, смайлик убирать не нужно:
+        нажмите на неё прямо в плитке.
       </p>
       {error && <p className="form-error">{error}</p>}
 
@@ -1109,6 +1183,70 @@ function EmojiPacksPanel() {
               {savingId === pack.id ? 'Загрузка…' : '+ Картинками'}
             </label>
           </div>
+
+          {/* Имя занято смайликом, который сами же и убрали: почти всегда это
+              значит «хотел обновить картинку». Предлагаем ровно то действие,
+              за которым человек и пришёл, вместо отказа с объяснением. */}
+          {conflicts?.packId === pack.id && conflicts.items.length > 0 && (
+            <div className="sa-emoji-conflict">
+              <span>
+                {conflicts.items.length === 1
+                  ? `Смайлик :${conflicts.items[0].name}: убирали раньше.`
+                  : `Убирали раньше: ${conflicts.items.map((i) => `:${i.name}:`).join(' ')}.`}
+                {' '}Вернуть с новыми картинками?
+              </span>
+              <div className="sa-emoji-conflict-actions">
+                <button
+                  type="button"
+                  disabled={savingId === pack.id}
+                  onClick={() => restoreWithImage(pack.id, conflicts.items)}
+                >
+                  {savingId === pack.id ? 'Возвращаю…' : 'Вернуть'}
+                </button>
+                <button type="button" className="sa-btn-quiet" onClick={() => setConflicts(null)}>Не нужно</button>
+              </div>
+            </div>
+          )}
+
+          {/* Убранные смайлики пака. Показываем их приглушённо и отдельно от
+              рабочих: в панель выбора они не попадают, но существуют — их имена
+              заняты навсегда, и вернуть их можно только отсюда. */}
+          {!!pack.retired_custom?.length && (
+            <details className="sa-emoji-retired">
+              <summary>Убранные: {pack.retired_custom.length}</summary>
+              <div className="sa-emoji-retired-list">
+                {pack.retired_custom.map((item) => (
+                  <div key={item.id} className="sa-emoji-retired-item" title={`:${item.name}:`}>
+                    <img src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
+                    <span>:{item.name}:</span>
+                    {/* Смайлики из удалённых паков лежат в архиве, а он выключен:
+                        вернуть «на место» значило бы оставить невидимым, поэтому
+                        для них спрашиваем живой пак. */}
+                    {pack.name === ARCHIVE_PACK_NAME ? (
+                      <select
+                        defaultValue=""
+                        disabled={savingId === item.id}
+                        onChange={(e) => { if (e.target.value) restoreCustom(item.id, Number(e.target.value)); }}
+                      >
+                        <option value="" disabled>Вернуть в пак…</option>
+                        {packs.filter((p) => p.name !== ARCHIVE_PACK_NAME).map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={savingId === item.id}
+                        onClick={() => restoreCustom(item.id, pack.id)}
+                      >
+                        {savingId === item.id ? '…' : 'Вернуть'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
           <div className="sa-emoji-pack-foot">
             <span className="sa-hint">

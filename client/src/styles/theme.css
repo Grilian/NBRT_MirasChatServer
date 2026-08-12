@@ -673,9 +673,13 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 
 /* ===== Ветки сообщений ===== */
+/* Зазор до пузыря задаётся только padding-top: min-height здесь был 32px, и у
+   короткой кнопки без аватаров текст центрировался внутри этой высоты — сверху
+   набегало вдвое больше воздуха, чем в margin, и кнопка выглядела оторванной от
+   сообщения. Высоту теперь диктует содержимое (аватары ответивших, когда есть). */
 .thread-link {
-  align-self: stretch; display: flex; align-items: center; gap: 8px; min-height: 32px;
-  margin: 2px -5px -4px; padding: 2px 7px; border: none; border-radius: 9px;
+  align-self: stretch; display: flex; align-items: center; gap: 8px;
+  margin: 0 -5px -4px; padding: 2px 7px 3px; border: none; border-radius: 9px;
   background: transparent; color: color-mix(in srgb, var(--accent) 88%, var(--ink));
   cursor: pointer; text-align: left; font: inherit;
 }
@@ -1053,6 +1057,45 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   padding: 0 12px; min-height: 60px; font-size: 12px; color: var(--ink-muted);
 }
 .sa-emoji-custom-add:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Поправимый отказ загрузки: имя занято смайликом, который сами же убрали.
+   Не form-error — это не ошибка, а предложение действия, и красным оно
+   читалось бы как «что-то сломалось». */
+.sa-emoji-conflict {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  margin: 8px 0; padding: 8px 10px; font-size: 12px;
+  border: 1px solid var(--accent); border-radius: var(--radius-md);
+  background: var(--paper-sunken); color: var(--ink);
+}
+.sa-emoji-conflict-actions { display: flex; gap: 6px; margin-left: auto; }
+.sa-emoji-conflict-actions button {
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  background: var(--accent); color: #fff;
+}
+.sa-emoji-conflict-actions button:disabled { opacity: 0.6; cursor: default; }
+.sa-emoji-conflict-actions .sa-btn-quiet {
+  background: var(--paper); color: var(--ink-muted); border-color: var(--line);
+}
+
+/* Убранные смайлики — свёрнуты: они существуют только чтобы их можно было
+   вернуть, и в развёрнутом виде отвлекали бы от рабочего состава пака. */
+.sa-emoji-retired > summary { font-size: 12px; color: var(--ink-muted); cursor: pointer; }
+.sa-emoji-retired-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.sa-emoji-retired-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border: 1px dashed var(--line); border-radius: var(--radius-md);
+  padding: 6px 8px; font-size: 11px; color: var(--ink-muted); max-width: 110px;
+}
+/* Приглушены намеренно: в обороте их нет, и выглядеть как рабочие они не должны. */
+.sa-emoji-retired-item img { width: 32px; height: 32px; object-fit: contain; opacity: 0.5; }
+.sa-emoji-retired-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.sa-emoji-retired-item button, .sa-emoji-retired-item select {
+  font-size: 11px; padding: 2px 8px; cursor: pointer; max-width: 100%;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper); color: var(--ink-muted);
+}
+.sa-emoji-retired-item button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
 
 /* Кастомный смайлик в тексте: по высоте строки и с выравниванием по базовой
    линии, иначе он растаскивает межстрочный интервал в абзаце. */
@@ -1937,7 +1980,13 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* ===== Реакции ===== */
 /* Под пузырём, каждая с аватаром поставившего — в спеке именно так, а не
    просто «эмодзи + счётчик»: в рабочей переписке важно, кто именно отметил. */
-.msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+/* Наезд на пузырь снизу (под временем) — так плашки читаются как часть
+   сообщения, а не как отдельная строка под ним. z-index обязателен: без него
+   фон пузыря перекрывал бы верхнюю кромку плашек. */
+.msg-reactions {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: -2px;
+  position: relative; z-index: 1;
+}
 .msg.mine .msg-reactions { justify-content: flex-end; }
 .reaction-chip {
   position: relative; display: inline-flex; align-items: center; gap: 3px;

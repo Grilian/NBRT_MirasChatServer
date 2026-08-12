@@ -1122,47 +1122,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     </span>
                 </div>
 
-                {/* Реакции — под пузырём, каждая с аватаром поставившего (в
-                    спеке именно так, не просто счётчик). Клик открывает
-                    детальный список, крестик снимает — он появляется только
-                    там, где снимать вправе (своя реакция или своё сообщение). */}
-                {(isGroupChat || (msg.thread?.reply_count || 0) > 0) && onOpenThread && !pendingDelivery && (
-                  <button
-                    type="button"
-                    className={'thread-link' + ((msg.thread?.unread_count || 0) > 0 ? ' has-unread' : '')}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (selectMode) { toggleSelected(msg.id); return; }
-                      onOpenThread(msg.id, !msg.thread?.reply_count);
-                    }}
-                  >
-                    {!!msg.thread?.reply_count && (
-                      <span className="thread-link-avatars" aria-hidden="true">
-                        {msg.thread.recent_authors.slice(0, 2).map((author) => (
-                          <Avatar
-                            key={author.id}
-                            name={author.display_name || author.username}
-                            avatarPath={author.avatar_path}
-                            size="sm"
-                          />
-                        ))}
-                      </span>
-                    )}
-                    <span className="thread-link-copy">
-                      <strong>{msg.thread?.reply_count ? threadReplyLabel(msg.thread.reply_count) : 'Ответить'}</strong>
-                      {!!msg.thread?.last_reply_at && (
-                        <span>последний ответ в {formatMoscowTime(msg.thread.last_reply_at)}</span>
-                      )}
-                    </span>
-                    {!!msg.thread?.unread_count && (
-                      <span className="thread-link-unread">{msg.thread.unread_count} новых</span>
-                    )}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
-                    </svg>
-                  </button>
-                )}
-
+                {/* Реакции идут сразу за пузырём и налезают на него снизу —
+                    они принадлежат сообщению, а не ветке. Кнопка «Ответить»
+                    поэтому ниже них: пока она стояла между, реакции отрывались
+                    от сообщения на всю её высоту и читались как отдельная
+                    строка. Каждая с аватаром поставившего (в спеке именно так,
+                    не просто счётчик). Клик открывает детальный список,
+                    крестик снимает — он появляется только там, где снимать
+                    вправе (своя реакция или своё сообщение). */}
                 {!!msg.reactions?.length && (
                   <div className="msg-reactions">
                     {groupReactions(msg.reactions).map(({ emoji, list }) => {
@@ -1208,6 +1175,43 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       );
                     })}
                   </div>
+                )}
+
+                {(isGroupChat || (msg.thread?.reply_count || 0) > 0) && onOpenThread && !pendingDelivery && (
+                  <button
+                    type="button"
+                    className={'thread-link' + ((msg.thread?.unread_count || 0) > 0 ? ' has-unread' : '')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (selectMode) { toggleSelected(msg.id); return; }
+                      onOpenThread(msg.id, !msg.thread?.reply_count);
+                    }}
+                  >
+                    {!!msg.thread?.reply_count && (
+                      <span className="thread-link-avatars" aria-hidden="true">
+                        {msg.thread.recent_authors.slice(0, 2).map((author) => (
+                          <Avatar
+                            key={author.id}
+                            name={author.display_name || author.username}
+                            avatarPath={author.avatar_path}
+                            size="sm"
+                          />
+                        ))}
+                      </span>
+                    )}
+                    <span className="thread-link-copy">
+                      <strong>{msg.thread?.reply_count ? threadReplyLabel(msg.thread.reply_count) : 'Ответить'}</strong>
+                      {!!msg.thread?.last_reply_at && (
+                        <span>последний ответ в {formatMoscowTime(msg.thread.last_reply_at)}</span>
+                      )}
+                    </span>
+                    {!!msg.thread?.unread_count && (
+                      <span className="thread-link-unread">{msg.thread.unread_count} новых</span>
+                    )}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+                    </svg>
+                  </button>
                 )}
               </div>
             </React.Fragment>

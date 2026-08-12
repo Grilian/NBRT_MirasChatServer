@@ -45,7 +45,13 @@ const ThreadInbox: React.FC<ThreadInboxProps> = ({
           className={'thread-inbox-row' + (activeRootId === item.root_id ? ' is-active' : '')}
           onClick={() => onOpen(item.root_id)}
         >
-          <Avatar name={authorName(item.root)} avatarPath={item.root.avatar_path} />
+          <Avatar
+            name={item.chat.name}
+            avatarPath={item.chat.avatar_path}
+            isGeneral={item.chat.kind === 'general'}
+            isGroup={item.chat.kind === 'group'}
+            isSelf={item.chat.kind === 'self'}
+          />
           <span className="thread-inbox-body">
             <span className="thread-inbox-meta">
               <strong>{item.chat.name}</strong>

@@ -1697,7 +1697,10 @@ const Chat: React.FC = () => {
     dismissAllDesktopNotifications();
   };
 
-  // Избранное
+  // Закрепление чата. Ручки и таблица на сервере называются `favorites` —
+  // это прежнее название той же самой отметки, переименована только та её
+  // часть, которую видит человек: «избранное» путалось с личным чатом
+  // «Избранное», куда пересылают сообщения.
   const toggleFavorite = async (chatId: string) => {
     try {
       if (favorites.includes(chatId)) {
@@ -2293,11 +2296,14 @@ const Chat: React.FC = () => {
   ).sort((a, b) => a.localeCompare(b, 'ru'));
 
   function groupRank(c: { id: string; section: ChatSection; groupLabel: string | null }) {
+    // Закреплённые — в самом начале списка, выше даже общего чата: закреп для
+    // того и делают, чтобы чат был первым. В отдельный раздел их не выносим —
+    // они остаются обычными строками, просто наверху.
+    if (favorites.includes(c.id)) return -2;
     if (c.section === 'general') return -1;
     if (c.section === 'self') return -0.5;
-    if (favorites.includes(c.id)) return 0;
     // Групповые чаты (созданные вручную, не отдел из панели супер-админа) —
-    // отдельным блоком сразу после избранного, до отделов настоящих.
+    // отдельным блоком сразу после закреплённых, до отделов настоящих.
     if (c.section === 'group') return 0.5;
     // Без жёсткой группировки все люди в одном ранге — порядок между ними
     // решает свежесть переписки. Раньше разделы по группам были всегда, и
@@ -2305,15 +2311,15 @@ const Chat: React.FC = () => {
     if (!uiPrefs.groupContacts) return 1;
     // groupLabel у "безгруппных" — это плейсхолдер "Без группы", а не реальное
     // название группы. truthy-проверка тут не годится: indexOf вернёт -1,
-    // и 2 + (-1) = 0 столкнёт их с избранными вместо конца списка.
+    // и 2 + (-1) = 0 столкнёт их с групповыми чатами вместо конца списка.
     const idx = realGroupNames.indexOf(c.groupLabel || '');
     if (idx !== -1) return 1 + idx;
     return 1 + realGroupNames.length; // "Без группы" — всегда последними
   }
 
-  // Формирование списка чатов: Общий чат — всегда первым, дальше избранные
-  // (по свежести), затем свои групповые чаты, затем реальные группы
-  // (настроены в панели супер-админа), внутри каждой — тоже по свежести.
+  // Формирование списка чатов: закреплённые (по свежести), затем Общий чат,
+  // затем свои групповые чаты, затем реальные группы (настроены в панели
+  // супер-админа), внутри каждой — тоже по свежести.
   const allChats: RosterChat[] = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
     // Личный чат «для себя» — сразу за общим, до всех остальных: это заметки
@@ -2356,13 +2362,15 @@ const Chat: React.FC = () => {
       const bTime = lastMessages[b.id] ? new Date(lastMessages[b.id].created_at).getTime() : 0;
       return bTime - aTime;
     })
-    // Избранным — свой ярлык раздела, чтобы не путался с их реальной группой.
-    // Без жёсткой группировки заголовки отделов не нужны вовсе: ранг у всех
-    // людей один, и разделитель разрезал бы список в случайном месте.
+    // У закреплённых заголовка раздела нет намеренно: они не отдельная группа,
+    // а те же чаты, поднятые наверх — раньше ярлык «Избранное» читался как
+    // перенос в другое место списка. Без жёсткой группировки заголовки отделов
+    // не нужны вовсе: ранг у всех людей один, и разделитель разрезал бы список
+    // в случайном месте.
     .map(c => ({
       ...c,
-      groupLabel: c.section !== 'general' && favorites.includes(c.id)
-        ? 'Избранное'
+      groupLabel: favorites.includes(c.id)
+        ? null
         : (!uiPrefs.groupContacts && c.section === 'staff' ? null : c.groupLabel),
     }));
 
@@ -2614,11 +2622,8 @@ const Chat: React.FC = () => {
       {generalInfoOpen && (
         <GeneralChatInfoModal
           currentUserId={currentUserId}
-          currentUserName={currentDisplayName}
-          currentUserAvatarPath={currentAvatarPath}
           notificationsMuted={mutedChatIds.has(GENERAL_CHAT_ID)}
           onToggleNotifications={(muted) => updateChatNotificationMute(GENERAL_CHAT_ID, muted)}
-          onOpenUserInfo={(userId) => { setGeneralInfoOpen(false); setInfoModalUserId(userId); }}
           onClose={() => setGeneralInfoOpen(false)}
         />
       )}

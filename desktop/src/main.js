@@ -22,7 +22,12 @@ const RENDERER_INDEX = path.join(__dirname, '..', 'renderer', 'index.html');
 const STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
 const APP_STATE_PATH = path.join(app.getPath('userData'), 'app-state.json');
 
-const DEFAULT_STATE = { width: 1200, height: 800, x: undefined, y: undefined, isMaximized: false };
+const DEFAULT_STATE = { width: 1200, height: 800, x: undefined, y: undefined, isMaximized: false, mode: 'normal' };
+// Как приложение было закрыто в прошлый раз: развёрнутым, свёрнутым в панель
+// задач или спрятанным в трей. Перезагрузка машины и установка обновления
+// завершают приложение помимо нашей воли, поэтому режим пишется на каждое
+// изменение, а не только при выходе.
+const WINDOW_MODES = ['normal', 'minimized', 'tray'];
 const MIN_WIDTH = 860;
 const MIN_HEIGHT = 560;
 
@@ -33,30 +38,47 @@ let isQuitting = false;
 function loadWindowState() {
   try {
     const raw = fs.readFileSync(STATE_PATH, 'utf8');
-    return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+    const state = { ...DEFAULT_STATE, ...JSON.parse(raw) };
+    if (!WINDOW_MODES.includes(state.mode)) state.mode = DEFAULT_STATE.mode;
+    return state;
   } catch {
     return { ...DEFAULT_STATE };
+  }
+}
+
+function writeWindowState(patch) {
+  try {
+    fs.writeFileSync(STATE_PATH, JSON.stringify({ ...loadWindowState(), ...patch }));
+  } catch {
+    // не критично, окно просто откроется со значениями по умолчанию в след. раз
   }
 }
 
 function saveWindowState(win) {
   if (!win || win.isDestroyed()) return;
   const isMaximized = win.isMaximized();
-  const bounds = isMaximized ? loadWindowState() : win.getBounds();
-  try {
-    fs.writeFileSync(
-      STATE_PATH,
-      JSON.stringify({
-        width: bounds.width,
-        height: bounds.height,
-        x: bounds.x,
-        y: bounds.y,
-        isMaximized
-      })
-    );
-  } catch {
-    // не критично, окно просто откроется со значениями по умолчанию в след. раз
+  // У свёрнутого и спрятанного окна getBounds отдаёт бесполезные координаты
+  // (Windows уводит свёрнутое окно за экран), поэтому геометрию в этих
+  // состояниях не трогаем — остаётся та, что была до сворачивания.
+  if (isMaximized || win.isMinimized() || !win.isVisible()) {
+    writeWindowState({ isMaximized });
+    return;
   }
+  const bounds = win.getBounds();
+  writeWindowState({
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    isMaximized
+  });
+}
+
+function saveWindowMode(win) {
+  if (!win || win.isDestroyed()) return;
+  if (!win.isVisible()) writeWindowState({ mode: 'tray' });
+  else if (win.isMinimized()) writeWindowState({ mode: 'minimized' });
+  else writeWindowState({ mode: 'normal' });
 }
 
 function loadAppState() {
@@ -122,11 +144,23 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     if (state.isMaximized) mainWindow.maximize();
+    // Возвращаемся туда, где человек оставил приложение. В трей — вообще не
+    // показываясь: показать и тут же спрятать значит моргнуть окном на весь
+    // экран при каждом старте с автозагрузки.
+    if (state.mode === 'tray') return;
+    if (state.mode === 'minimized') {
+      mainWindow.showInactive();
+      mainWindow.minimize();
+      return;
+    }
     mainWindow.show();
   });
 
   mainWindow.on('resize', () => saveWindowState(mainWindow));
   mainWindow.on('move', () => saveWindowState(mainWindow));
+
+  mainWindow.on('minimize', () => saveWindowMode(mainWindow));
+  mainWindow.on('restore', () => saveWindowMode(mainWindow));
 
   mainWindow.on('maximize', () => mainWindow.webContents.send('window:maximized', true));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:maximized', false));
@@ -140,9 +174,13 @@ function createWindow() {
     mainWindow.webContents.send('window:focus-changed', true);
   });
   mainWindow.on('blur', () => mainWindow.webContents.send('window:focus-changed', false));
-  mainWindow.on('hide', () => mainWindow.webContents.send('window:focus-changed', false));
+  mainWindow.on('hide', () => {
+    mainWindow.webContents.send('window:focus-changed', false);
+    saveWindowMode(mainWindow);
+  });
   mainWindow.on('show', () => {
     if (mainWindow.isFocused()) mainWindow.webContents.send('window:focus-changed', true);
+    saveWindowMode(mainWindow);
   });
 
   mainWindow.on('close', (event) => {

@@ -1,37 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/client';
 import Avatar from './Avatar';
-import { nameFor } from '../utils/user';
 
 interface GeneralChatUser {
   id: number;
-  username: string;
-  display_name: string | null;
-  avatar_path: string | null;
 }
 
 interface GeneralChatInfoModalProps {
   currentUserId: number;
-  currentUserName: string;
-  currentUserAvatarPath?: string | null;
   notificationsMuted: boolean;
   onToggleNotifications: (muted: boolean) => Promise<void>;
-  onOpenUserInfo?: (userId: number) => void;
   onClose: () => void;
 }
 
 /**
- * Карточка общего чата. Своей строки в `chat_groups` у него нет — состав это
- * весь справочник (`/api/users`), поэтому список читается отдельно, а не через
- * `/groups/:id`. Управлять составом и правами отсюда нельзя: участие в общем
- * чате не выдаётся и не отбирается, оно есть у всех по определению. Смысл
- * окна — единственная настройка, которая у него всё-таки своя: уведомления.
+ * Карточка общего чата. Своей строки в `chat_groups` у него нет, а списка
+ * участников здесь нет намеренно — это единственная группа, где состав не
+ * показывается: он совпадает со всей организацией, управлять им отсюда нельзя
+ * (участие в общем чате не выдаётся и не отбирается), и список превращался бы
+ * во второй справочник рядом с «Людьми». Остаётся только счёт и единственная
+ * настройка, которая у чата всё-таки своя: уведомления.
  */
 const GeneralChatInfoModal: React.FC<GeneralChatInfoModalProps> = ({
-  currentUserId, currentUserName, currentUserAvatarPath, notificationsMuted,
-  onToggleNotifications, onOpenUserInfo, onClose,
+  currentUserId, notificationsMuted, onToggleNotifications, onClose,
 }) => {
-  const [members, setMembers] = useState<GeneralChatUser[]>([]);
+  const [memberCount, setMemberCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [notificationBusy, setNotificationBusy] = useState(false);
   const [notificationError, setNotificationError] = useState('');
@@ -46,15 +39,12 @@ const GeneralChatInfoModal: React.FC<GeneralChatInfoModalProps> = ({
         // нём человек обязан видеть: иначе в общем чате всей организации
         // счётчик занижен на одного, и именно на него самого.
         const others = Array.isArray(data) ? data.filter((u) => u.id !== currentUserId) : [];
-        setMembers([
-          { id: currentUserId, username: currentUserName, display_name: currentUserName, avatar_path: currentUserAvatarPath ?? null },
-          ...others,
-        ]);
+        setMemberCount(others.length + 1);
       })
       .catch(console.error)
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [currentUserId, currentUserName, currentUserAvatarPath]);
+  }, [currentUserId]);
 
   const toggleNotifications = async () => {
     if (notificationBusy) return;
@@ -86,7 +76,7 @@ const GeneralChatInfoModal: React.FC<GeneralChatInfoModalProps> = ({
               у всего, что не `:disabled`, а div отключённым не бывает. */}
           <button type="button" className="group-info-name" disabled>Общий чат</button>
           <div className="group-info-count">
-            {loading ? 'Загружаем состав…' : `${members.length} ${declineMembers(members.length)}`}
+            {loading ? 'Загружаем состав…' : `${memberCount} ${declineMembers(memberCount)}`}
           </div>
           <button
             type="button"
@@ -109,28 +99,6 @@ const GeneralChatInfoModal: React.FC<GeneralChatInfoModalProps> = ({
           Здесь состоят все сотрудники — сообщение из этого чата видит вся организация.
         </div>
 
-        <div className="directory-list group-info-members">
-          {loading && <div className="roster-empty">Загрузка...</div>}
-          {!loading && members.length === 0 && <div className="roster-empty">Сотрудники не найдены</div>}
-          {members.map((member) => (
-            <div key={member.id} className="row group-info-row">
-              <button
-                type="button"
-                className="row-avatar-btn"
-                onClick={() => onOpenUserInfo?.(member.id)}
-                disabled={!onOpenUserInfo || member.id === currentUserId}
-                aria-label="Профиль"
-              >
-                <Avatar name={nameFor(member)} avatarPath={member.avatar_path} />
-              </button>
-              <div className="row-body">
-                <div className="row-name">
-                  <span>{nameFor(member)}{member.id === currentUserId ? ' (вы)' : ''}</span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
