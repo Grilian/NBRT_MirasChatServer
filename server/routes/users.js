@@ -7,7 +7,7 @@ const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const sharp = require('sharp');
 const { isValidLogin, isReservedLogin, isValidPassword, isValidDisplayName, isValidPhone, isValidBio, isValidShortText, isValidBirthDate } = require('../utils/validators');
-const { deleteAvatarFile } = require('../utils/files');
+const { deleteAvatarFile, deleteUploadedFile } = require('../utils/files');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { clearExpiredStatuses } = require('../services/statusExpiry');
 const { selfChatId } = require('../services/chatParticipants');
@@ -27,6 +27,23 @@ const AVATAR_JPEG_QUALITY = 80;
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, AVATAR_ALLOWED_MIME.includes(file.mimetype)),
+});
+
+// Обои под лентой сообщений. Предел по ВЫСОТЕ больше, чем по ширине: лента
+// всегда выше своей ширины, и сюда несут вертикальные снимки с телефона.
+// Качество ниже аватарного: это фон за текстом, разницы не видно, а место
+// экономит заметно — при сотне сотрудников счёт идёт на гигабайты.
+const BACKGROUNDS_DIR = path.join(__dirname, '..', 'uploads', 'backgrounds');
+fs.mkdirSync(BACKGROUNDS_DIR, { recursive: true });
+
+const BACKGROUND_MAX_WIDTH = 1080;
+const BACKGROUND_MAX_HEIGHT = 1920;
+const BACKGROUND_QUALITY = 62;
+
+const backgroundUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 16 * 1024 * 1024 },
   fileFilter: (req, file, cb) => cb(null, AVATAR_ALLOWED_MIME.includes(file.mimetype)),
 });
 
@@ -115,6 +132,8 @@ router.get('/me', verifyToken, (req, res) => {
       username: user.username,
       display_name: user.display_name || user.username,
       avatar_path: user.avatar_path || null,
+      // Свои обои под лентой сообщений — общие на все чаты этого человека.
+      chat_background_path: user.chat_background_path || null,
       bio: user.bio || '',
       phone: user.phone || '',
       department: user.department_name || '',
@@ -348,6 +367,67 @@ router.post('/me/avatar', verifyToken, (req, res) => {
       res.status(500).json({ error: e.message });
     }
   });
+});
+
+/**
+ * Загрузить свои обои под ленту сообщений.
+ *
+ * Исходник не храним никогда: с телефона приходит снимок на несколько мегабайт,
+ * а обои — это фон за текстом, где разница между исходным качеством и сжатым
+ * не видна вовсе. При сотне сотрудников разница между «как прислали» и
+ * «сжатым» — это гигабайты на диске против десятков мегабайт.
+ *
+ * Размер подобран под вертикальный кадр с телефона: лента сообщений всегда
+ * выше своей ширины, и обои растягиваются по ней с обрезкой боков (cover).
+ */
+router.post('/me/chat-background', verifyToken, (req, res) => {
+  backgroundUpload.single('background')(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Не удалось загрузить файл' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не распознан как изображение (jpeg/png/webp)' });
+    }
+
+    try {
+      const filename = `bg_${req.userId}_${Date.now()}.webp`;
+      await sharp(req.file.buffer)
+        .rotate() // EXIF-ориентация с телефонных камер, иначе кадр ляжет боком
+        .resize(BACKGROUND_MAX_WIDTH, BACKGROUND_MAX_HEIGHT, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .webp({ quality: BACKGROUND_QUALITY })
+        .toFile(path.join(BACKGROUNDS_DIR, filename));
+
+      const user = db.prepare('SELECT chat_background_path FROM users WHERE id = ?').get(req.userId);
+      const backgroundPath = `/uploads/backgrounds/${filename}`;
+
+      db.prepare('UPDATE users SET chat_background_path = ? WHERE id = ?')
+        .run(backgroundPath, req.userId);
+      // Имя всегда новое (в нём время), поэтому прежний файл больше не нужен
+      // никому: на него не ссылается ни одно сообщение, в отличие от картинок
+      // в переписке.
+      if (user && user.chat_background_path && user.chat_background_path !== backgroundPath) {
+        deleteUploadedFile(user.chat_background_path);
+      }
+
+      res.json({ chat_background_path: backgroundPath });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+router.delete('/me/chat-background', verifyToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT chat_background_path FROM users WHERE id = ?').get(req.userId);
+    db.prepare('UPDATE users SET chat_background_path = NULL WHERE id = ?').run(req.userId);
+    if (user && user.chat_background_path) deleteUploadedFile(user.chat_background_path);
+    res.json({ chat_background_path: null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Убрать аватар — возврат к сгенерированной заглушке с инициалами

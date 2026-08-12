@@ -1061,7 +1061,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         // Суффикс `_a` в имени ставит сервер, когда в картинке
                         // есть прозрачность (см. routes/messages.js).
                         className={'bubble-image' + (msg.file_path && /_a\.webp$/.test(msg.file_path) ? ' has-alpha' : '') + (msg.local_file_url ? ' has-local-preview' : '') + (msg.status === 'failed' ? ' is-send-failed' : '')}
-                        style={msg.file_width && msg.file_height ? { aspectRatio: `${msg.file_width} / ${msg.file_height}` } : undefined}
+                        // Пропорция держит место под картинку до её загрузки, а
+                        // предел по натуральной ширине не даёт растянуть мелкий
+                        // кадр на весь пузырь: ширину картинке задаёт пузырь
+                        // (см. .bubble-image), и снимок в 200px иначе
+                        // размазало бы втрое.
+                        style={msg.file_width && msg.file_height ? {
+                          aspectRatio: `${msg.file_width} / ${msg.file_height}`,
+                          // Строкой с единицами, а не числом: числовое значение
+                          // спотыкается о проверку стилей в React.
+                          maxWidth: `${msg.file_width}px`,
+                        } : undefined}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (selectMode) { toggleSelected(msg.id); return; }

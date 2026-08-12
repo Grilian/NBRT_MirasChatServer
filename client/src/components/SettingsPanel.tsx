@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Avatar from './Avatar';
+import api from '../api/client';
+import { applyChatWallpaper } from '../utils/chatWallpaper';
+import { resolveUploadUrl } from '../utils/uploads';
 import { ThemePreference, applyThemePreference, getThemePreference } from '../utils/theme';
 import {
   DURATION_OPTIONS,
@@ -45,6 +48,59 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [ui, setUi] = useState<UiPrefs>(getUiPrefs);
   const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
   const [qrOpen, setQrOpen] = useState(false);
+
+  // Обои под лентой. Путь держим в localStorage, потому что применяет их не
+  // React, а переменные CSS (см. utils/chatWallpaper.ts), и панели нужно лишь
+  // знать, показывать ли кнопку «Убрать».
+  const [wallpaperPath, setWallpaperPath] = useState<string | null>(
+    localStorage.getItem('chatBackgroundPath') || null
+  );
+  const [wallpaperBusy, setWallpaperBusy] = useState(false);
+  const [wallpaperError, setWallpaperError] = useState('');
+  const wallpaperInputRef = useRef<HTMLInputElement | null>(null);
+  const wallpaperUrl = resolveUploadUrl(wallpaperPath);
+
+  const rememberWallpaper = (path: string | null) => {
+    setWallpaperPath(path);
+    localStorage.setItem('chatBackgroundPath', path || '');
+    // Применяем сразу: фон должен смениться под открытой перепиской, а не
+    // после перезахода.
+    applyChatWallpaper(path);
+  };
+
+  const handleWallpaperPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Значение поля сбрасываем всегда: без этого повторный выбор того же файла
+    // не вызывает change, и «Заменить» после ошибки не срабатывает.
+    e.target.value = '';
+    if (!file) return;
+
+    setWallpaperBusy(true);
+    setWallpaperError('');
+    try {
+      const form = new FormData();
+      form.append('background', file);
+      const { data } = await api.post('/users/me/chat-background', form);
+      rememberWallpaper(data.chat_background_path || null);
+    } catch (err: any) {
+      setWallpaperError(err.response?.data?.error || 'Не удалось загрузить изображение');
+    } finally {
+      setWallpaperBusy(false);
+    }
+  };
+
+  const handleWallpaperRemove = async () => {
+    setWallpaperBusy(true);
+    setWallpaperError('');
+    try {
+      await api.delete('/users/me/chat-background');
+      rememberWallpaper(null);
+    } catch {
+      setWallpaperError('Не удалось убрать фон');
+    } finally {
+      setWallpaperBusy(false);
+    }
+  };
 
   const handleThemeChange = (value: ThemePreference) => {
     setTheme(value);
@@ -161,6 +217,52 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div className="settings-hint">
             Выключено — смайлики в переписке остаются неподвижными. Настройка личная: у остальных
             анимация продолжит работать.
+          </div>
+        </div>
+
+        <div className="settings-section-title">Фон переписки</div>
+        <div className="settings-group">
+          <div className="settings-row static settings-wallpaper">
+            <div
+              className={'settings-wallpaper-preview' + (wallpaperUrl ? ' has-image' : '')}
+              style={wallpaperUrl ? { backgroundImage: `url("${wallpaperUrl}")` } : undefined}
+              aria-hidden="true"
+            />
+            <div className="settings-wallpaper-actions">
+              {/* Поле файла спрятано за кнопкой: системное оформление input[type=file]
+                  не поддаётся стилям и выбивалось бы из списка настроек. */}
+              <input
+                ref={wallpaperInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                hidden
+                onChange={handleWallpaperPick}
+              />
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => wallpaperInputRef.current?.click()}
+                disabled={wallpaperBusy}
+              >
+                {wallpaperBusy ? 'Загрузка…' : wallpaperUrl ? 'Заменить' : 'Выбрать изображение'}
+              </button>
+              {wallpaperUrl && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleWallpaperRemove}
+                  disabled={wallpaperBusy}
+                >
+                  Убрать
+                </button>
+              )}
+            </div>
+          </div>
+          {wallpaperError && <div className="settings-hint form-error">{wallpaperError}</div>}
+          <div className="settings-hint">
+            Один фон на все чаты сразу. Лучше всего подходит вертикальное изображение — лента
+            сообщений выше своей ширины. Сервер сжимает картинку, поэтому исходник может быть
+            любого размера.
           </div>
         </div>
 

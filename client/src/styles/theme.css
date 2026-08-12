@@ -671,13 +671,19 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
      пузырь на экране и тем самым отодвигать фактическое дно после открытия. */
   overflow-anchor: none;
   background-color: var(--chat-bg);
-  /* Ненавязчивый узор вместо плоской заливки — как обои Telegram по умолчанию */
-  background-image:
+  /* Ненавязчивый узор вместо плоской заливки — как обои Telegram по умолчанию.
+     Каждое свойство берётся из переменной со своим запасным значением: когда
+     человек ставит свои обои, utils/chatWallpaper.ts переопределяет их на
+     корне документа, и все ленты — переписка, ветка, узкий экран — меняются
+     разом, без пропсов и без перерисовки React. */
+  background-image: var(--chat-wallpaper-image,
     radial-gradient(circle at 20% 25%, var(--chat-pattern) 0 12%, transparent 12.5%),
     radial-gradient(circle at 70% 65%, var(--chat-pattern) 0 9%, transparent 9.5%),
-    radial-gradient(circle at 45% 90%, var(--chat-pattern) 0 7%, transparent 7.5%);
-  background-size: 340px 340px, 260px 260px, 180px 180px;
-  background-attachment: local, local, local;
+    radial-gradient(circle at 45% 90%, var(--chat-pattern) 0 7%, transparent 7.5%));
+  background-size: var(--chat-wallpaper-size, 340px 340px, 260px 260px, 180px 180px);
+  background-position: var(--chat-wallpaper-position, 0% 0%);
+  background-repeat: var(--chat-wallpaper-repeat, repeat);
+  background-attachment: var(--chat-wallpaper-attachment, local);
 }
 
 .conv-empty { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--chat-bg); }
@@ -841,8 +847,19 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    верх и низ — в полноэкранном просмотре при этом всё было цело.
    Теперь пропорция и предел высоты живут на одном элементе: браузер сам сужает
    ширину, и кадр виден целиком. */
+/* Ширина картинки — вся ширина пузыря, без собственного предела. Прежние 320px
+   были уже пузыря (он ограничен min(70%, 680px)), и под длинным текстом кадр
+   висел узкой полосой посреди широкого сообщения. Растянуть сверх исходника это
+   не может: в чат картинка кладётся уменьшенной до 1600px по большей стороне,
+   что заведомо больше пузыря, а на всякий случай сверху стоит ещё и предел по
+   натуральной ширине (inline из file_width, см. ChatWindow.tsx).
+
+   Предел по высоте остаётся, иначе портретный кадр во всю ширину занял бы
+   несколько экранов. Но он поднят с 320px: при 320 полную ширину получали
+   только кадры шире 2:1, а обычное фото 4:3 упиралось в высоту и оставалось
+   таким же узким, как раньше. */
 .bubble-image {
-  position: relative; display: block; width: calc(100% + 22px); max-width: 320px; max-height: 320px;
+  position: relative; display: block; width: calc(100% + 22px); max-height: 480px;
   margin: -6px -11px 4px;
   border: none; padding: 0; cursor: zoom-in; background: var(--paper-sunken);
   border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
@@ -1694,6 +1711,26 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .settings-group { background: var(--paper-raised); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
 .settings-hint { padding: 8px 14px 12px; font-size: 12.5px; color: var(--ink-faint); border-top: 1px solid var(--line); }
+
+/* Фон переписки: образец слева, кнопки справа. Образец вертикальный — таким же
+   боком картинка ляжет и в саму ленту, и по нему сразу видно, подходит ли
+   кадр. */
+.settings-wallpaper { align-items: center; gap: 12px; }
+.settings-wallpaper-preview {
+  width: 48px; height: 74px; flex: 0 0 auto; border-radius: 8px;
+  border: 1px solid var(--line); background-color: var(--chat-bg);
+  background-size: cover; background-position: center;
+}
+/* Пока обоев нет — тот же узор, что и в самой ленте, а не пустой прямоугольник:
+   так видно, что именно заменяется. */
+.settings-wallpaper-preview:not(.has-image) {
+  background-image:
+    radial-gradient(circle at 25% 20%, var(--chat-pattern) 0 14%, transparent 14.5%),
+    radial-gradient(circle at 70% 60%, var(--chat-pattern) 0 11%, transparent 11.5%);
+  background-size: 34px 34px, 26px 26px;
+}
+.settings-wallpaper-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.settings-wallpaper-actions .btn-secondary { width: auto; margin: 0; padding: 7px 14px; font-size: 13px; }
 
 .settings-row {
   width: 100%; display: flex; align-items: center; gap: 14px; padding: 13px 16px; border: none; background: none;

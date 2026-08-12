@@ -763,6 +763,17 @@ try {
   // Колонка уже есть
 }
 
+// Свои обои под лентой сообщений. Настройка личная и общая на все чаты сразу:
+// отдельный фон у каждой переписки — другая задача, и заводить под неё таблицу
+// заранее незачем. Хранится на сервере, а не в localStorage, как остальные
+// настройки вида: человек ставит картинку один раз и ждёт её на всех своих
+// устройствах, а не заново на каждом.
+try {
+  db.exec('ALTER TABLE users ADD COLUMN chat_background_path TEXT');
+} catch (e) {
+  // Колонка уже есть
+}
+
 function ensureDepartment(name) {
   const existing = db.prepare('SELECT id FROM departments WHERE name = ?').get(name);
   if (existing) return existing.id;

@@ -34,6 +34,7 @@ import ThreadInbox from '../components/ThreadInbox';
 import { Poll, PollDraft } from '../types/poll';
 import { ThreadInboxItem, ThreadSummary } from '../types/thread';
 import { CustomEmojiMap, buildEmojiMap, toPlainText, setEmojiAnimationEnabled } from '../utils/customEmoji';
+import { applyChatWallpaper } from '../utils/chatWallpaper';
 import { invalidateEmojiPackCache } from '../components/EmojiPicker';
 import {
   ensureMobileNotificationPermission,
@@ -594,6 +595,11 @@ const Chat: React.FC = () => {
   const [currentUsername, setCurrentUsername] = useState(localStorage.getItem('username') || '');
   const [currentDisplayName, setCurrentDisplayName] = useState(localStorage.getItem('displayName') || localStorage.getItem('username') || '');
   const [currentAvatarPath, setCurrentAvatarPath] = useState<string | null>(localStorage.getItem('avatarPath') || null);
+  // Обои запоминаются на устройстве, чтобы при открытии приложения фон не
+  // моргал узором по умолчанию, пока едет ответ /users/me.
+  const [chatBackgroundPath, setChatBackgroundPath] = useState<string | null>(
+    localStorage.getItem('chatBackgroundPath') || null
+  );
   const [currentBio, setCurrentBio] = useState(localStorage.getItem('bio') || '');
   const [currentPhone, setCurrentPhone] = useState(localStorage.getItem('phone') || '');
   const [currentDepartment, setCurrentDepartment] = useState(localStorage.getItem('department') || '');
@@ -655,6 +661,8 @@ const Chat: React.FC = () => {
   // в каждое — верный способ забыть половину. Держим в курсе на каждое
   // изменение настройки.
   useEffect(() => { setEmojiAnimationEnabled(uiPrefs.animatedEmoji); }, [uiPrefs.animatedEmoji]);
+  // Запомненные обои — на первый кадр, до ответа сервера.
+  useEffect(() => { applyChatWallpaper(chatBackgroundPath); }, [chatBackgroundPath]);
 
   // Растягивание списка чатов мышью. Ширина во время перетаскивания живёт в
   // состоянии (перерисовка на каждый кадр), а в localStorage уходит один раз,
@@ -935,6 +943,10 @@ const Chat: React.FC = () => {
         setCurrentUsername(data.username);
         setCurrentDisplayName(data.display_name);
         setCurrentAvatarPath(data.avatar_path);
+        setChatBackgroundPath(data.chat_background_path || null);
+        // Обои применяются сразу, до всякой перерисовки: они живут в
+        // переменных CSS, а не в разметке (см. utils/chatWallpaper.ts).
+        applyChatWallpaper(data.chat_background_path);
         setCurrentBio(data.bio);
         setCurrentPhone(data.phone);
         setCurrentDepartment(data.department);
@@ -953,6 +965,7 @@ const Chat: React.FC = () => {
         localStorage.setItem('username', data.username);
         localStorage.setItem('displayName', data.display_name);
         localStorage.setItem('avatarPath', data.avatar_path || '');
+        localStorage.setItem('chatBackgroundPath', data.chat_background_path || '');
         localStorage.setItem('bio', data.bio || '');
         localStorage.setItem('phone', data.phone || '');
         localStorage.setItem('department', data.department || '');
