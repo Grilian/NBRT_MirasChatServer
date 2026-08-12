@@ -1,10 +1,12 @@
 import api from '../api/client';
-import { CalendarOccurrence, CalendarScope, EventDraft } from './types';
+import { CalendarOccurrence, CalendarScope, EventDraft, GoogleCalendarLayer } from './types';
 
 interface RangeResponse {
   events: CalendarOccurrence[];
   birthdays: CalendarOccurrence[];
   canPublishGlobal: boolean;
+  /** Подключённые дополнительные календари Google — по слою на каждый. */
+  googleCalendars: GoogleCalendarLayer[];
 }
 
 /**
@@ -33,6 +35,7 @@ export async function fetchRange(
     events: data.events || [],
     birthdays: data.birthdays || [],
     canPublishGlobal: !!data.can_publish_global,
+    googleCalendars: data.google_calendars || [],
   };
 }
 

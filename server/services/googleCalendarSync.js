@@ -62,6 +62,17 @@ const upsertLink = db.prepare(`
 function recordLocalDeletion(eventId) {
   const link = linkByEvent.get(eventId);
   if (!link) return;
+
+  // В календарь, доступный только на чтение, удаление отправить нельзя. Копить
+  // такие надгробия в расчёте на будущее право записи нельзя тем более: они
+  // разъехались бы разом в день его выдачи и снесли бы в чужом календаре
+  // события, которые никто не собирался удалять оттуда — у нас это в тот момент
+  // значило «убрать из зеркала», а не «удалить у всех».
+  const source = db.prepare(
+    'SELECT read_only FROM google_calendar_sources WHERE account_id = ? AND google_calendar_id = ?'
+  ).get(link.account_id, link.google_calendar_id);
+  if (!source || source.read_only) return;
+
   db.prepare(`
     INSERT OR IGNORE INTO google_calendar_deletions
       (account_id, google_calendar_id, google_event_id, created_at)
@@ -69,23 +80,55 @@ function recordLocalDeletion(eventId) {
   `).run(link.account_id, link.google_calendar_id, link.google_event_id, Date.now());
 }
 
-/** Аккаунт, с которым есть что синхронизировать. null — нечего или не настроено. */
+/**
+ * Аккаунт, с которым есть что синхронизировать. null — нечего или не настроено.
+ *
+ * Календарь тут уже не обязателен: дополнительные читаются и без выбранного
+ * основного. Без автора импортированных событий — по-прежнему нельзя, у нашего
+ * события owner_id пустым быть не может.
+ */
 function syncableAccount(userId = ORG_ACCOUNT) {
   const account = getAccount(userId);
-  if (!account || !account.calendar_id || !account.owner_user_id) return null;
+  if (!account || !account.owner_user_id) return null;
+  if (!listSources(account.id).length) return null;
   return account;
 }
 
+const listSources = (accountId) => db.prepare(
+  'SELECT * FROM google_calendar_sources WHERE account_id = ? ORDER BY is_main DESC, id'
+).all(accountId);
+
+/** Календарь, в который уезжают НАШИ события. null — такого нет или он на чтение. */
+function writableMain(accountId) {
+  const main = db.prepare(
+    'SELECT * FROM google_calendar_sources WHERE account_id = ? AND is_main = 1'
+  ).get(accountId);
+  return main && !main.read_only ? main : null;
+}
+
+/**
+ * Куда в нашем календаре ложится содержимое этого календаря Google.
+ *
+ * Основной — в общий календарь: он и есть календарь организации. Остальные —
+ * каждый в свой слой, как «Другие календари» в самом Google; свалив их в общий,
+ * мы лишили бы человека возможности выключить чужие мероприятия, не выключая
+ * события организации.
+ */
+const scopeOf = (source) => (source.is_main
+  ? { kind: SYNCED_SCOPE, id: null }
+  : { kind: 'gcal', id: source.id });
+
 // ===== Отправка наших изменений =====
 
-async function pushDeletions(account) {
-  const rows = db.prepare(
-    'SELECT * FROM google_calendar_deletions WHERE account_id = ? ORDER BY id LIMIT 200'
-  ).all(account.id);
+async function pushDeletions(account, main) {
+  const rows = db.prepare(`
+    SELECT * FROM google_calendar_deletions
+    WHERE account_id = ? AND google_calendar_id = ? ORDER BY id LIMIT 200
+  `).all(account.id, main.google_calendar_id);
 
   let count = 0;
   for (const row of rows) {
-    await api.deleteEvent({ ...account, calendar_id: row.google_calendar_id }, row.google_event_id);
+    await api.deleteEvent(account, row.google_calendar_id, row.google_event_id);
     // Снимаем надгробие только после успеха: на ошибке проход прервётся, и
     // удаление доедет следующим — потерять его нельзя, второго повода не будет.
     db.prepare('DELETE FROM google_calendar_deletions WHERE id = ?').run(row.id);
@@ -94,9 +137,13 @@ async function pushDeletions(account) {
   return count;
 }
 
-async function pushEvents(account) {
+async function pushEvents(account, main) {
   // Новые (привязки нет) и изменённые после последней отправки. Одним
   // запросом, потому что различаются они только наличием строки в links.
+  //
+  // Берётся только общий календарь: события слоёв 'gcal' — зеркало чужих
+  // календарей, и отправлять их куда-либо значило бы копировать чужие
+  // мероприятия в календарь организации.
   const rows = db.prepare(`
     SELECT e.*, l.google_event_id, l.local_synced_at, l.push_blocked
     FROM calendar_events e
@@ -109,11 +156,11 @@ async function pushEvents(account) {
   for (const event of rows) {
     const body = toGoogleEvent(event);
     const saved = event.google_event_id
-      ? await api.patchEvent(account, event.google_event_id, body)
-      : await api.insertEvent(account, body);
+      ? await api.patchEvent(account, main.google_calendar_id, event.google_event_id, body)
+      : await api.insertEvent(account, main.google_calendar_id, body);
 
     upsertLink.run(
-      event.id, account.id, account.calendar_id, saved.id,
+      event.id, account.id, main.google_calendar_id, saved.id,
       Date.parse(saved.updated) || Date.now(), saved.etag || null,
       // Именно updated_at события, а не «сейчас»: между выборкой и ответом
       // Google его могли успеть поправить снова, и «сейчас» проглотило бы ту
@@ -131,7 +178,7 @@ const insertEvent = db.prepare(`
   INSERT INTO calendar_events
     (owner_id, scope_kind, scope_id, title, description, location,
      starts_at, ends_at, all_day, color, recurrence, is_task, created_at, updated_at)
-  VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const updateEvent = db.prepare(`
@@ -149,8 +196,9 @@ const updateEvent = db.prepare(`
  * проходе после нашей же отправки возвращает наши собственные события, и
  * считать их изменениями значило бы дёргать клиентов на каждом тике.
  */
-function applyRemoteMaster(account, item) {
-  const link = linkByGoogle.get(account.calendar_id, item.id);
+function applyRemoteMaster(account, source, item) {
+  const link = linkByGoogle.get(source.google_calendar_id, item.id);
+  const scope = scopeOf(source);
 
   if (item.status === 'cancelled') {
     // Удалили у них — удаляем у себя. Привязка уходит по каскаду, и надгробие
@@ -176,14 +224,21 @@ function applyRemoteMaster(account, item) {
     // Правили с обеих сторон — побеждает более позднее изменение. Отправка
     // идёт до чтения, поэтому сюда попадает только правка, случившаяся прямо
     // во время прохода; молча затирать её более старой чужой нельзя.
-    if (local.updated_at > link.local_synced_at && local.updated_at > remoteUpdated) {
+    //
+    // Для календаря, доступного только на чтение, этого спора не существует:
+    // наша правка туда не уедет никогда, и оставить её значило бы навсегда
+    // заморозить событие в состоянии, которого на той стороне нет.
+    if (!source.read_only
+      && local.updated_at > link.local_synced_at && local.updated_at > remoteUpdated) {
       return false;
     }
 
     const now = Date.now();
     updateEvent.run(
       fields.title, fields.description, fields.location, fields.starts_at,
-      fields.ends_at, fields.all_day, fields.color, fields.recurrence, now, link.event_id
+      fields.ends_at, fields.all_day,
+      source.is_main ? fields.color : source.color,
+      fields.recurrence, now, link.event_id
     );
     // Время и правило могли сдвинуться — вхождения, к которым привязаны
     // отметки и напоминания, уехали. Ровно как при правке через наш API.
@@ -191,7 +246,7 @@ function applyRemoteMaster(account, item) {
     applyRemoteSkips(link.event_id, parsed.skips);
 
     upsertLink.run(
-      link.event_id, account.id, account.calendar_id, item.id,
+      link.event_id, account.id, source.google_calendar_id, item.id,
       remoteUpdated, item.etag || null,
       // Мы только что подняли updated_at до now. Не отметив это здесь,
       // следующая же отправка сочла бы событие изменённым у нас и отправила
@@ -209,10 +264,10 @@ function applyRemoteMaster(account, item) {
   if (claimed) {
     const existing = db.prepare(
       'SELECT * FROM calendar_events WHERE id = ? AND scope_kind = ?'
-    ).get(claimed, SYNCED_SCOPE);
+    ).get(claimed, scope.kind);
     if (existing && !linkByEvent.get(existing.id)) {
       upsertLink.run(
-        existing.id, account.id, account.calendar_id, item.id,
+        existing.id, account.id, source.google_calendar_id, item.id,
         remoteUpdated, item.etag || null, existing.updated_at, parsed.supported ? 0 : 1
       );
       // Связь восстановили, содержимое не трогали — показывать нечего.
@@ -222,15 +277,20 @@ function applyRemoteMaster(account, item) {
 
   const now = Date.now();
   const result = insertEvent.run(
-    account.owner_user_id, SYNCED_SCOPE,
+    account.owner_user_id, scope.kind, scope.id,
     fields.title, fields.description, fields.location, fields.starts_at,
-    fields.ends_at, fields.all_day, fields.color, fields.recurrence, fields.is_task,
+    fields.ends_at, fields.all_day,
+    // Цвет слоя, а не тот, что стоит у события в Google: дополнительный
+    // календарь узнаётся в сетке именно по цвету, и разноцветные мероприятия
+    // внутри него сделали бы слой неотличимым от остальных.
+    source.is_main ? fields.color : source.color,
+    fields.recurrence, fields.is_task,
     now, now
   );
   const eventId = Number(result.lastInsertRowid);
   applyRemoteSkips(eventId, parsed.skips);
   upsertLink.run(
-    eventId, account.id, account.calendar_id, item.id,
+    eventId, account.id, source.google_calendar_id, item.id,
     remoteUpdated, item.etag || null, now, parsed.supported ? 0 : 1
   );
   return true;
@@ -243,8 +303,8 @@ function applyRemoteMaster(account, item) {
  * originalStartTime, то есть место вхождения в серии, а не его новое время.
  * Ровно тот же ключ, что и у правки вхождения через наш API.
  */
-function applyRemoteInstance(account, item) {
-  const link = linkByGoogle.get(account.calendar_id, item.recurringEventId);
+function applyRemoteInstance(account, source, item) {
+  const link = linkByGoogle.get(source.google_calendar_id, item.recurringEventId);
   if (!link) return false;
 
   const slot = originalStartOf(item);
@@ -338,24 +398,25 @@ function deleteLocalEvent(eventId) {
  * ссылается на свою серию, а порядок в ответе Google не обещан, и на первой же
  * новой серии её правка потерялась бы, не найдя привязки.
  */
-function applyPage(account, items) {
+function applyPage(account, source, items) {
   let changed = 0;
 
   for (const item of items) {
     if (item.recurringEventId) continue;
-    if (applyRemoteMaster(account, item)) changed += 1;
+    if (applyRemoteMaster(account, source, item)) changed += 1;
   }
 
   for (const item of items) {
     if (!item.recurringEventId) continue;
-    if (applyRemoteInstance(account, item)) changed += 1;
+    if (applyRemoteInstance(account, source, item)) changed += 1;
   }
 
   return changed;
 }
 
-async function pullEvents(account) {
-  let syncToken = account.sync_token || null;
+/** Чтение одного календаря. Курсор у каждого свой — см. таблицу источников. */
+async function pullSource(account, source) {
+  let syncToken = source.sync_token || null;
   let usedFullResync = false;
   let changed = 0;
 
@@ -365,17 +426,17 @@ async function pullEvents(account) {
 
     try {
       for (let page = 0; page < MAX_PAGES; page += 1) {
-        const data = await api.listEvents(account, {
+        const data = await api.listEvents(account, source.google_calendar_id, {
           syncToken,
           timeMin: account.sync_from || Date.now() - 30 * 24 * 60 * 60 * 1000,
           pageToken,
         });
 
-        changed += applyPage(account, data.items || []);
+        changed += applyPage(account, source, data.items || []);
 
         if (data.nextSyncToken) {
-          db.prepare('UPDATE google_calendar_accounts SET sync_token = ?, updated_at = ? WHERE id = ?')
-            .run(data.nextSyncToken, Date.now(), account.id);
+          db.prepare('UPDATE google_calendar_sources SET sync_token = ? WHERE id = ?')
+            .run(data.nextSyncToken, source.id);
         }
         if (!data.nextPageToken) break;
         pageToken = data.nextPageToken;
@@ -385,7 +446,7 @@ async function pullEvents(account) {
       // 410 — курсор протух (Google хранит их ограниченное время). Это штатный
       // ответ, а не поломка: начинаем проход заново без курсора.
       if (e instanceof api.GoogleApiError && e.status === 410 && syncToken) {
-        db.prepare('UPDATE google_calendar_accounts SET sync_token = NULL WHERE id = ?').run(account.id);
+        db.prepare('UPDATE google_calendar_sources SET sync_token = NULL WHERE id = ?').run(source.id);
         syncToken = null;
         usedFullResync = true;
         continue;
@@ -395,6 +456,29 @@ async function pullEvents(account) {
   }
 
   return { changed, fullResync: usedFullResync };
+}
+
+/**
+ * Перечитать права на календарь у самого Google.
+ *
+ * Делается каждый проход: право записи могут выдать когда угодно и не сказав
+ * нам. Без этого календарь, подключённый на чтение, остался бы односторонним
+ * навсегда — до тех пор, пока человек не вспомнит и не переподключит его
+ * руками. Ошибку опроса глотаем: остаться при прежнем знании о правах лучше,
+ * чем не прочитать календарь вовсе.
+ */
+async function refreshAccess(account, source) {
+  try {
+    const access = await api.getCalendarAccess(account, source.google_calendar_id);
+    if (!access) return source;
+    const readOnly = access.writable ? 0 : 1;
+    if (readOnly === source.read_only && access.access_role === source.access_role) return source;
+    db.prepare('UPDATE google_calendar_sources SET read_only = ?, access_role = ? WHERE id = ?')
+      .run(readOnly, access.access_role, source.id);
+    return { ...source, read_only: readOnly, access_role: access.access_role };
+  } catch {
+    return source;
+  }
 }
 
 // ===== Проход целиком =====
@@ -413,9 +497,36 @@ async function runSync(io, { userId = ORG_ACCOUNT } = {}) {
   running = true;
 
   try {
-    const deleted = await pushDeletions(account);
-    const pushed = await pushEvents(account);
-    const pulled = await pullEvents(account);
+    // Права перечитываем до всего остального: от них зависит, отправлять ли
+    // вообще, а выданное вчера право записи должно включить обмен само.
+    const sources = [];
+    for (const source of listSources(account.id)) {
+      sources.push(await refreshAccess(account, source));
+    }
+
+    // Отправка — только в основной календарь и только если в него можно писать.
+    const main = writableMain(account.id);
+    const deleted = main ? await pushDeletions(account, main) : 0;
+    const pushed = main ? await pushEvents(account, main) : 0;
+
+    let pulled = 0;
+    let fullResync = false;
+    for (const source of sources) {
+      // Один недоступный календарь не должен останавливать остальные: доступ к
+      // чужому могут отозвать в любой момент, и это не повод перестать читать
+      // собственный. Ошибка запоминается у самого календаря.
+      try {
+        const result = await pullSource(account, source);
+        pulled += result.changed;
+        fullResync = fullResync || result.fullResync;
+        db.prepare(
+          'UPDATE google_calendar_sources SET last_sync_at = ?, last_error = NULL WHERE id = ?'
+        ).run(Date.now(), source.id);
+      } catch (e) {
+        db.prepare('UPDATE google_calendar_sources SET last_error = ? WHERE id = ?')
+          .run(String(e.message || e).slice(0, 500), source.id);
+      }
+    }
 
     db.prepare(
       'UPDATE google_calendar_accounts SET last_sync_at = ?, last_error = NULL, updated_at = ? WHERE id = ?'
@@ -423,9 +534,9 @@ async function runSync(io, { userId = ORG_ACCOUNT } = {}) {
 
     // Календарь у клиентов перечитывается по смене диапазона, и без сигнала
     // импортированное появлялось бы только после перелистывания месяца.
-    if (io && (pulled.changed || pushed || deleted)) io.emit('calendar_changed');
+    if (io && (pulled || pushed || deleted)) io.emit('calendar_changed');
 
-    return { ok: true, pushed, deleted, pulled: pulled.changed, fullResync: pulled.fullResync };
+    return { ok: true, pushed, deleted, pulled, fullResync, readonly: !main };
   } catch (e) {
     const message = e && e.message ? e.message : 'Неизвестная ошибка';
     recordError(account.id, message);
@@ -457,6 +568,8 @@ module.exports = {
   runSync,
   recordLocalDeletion,
   syncableAccount,
+  listSources,
+  scopeOf,
   applyRemoteMaster,
   applyRemoteInstance,
   applyPage,

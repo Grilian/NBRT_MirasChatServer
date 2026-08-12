@@ -945,6 +945,79 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_google_links_account ON google_calendar_links(account_id);
 `);
 
+// Есть ли у нас право писать в выбранный календарь. Чужой календарь, на который
+// аккаунт лишь подписан, доступен только на чтение — такой синхронизируется в
+// одну сторону, и пытаться отправить туда наши правки значило бы получать 403
+// на каждом проходе.
+//
+// Признак не задаётся руками и не приходит от клиента: его перечитывает каждый
+// проход синхронизации у самого Google. Иначе выданное позже право записи
+// пришлось бы замечать вручную, а до тех пор обмен молча оставался бы
+// односторонним.
+try {
+  db.exec('ALTER TABLE google_calendar_accounts ADD COLUMN calendar_read_only INTEGER NOT NULL DEFAULT 0');
+} catch (e) {
+  // Колонка уже есть
+}
+
+// Календари, которые мы читаем. Их несколько, ровно как в самом Google, где
+// рядом с собственным календарём аккаунта живут «Другие календари» — чужие,
+// подписанные, доступные только на чтение.
+//
+// Основной календарь (google_calendar_accounts.calendar_id) — тоже строка
+// здесь, с is_main = 1: пайплайн чтения у всех один, и держать для него
+// отдельную ветку кода значило бы чинить каждую ошибку дважды. Отличается он
+// ровно двумя вещами — в него уходят НАШИ события, и его содержимое ложится в
+// общий календарь, тогда как дополнительные получают каждый свой слой.
+//
+// Курсор у каждого календаря свой: инкрементальная выборка Google выдаётся на
+// календарь, и один общий sync_token означал бы, что чтение второго календаря
+// сбрасывает позицию первого.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS google_calendar_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    google_calendar_id TEXT NOT NULL,
+    name TEXT,
+    -- Права на момент последнего прохода: их перечитывает сама синхронизация,
+    -- потому что доступ могут выдать или отобрать не спросив нас.
+    access_role TEXT,
+    read_only INTEGER NOT NULL DEFAULT 1,
+    is_main INTEGER NOT NULL DEFAULT 0,
+    -- Цвет слоя в календаре чата. У дополнительного календаря он свой, иначе
+    -- в сетке их было бы не отличить друг от друга и от общего.
+    color TEXT NOT NULL DEFAULT 'violet',
+    sync_token TEXT,
+    last_sync_at INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE(account_id, google_calendar_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_google_sources_account ON google_calendar_sources(account_id);
+`);
+
+// Перенос уже подключённого календаря в новую таблицу. Аккаунт на проде завели
+// до её появления, и без этого его календарь перестал бы читаться вовсе.
+const legacyAccount = db.prepare(
+  'SELECT * FROM google_calendar_accounts WHERE calendar_id IS NOT NULL'
+).all();
+for (const account of legacyAccount) {
+  const exists = db.prepare(
+    'SELECT 1 FROM google_calendar_sources WHERE account_id = ? AND google_calendar_id = ?'
+  ).get(account.id, account.calendar_id);
+  if (exists) continue;
+  db.prepare(`
+    INSERT INTO google_calendar_sources
+      (account_id, google_calendar_id, name, read_only, is_main, sync_token, last_sync_at, created_at)
+    VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+  `).run(
+    account.id, account.calendar_id, account.calendar_name,
+    account.calendar_read_only ? 1 : 0,
+    account.sync_token, account.last_sync_at, Date.now()
+  );
+}
+
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {
   const initialUsername = process.env.SUPERADMIN_USERNAME || 'superadmin';

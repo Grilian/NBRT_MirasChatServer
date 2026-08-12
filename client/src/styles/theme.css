@@ -2024,6 +2024,29 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-google-actions .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; }
 .sa-google .sa-btn-danger { margin-left: auto; }
 
+/* Список дополнительных календарей. Кружок слева — тот же цвет, которым слой
+   будет виден в сетке календаря: подбирать его вслепую по названию нельзя. */
+.sa-google-sources { list-style: none; margin: 14px 0 0; padding: 0; display: flex;
+  flex-direction: column; gap: 8px; }
+.sa-google-sources li { display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.sa-google-source-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sa-google-source-name em { font-style: normal; font-size: 12px; color: var(--ink-dim); }
+.sa-google-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; }
+.sa-google-dot--violet { background: #8b5cf6; }
+.sa-google-dot--teal { background: #14b8a6; }
+.sa-google-dot--green { background: #22c55e; }
+.sa-google-dot--orange { background: #f97316; }
+.sa-google-dot--graphite { background: #64748b; }
+
+.sa-google-add { display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  flex-wrap: wrap; }
+.sa-google-add select { flex: 1 1 180px; min-width: 0; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--surface);
+  color: var(--ink); font-size: 14px; }
+.sa-google-add select:focus { outline: none; border-color: var(--accent); }
+.sa-google-add .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; }
+
 .sa-verified-badge { color: var(--accent); font-weight: 700; margin-left: 4px; }
 .sa-reaction-preview { display: flex; gap: 8px; font-size: 22px; margin: 4px 0 12px; }
 .sa-new-badge {

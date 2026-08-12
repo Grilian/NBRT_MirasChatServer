@@ -50,6 +50,23 @@ function canPublishGlobal(userId) {
 // Тип "Интернет" (незнакомые с улицы) не должен видеть общий календарь целиком
 // организации — только свои личные события. Тот же принцип ограничения
 // видимости, что уже применяется к справочнику людей в routes/users.js.
+/**
+ * Дополнительные календари, прочитанные из Google, — по одному слою на каждый.
+ *
+ * Основной сюда не попадает: его события ложатся в общий календарь и своего
+ * слоя не образуют.
+ */
+function listGoogleCalendarLayers() {
+  return db.prepare(`
+    SELECT id, name, color FROM google_calendar_sources
+    WHERE is_main = 0 ORDER BY id
+  `).all().map((row) => ({
+    id: row.id,
+    name: row.name || 'Календарь Google',
+    color: row.color,
+  }));
+}
+
 function canSeeGlobalCalendar(userId) {
   const user = db.prepare('SELECT account_type FROM users WHERE id = ?').get(userId);
   return !user || user.account_type !== 'internet';
@@ -174,6 +191,10 @@ function replaceGuests(eventId, ownerId, guestIds) {
 function editableEvent(eventId, userId) {
   const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(eventId);
   if (!event) return null;
+  // Зеркало чужого календаря не правит никто, включая того, от чьего имени
+  // события импортируются: он указан владельцем лишь потому, что owner_id не
+  // может быть пустым, а не потому, что события его.
+  if (event.scope_kind === 'gcal') return null;
   if (event.scope_kind === 'global') return canPublishGlobal(userId) ? event : null;
   return event.owner_id === userId ? event : null;
 }
@@ -210,7 +231,16 @@ router.get('/events', verifyToken, (req, res) => {
       ? listContactBirthdays({ userId: req.userId, ...range })
       : [];
 
-    res.json({ events, birthdays, can_publish_global: canEditGlobal });
+    res.json({
+      events,
+      birthdays,
+      can_publish_global: canEditGlobal,
+      // Названия и цвета дополнительных календарей едут вместе с событиями, а
+      // не отдельной ручкой: слой без имени клиент показать не может, и вторым
+      // запросом список приезжал бы позже событий — слой успевал бы моргнуть
+      // безымянным. Тем, кто не видит общий календарь, он и не нужен.
+      google_calendars: includeGlobal ? listGoogleCalendarLayers() : [],
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

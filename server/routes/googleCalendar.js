@@ -38,6 +38,19 @@ router.get('/admin/status', verifySuperAdmin, (req, res) => {
       last_error: account ? account.last_error : null,
       // Сколько событий уже связано — самый понятный признак того, что
       // синхронизация действительно работает, а не просто «без ошибок».
+      // Дополнительные календари — те же строки источников, только не основной.
+      // Отдаём вместе со счётчиком событий: «подключил, а приехало ли» — первый
+      // вопрос, на который человек ищет ответ в панели.
+      sources: account
+        ? db.prepare(`
+          SELECT s.id, s.google_calendar_id, s.name, s.color, s.access_role,
+                 s.read_only, s.is_main, s.last_error,
+                 (SELECT COUNT(*) FROM google_calendar_links l
+                   WHERE l.google_calendar_id = s.google_calendar_id) AS linked_count
+          FROM google_calendar_sources s
+          WHERE s.account_id = ? ORDER BY s.is_main DESC, s.id
+        `).all(account.id)
+        : [],
       linked_count: account
         ? db.prepare('SELECT COUNT(*) AS c FROM google_calendar_links WHERE account_id = ?')
           .get(account.id).c
@@ -180,12 +193,45 @@ router.put('/admin/settings', verifySuperAdmin, (req, res) => {
     // править чужие строки по чужим id.
     const calendarChanged = calendarId !== account.calendar_id;
     if (calendarChanged) {
-      db.prepare('DELETE FROM google_calendar_links WHERE account_id = ?').run(account.id);
-      db.prepare('DELETE FROM google_calendar_deletions WHERE account_id = ?').run(account.id);
+      const old = db.prepare(
+        'SELECT google_calendar_id FROM google_calendar_sources WHERE account_id = ? AND is_main = 1'
+      ).get(account.id);
+      if (old) {
+        db.prepare('DELETE FROM google_calendar_links WHERE google_calendar_id = ?')
+          .run(old.google_calendar_id);
+        db.prepare('DELETE FROM google_calendar_deletions WHERE google_calendar_id = ?')
+          .run(old.google_calendar_id);
+        db.prepare('DELETE FROM google_calendar_sources WHERE account_id = ? AND is_main = 1')
+          .run(account.id);
+      }
+      if (calendarId) {
+        // Уже подключённый дополнительным становится основным, а не заводится
+        // вторым: пара (аккаунт, календарь) уникальна, и вставка упала бы.
+        const existing = db.prepare(
+          'SELECT id FROM google_calendar_sources WHERE account_id = ? AND google_calendar_id = ?'
+        ).get(account.id, calendarId);
+        if (existing) {
+          db.prepare('UPDATE google_calendar_sources SET is_main = 1, sync_token = NULL WHERE id = ?')
+            .run(existing.id);
+        } else {
+          db.prepare(`
+            INSERT INTO google_calendar_sources
+              (account_id, google_calendar_id, name, is_main, read_only, created_at)
+            VALUES (?, ?, ?, 1, 1, ?)
+          `).run(account.id, calendarId, req.body.calendar_name || calendarId, Date.now());
+        }
+      }
     }
     // Сдвиг границы импорта назад тоже требует полного прохода: инкрементальная
     // выборка отдаёт изменения, а не «то, что мы решили посмотреть пораньше».
     const widened = syncFrom !== null && account.sync_from !== null && syncFrom < account.sync_from;
+    if (widened) {
+      // Граница общая на все календари, поэтому и курсоры сбрасываются у всех:
+      // оставив хоть один, мы попросили бы у Google «изменения с прошлого раза»
+      // там, где нужен полный проход по расширенному промежутку.
+      db.prepare('UPDATE google_calendar_sources SET sync_token = NULL WHERE account_id = ?')
+        .run(account.id);
+    }
 
     db.prepare(`
       UPDATE google_calendar_accounts
@@ -204,6 +250,97 @@ router.put('/admin/settings', verifySuperAdmin, (req, res) => {
     );
 
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Цвета слоя дополнительного календаря — те же, что у событий: палитра одна на
+// весь календарь, заводить вторую ради этого списка незачем.
+const LAYER_COLORS = new Set(['blue', 'green', 'red', 'orange', 'violet', 'teal', 'graphite']);
+
+/**
+ * Подключить дополнительный календарь — тот, что показывается отдельным слоем.
+ *
+ * Право записи не требуется и не проверяется: дополнительные читаются, и самый
+ * частый случай — как раз чужой публичный календарь, подписанный аккаунтом.
+ */
+router.post('/admin/sources', verifySuperAdmin, (req, res) => {
+  try {
+    const account = oauth.getAccount();
+    if (!account) return res.status(400).json({ error: 'Аккаунт не подключён' });
+
+    const calendarId = String(req.body.calendar_id || '').trim();
+    if (!calendarId) return res.status(400).json({ error: 'Не выбран календарь' });
+    if (calendarId === account.calendar_id) {
+      return res.status(400).json({ error: 'Этот календарь уже подключён основным' });
+    }
+
+    const exists = db.prepare(
+      'SELECT 1 FROM google_calendar_sources WHERE account_id = ? AND google_calendar_id = ?'
+    ).get(account.id, calendarId);
+    if (exists) return res.status(409).json({ error: 'Этот календарь уже подключён' });
+
+    const color = LAYER_COLORS.has(req.body.color) ? req.body.color : 'violet';
+
+    // read_only = 1 до первого прохода намеренно: права спросит сама
+    // синхронизация. Предположить обратное значило бы разрешить отправку в
+    // календарь, о котором мы ещё ничего не знаем.
+    db.prepare(`
+      INSERT INTO google_calendar_sources
+        (account_id, google_calendar_id, name, color, read_only, is_main, created_at)
+      VALUES (?, ?, ?, ?, 1, 0, ?)
+    `).run(
+      account.id, calendarId,
+      String(req.body.name || calendarId).slice(0, 200),
+      color, Date.now()
+    );
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * Отключить дополнительный календарь.
+ *
+ * Его события удаляются вместе с ним: они были зеркалом, править их в чате
+ * нельзя, и оставшись без источника они превратились бы в мусор, который никто
+ * уже не сможет ни обновить, ни убрать. Основной так отключить нельзя — для
+ * него это выбор календаря в настройках выше.
+ */
+router.delete('/admin/sources/:id', verifySuperAdmin, (req, res) => {
+  try {
+    const source = db.prepare(
+      'SELECT * FROM google_calendar_sources WHERE id = ? AND is_main = 0'
+    ).get(Number(req.params.id));
+    if (!source) return res.status(404).json({ error: 'Календарь не найден' });
+
+    const events = db.prepare(
+      'SELECT id FROM calendar_events WHERE scope_kind = ? AND scope_id = ?'
+    ).all('gcal', source.id);
+
+    const drop = db.transaction(() => {
+      for (const event of events) {
+        db.prepare('DELETE FROM calendar_task_completions WHERE event_id = ?').run(event.id);
+        db.prepare('DELETE FROM calendar_event_guests WHERE event_id = ?').run(event.id);
+        db.prepare('DELETE FROM calendar_event_reminders WHERE event_id = ?').run(event.id);
+        db.prepare('DELETE FROM calendar_reminders_sent WHERE event_id = ?').run(event.id);
+        db.prepare('DELETE FROM calendar_event_exceptions WHERE event_id = ?').run(event.id);
+        // Привязка уйдёт по каскаду вместе с событием.
+        db.prepare('DELETE FROM calendar_events WHERE id = ?').run(event.id);
+      }
+      db.prepare('DELETE FROM google_calendar_deletions WHERE google_calendar_id = ?')
+        .run(source.google_calendar_id);
+      db.prepare('DELETE FROM google_calendar_sources WHERE id = ?').run(source.id);
+    });
+    drop();
+
+    const io = req.app.get('io');
+    if (io) io.emit('calendar_changed');
+
+    res.json({ ok: true, removed_events: events.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

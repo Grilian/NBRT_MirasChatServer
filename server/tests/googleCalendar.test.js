@@ -192,17 +192,37 @@ function makeAccount() {
   ).run(`google_owner_${accountSeq}`, 'x', 'Владелец').lastInsertRowid);
 
   const now = Date.now();
+  const calendarId = `primary_${accountSeq}`;
   const id = Number(db.prepare(`
     INSERT INTO google_calendar_accounts
       (user_id, calendar_id, owner_user_id, sync_from, created_at, updated_at)
-    VALUES (?, 'primary', ?, ?, ?, ?)
-  `).run(accountSeq, ownerId, now - 86400000, now, now).lastInsertRowid);
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(accountSeq, calendarId, ownerId, now - 86400000, now, now).lastInsertRowid);
 
   return db.prepare('SELECT * FROM google_calendar_accounts WHERE id = ?').get(id);
 }
 
+/**
+ * Календарь аккаунта. По умолчанию основной — тот, чьи события ложатся в общий
+ * календарь и куда уходят наши; дополнительный получает свой слой 'gcal'.
+ */
+function makeSource(account, { main = true, color = 'violet' } = {}) {
+  const calendarId = main ? account.calendar_id : `extra_${account.id}_${Date.now()}`;
+  const id = Number(db.prepare(`
+    INSERT INTO google_calendar_sources
+      (account_id, google_calendar_id, name, color, read_only, is_main, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    account.id, calendarId, main ? 'Основной' : 'Мероприятия',
+    color, main ? 0 : 1, main ? 1 : 0, Date.now()
+  ).lastInsertRowid);
+
+  return db.prepare('SELECT * FROM google_calendar_sources WHERE id = ?').get(id);
+}
+
 test('чужое событие импортируется, правится и удаляется', () => {
   const account = makeAccount();
+  const source = makeSource(account);
 
   const item = {
     id: 'g-event-1',
@@ -214,7 +234,7 @@ test('чужое событие импортируется, правится и 
     end: { dateTime: '2026-08-12T11:00:00Z' },
   };
 
-  assert.equal(sync.applyRemoteMaster(account, item), true);
+  assert.equal(sync.applyRemoteMaster(account, source, item), true);
   const link = db.prepare(
     'SELECT * FROM google_calendar_links WHERE google_event_id = ?'
   ).get('g-event-1');
@@ -226,10 +246,10 @@ test('чужое событие импортируется, правится и 
   assert.equal(stored.owner_id, account.owner_user_id);
 
   // Повтор той же строки — эхо: менять нечего, и дёргать клиентов незачем.
-  assert.equal(sync.applyRemoteMaster(account, item), false);
+  assert.equal(sync.applyRemoteMaster(account, source, item), false);
 
   // Настоящая правка на той стороне — более поздний updated.
-  assert.equal(sync.applyRemoteMaster(account, {
+  assert.equal(sync.applyRemoteMaster(account, source, {
     ...item, summary: 'Совещание перенесено', updated: '2026-08-12T09:30:00.000Z',
   }), true);
   assert.equal(
@@ -237,13 +257,14 @@ test('чужое событие импортируется, правится и 
     'Совещание перенесено'
   );
 
-  assert.equal(sync.applyRemoteMaster(account, { id: 'g-event-1', status: 'cancelled' }), true);
+  assert.equal(sync.applyRemoteMaster(account, source, { id: 'g-event-1', status: 'cancelled' }), true);
   assert.equal(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(link.event_id), undefined);
 });
 
 test('непереводимое правило запрещает обратную отправку', () => {
   const account = makeAccount();
-  sync.applyRemoteMaster(account, {
+  const source = makeSource(account);
+  sync.applyRemoteMaster(account, source, {
     id: 'g-event-hard',
     status: 'confirmed',
     updated: '2026-08-12T09:00:00.000Z',
@@ -261,6 +282,7 @@ test('непереводимое правило запрещает обратн�
 
 test('отменённое вхождение серии становится пропуском, а не удалением серии', () => {
   const account = makeAccount();
+  const source = makeSource(account);
   const master = {
     id: 'g-series',
     status: 'confirmed',
@@ -279,7 +301,7 @@ test('отменённое вхождение серии становится п
 
   // Порядок намеренно обратный: вхождение раньше своей серии. Google порядка
   // не обещает, и разбор обязан справиться.
-  sync.applyPage(account, [cancelled, master]);
+  sync.applyPage(account, source, [cancelled, master]);
 
   const link = db.prepare('SELECT * FROM google_calendar_links WHERE google_event_id = ?').get('g-series');
   assert.ok(link, 'серия должна была импортироваться');
@@ -296,9 +318,10 @@ test('отменённое вхождение серии становится п
 
 test('EXDATE в самой серии превращается в пропуск вхождения', () => {
   const account = makeAccount();
+  const source = makeSource(account);
   // Отмена, приехавшая строкой EXDATE, а не отдельным cancelled-вхождением:
   // так приходят события из ICS-подписок и перенесённые из других приложений.
-  sync.applyRemoteMaster(account, {
+  sync.applyRemoteMaster(account, source, {
     id: 'g-series-exdate',
     status: 'confirmed',
     updated: '2026-08-12T09:00:00.000Z',
@@ -320,9 +343,93 @@ test('EXDATE в самой серии превращается в пропуск
   assert.equal(exception.occurrence_start, Date.parse('2026-08-14T07:00:00Z'));
 });
 
+test('дополнительный календарь ложится своим слоем, а не в общий', () => {
+  const account = makeAccount();
+  const extra = makeSource(account, { main: false, color: 'teal' });
+
+  sync.applyRemoteMaster(account, extra, {
+    id: 'g-extra-1',
+    status: 'confirmed',
+    updated: '2026-08-12T09:00:00.000Z',
+    summary: 'Экскурсия «Хранители»',
+    // Свой цвет у события в Google есть, но слой узнаётся именно по цвету:
+    // разноцветные мероприятия внутри него сделали бы его неотличимым.
+    colorId: '11',
+    start: { dateTime: '2026-08-12T10:00:00Z' },
+    end: { dateTime: '2026-08-12T11:00:00Z' },
+  });
+
+  const link = db.prepare(
+    'SELECT * FROM google_calendar_links WHERE google_event_id = ?'
+  ).get('g-extra-1');
+  const stored = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(link.event_id);
+
+  assert.equal(stored.scope_kind, 'gcal');
+  assert.equal(stored.scope_id, extra.id);
+  assert.equal(stored.color, 'teal');
+});
+
+test('удаление события из дополнительного календаря надгробия не оставляет', () => {
+  const account = makeAccount();
+  const extra = makeSource(account, { main: false });
+  sync.applyRemoteMaster(account, extra, {
+    id: 'g-extra-del',
+    status: 'confirmed',
+    updated: '2026-08-12T09:00:00.000Z',
+    summary: 'Чужое мероприятие',
+    start: { dateTime: '2026-08-12T10:00:00Z' },
+    end: { dateTime: '2026-08-12T11:00:00Z' },
+  });
+  const link = db.prepare(
+    'SELECT * FROM google_calendar_links WHERE google_event_id = ?'
+  ).get('g-extra-del');
+
+  sync.recordLocalDeletion(link.event_id);
+
+  // Отправить удаление в календарь, доступный только на чтение, нельзя. Копить
+  // такие надгробия тем более нельзя: в день выдачи права записи они разъехались
+  // бы разом и снесли бы у владельца события, которые никто не удалял у него.
+  assert.equal(
+    db.prepare('SELECT * FROM google_calendar_deletions WHERE google_event_id = ?').get('g-extra-del'),
+    undefined
+  );
+});
+
+test('в дополнительном календаре побеждает чужая правка, а не наша', () => {
+  const account = makeAccount();
+  const extra = makeSource(account, { main: false });
+  const base = {
+    id: 'g-extra-conflict',
+    status: 'confirmed',
+    updated: '2026-08-12T09:00:00.000Z',
+    summary: 'Как у них',
+    start: { dateTime: '2026-08-12T10:00:00Z' },
+    end: { dateTime: '2026-08-12T11:00:00Z' },
+  };
+  sync.applyRemoteMaster(account, extra, base);
+  const link = db.prepare(
+    'SELECT * FROM google_calendar_links WHERE google_event_id = ?'
+  ).get('g-extra-conflict');
+
+  // Правка у нас — позже всего, что известно о той стороне. В двустороннем
+  // обмене она победила бы, но отсюда она не уедет никогда, и оставить её
+  // значило бы навсегда заморозить событие в состоянии, которого у них нет.
+  db.prepare('UPDATE calendar_events SET title = ?, updated_at = ? WHERE id = ?')
+    .run('Правка в чате', Date.now() + 60000, link.event_id);
+
+  assert.equal(sync.applyRemoteMaster(account, extra, {
+    ...base, summary: 'Как у них, обновлено', updated: '2026-08-12T09:30:00.000Z',
+  }), true);
+  assert.equal(
+    db.prepare('SELECT title FROM calendar_events WHERE id = ?').get(link.event_id).title,
+    'Как у них, обновлено'
+  );
+});
+
 test('удаление события оставляет надгробие для отправки в Google', () => {
   const account = makeAccount();
-  sync.applyRemoteMaster(account, {
+  const source = makeSource(account);
+  sync.applyRemoteMaster(account, source, {
     id: 'g-event-del',
     status: 'confirmed',
     updated: '2026-08-12T09:00:00.000Z',

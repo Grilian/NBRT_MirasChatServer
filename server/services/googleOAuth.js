@@ -251,6 +251,14 @@ function disconnect(userId = ORG_ACCOUNT) {
   // их стало некуда. Сами события остаются: они уже часть общего календаря.
   db.prepare('DELETE FROM google_calendar_links WHERE account_id = ?').run(account.id);
   db.prepare('DELETE FROM google_calendar_deletions WHERE account_id = ?').run(account.id);
+  // События дополнительных календарей — зеркало, и без аккаунта обновлять их
+  // нечем: остались бы неудаляемым мусором в чужих слоях.
+  for (const source of db.prepare(
+    'SELECT id FROM google_calendar_sources WHERE account_id = ? AND is_main = 0'
+  ).all(account.id)) {
+    db.prepare("DELETE FROM calendar_events WHERE scope_kind = 'gcal' AND scope_id = ?").run(source.id);
+  }
+  db.prepare('DELETE FROM google_calendar_sources WHERE account_id = ?').run(account.id);
   db.prepare('DELETE FROM google_calendar_accounts WHERE id = ?').run(account.id);
 }
 

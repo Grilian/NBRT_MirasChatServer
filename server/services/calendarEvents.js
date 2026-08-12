@@ -157,7 +157,13 @@ function serializeOccurrence(event, occurrence, userId, completions, canEditGlob
   // Общее событие правит любой администратор или модератор, а не только тот,
   // кто его завёл: объявление на всю организацию не должно застревать из-за
   // того, что автор в отпуске.
-  const canEdit = event.scope_kind === 'global' ? canEditGlobal : isOwner;
+  // Календарь, прочитанный из Google, — зеркало: править его в чате нельзя
+  // никому. Правка не уехала бы обратно (такие календари подключаются только на
+  // чтение) и вдобавок пропала бы сама — следующий обмен вернул бы событие к
+  // тому, что стоит на той стороне.
+  const canEdit = event.scope_kind === 'gcal'
+    ? false
+    : event.scope_kind === 'global' ? canEditGlobal : isOwner;
 
   const guests = guestsStatement.all(event.id).map((g) => ({
     user_id: g.user_id,
@@ -236,7 +242,9 @@ function listVisibleEvents({ userId, from, to, canEditGlobal = false, includeGlo
     FROM calendar_events e
     LEFT JOIN calendar_event_guests g ON g.event_id = e.id
     WHERE (
-      (? = 1 AND e.scope_kind = 'global')
+      -- Календари, прочитанные из Google, показываем тем же людям, что и общий:
+      -- это календари организации, и отдельного правила видимости у них нет.
+      (? = 1 AND e.scope_kind IN ('global', 'gcal'))
       OR (e.scope_kind = 'personal' AND (e.owner_id = ? OR g.user_id = ?))
     )
     AND ${RANGE_CONDITION}

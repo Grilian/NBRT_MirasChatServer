@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchRange } from './api';
 import { DayKey, addDays, instantOf, monthGrid, todayKey, weekDays } from './dates';
 import { describeLayers, layerOf, loadDisabledLayers, saveDisabledLayers } from './layers';
-import { CalendarLayer, CalendarOccurrence, CalendarScope, CalendarViewMode, LayerId } from './types';
+import {
+  CalendarLayer, CalendarOccurrence, CalendarScope, CalendarViewMode, GoogleCalendarLayer, LayerId,
+} from './types';
 
 // Сколько дней вперёд показывает «Расписание». Достаточно, чтобы список не
 // обрывался на пустом месте, и не столько, чтобы тянуть полгода событий.
@@ -58,6 +60,7 @@ export function useCalendarData(scope?: CalendarScope, changeToken = 0): Calenda
   const [anchor, setAnchor] = useState<DayKey>(todayKey);
   const [all, setAll] = useState<CalendarOccurrence[]>([]);
   const [canPublishGlobal, setCanPublishGlobal] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarLayer[]>([]);
   const [disabled, setDisabled] = useState<Set<LayerId>>(loadDisabledLayers);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -76,6 +79,7 @@ export function useCalendarData(scope?: CalendarScope, changeToken = 0): Calenda
         // остальными: слой у них свой, а обращение одинаковое.
         setAll([...data.events, ...data.birthdays]);
         setCanPublishGlobal(data.canPublishGlobal);
+        setGoogleCalendars(data.googleCalendars);
         setError(false);
       })
       .catch(() => { if (!cancelled) setError(true); })
@@ -89,7 +93,10 @@ export function useCalendarData(scope?: CalendarScope, changeToken = 0): Calenda
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope?.kind, scope?.id, from, to, reloadToken, changeToken]);
 
-  const layers = useMemo(() => describeLayers(all), [all]);
+  const layers = useMemo(
+    () => describeLayers(all, {}, googleCalendars),
+    [all, googleCalendars]
+  );
 
   const isLayerEnabled = useCallback((id: LayerId) => !disabled.has(id), [disabled]);
 

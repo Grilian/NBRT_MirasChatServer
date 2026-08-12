@@ -2,7 +2,10 @@
 // показывать внутри пространств. Всё, что отличает один календарь от другого,
 // собрано здесь, в scope — дальше по коду он просто прокидывается вниз, и ни
 // одному представлению не нужно знать, чей календарь оно рисует.
-export type CalendarScopeKind = 'personal' | 'global' | 'space';
+// 'gcal' — зеркало дополнительного календаря Google (те самые «Другие
+// календари» из его интерфейса). Своя область, а не часть общего: иначе чужие
+// мероприятия нельзя было бы выключить, не выключив события организации.
+export type CalendarScopeKind = 'personal' | 'global' | 'space' | 'gcal';
 
 export interface CalendarScope {
   kind: CalendarScopeKind;
@@ -130,6 +133,19 @@ export const REMINDER_OPTIONS: { value: number; label: string }[] = [
  * Календарь показывает объединение включённых слоёв, а не одну область.
  */
 export type LayerId = 'global' | 'personal' | 'birthdays' | string;
+
+/**
+ * Дополнительный календарь Google — его название и цвет для слоя `gcal:<id>`.
+ *
+ * Приезжает вместе с событиями: слой без имени показать нечем, а отдельным
+ * запросом список приходил бы позже событий, и слой успевал бы моргнуть
+ * безымянным.
+ */
+export interface GoogleCalendarLayer {
+  id: number;
+  name: string;
+  color: EventColor;
+}
 
 export interface CalendarLayer {
   id: LayerId;

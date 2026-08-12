@@ -730,6 +730,7 @@ interface GoogleStatus {
   last_error: string | null;
   linked_count: number;
   readonly_count: number;
+  sources: GoogleSource[];
 }
 
 interface GoogleCalendarOption {
@@ -737,7 +738,31 @@ interface GoogleCalendarOption {
   name: string;
   primary: boolean;
   access_role: string;
+  writable: boolean;
 }
+
+/** Подключённый календарь: основной либо дополнительный, показываемый слоем. */
+interface GoogleSource {
+  id: number;
+  google_calendar_id: string;
+  name: string | null;
+  color: string;
+  access_role: string | null;
+  read_only: number;
+  is_main: number;
+  last_error: string | null;
+  linked_count: number;
+}
+
+// Та же палитра, что у событий календаря: цвет слоя выбирается из неё, чтобы
+// дополнительный календарь отличался в сетке от общего и от личного.
+const LAYER_COLORS: { value: string; label: string }[] = [
+  { value: 'violet', label: 'Фиолетовый' },
+  { value: 'teal', label: 'Бирюзовый' },
+  { value: 'green', label: 'Зелёный' },
+  { value: 'orange', label: 'Оранжевый' },
+  { value: 'graphite', label: 'Графитовый' },
+];
 
 /**
  * Подключение гугл-аккаунта организации и настройки синхронизации.
@@ -755,6 +780,8 @@ function GoogleCalendarPanel({ users }: { users: UserRow[] }) {
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [newSourceId, setNewSourceId] = useState('');
+  const [newSourceColor, setNewSourceColor] = useState('violet');
 
   const load = async () => {
     try {
@@ -834,6 +861,45 @@ function GoogleCalendarPanel({ users }: { users: UserRow[] }) {
       await load();
     } catch (e: any) {
       setError(e.response?.data?.error || 'Не удалось сохранить');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addSource = async () => {
+    if (!newSourceId) return;
+    const picked = calendars.find((c) => c.id === newSourceId);
+    setBusy(true);
+    try {
+      await superAdminApi.post('/calendar/google/admin/sources', {
+        calendar_id: newSourceId,
+        name: picked?.name || newSourceId,
+        color: newSourceColor,
+      });
+      setNewSourceId('');
+      setNote('Календарь подключён. События приедут ближайшим обменом.');
+      setError('');
+      await load();
+    } catch (e: any) {
+      setError(e.response?.data?.error || 'Не удалось подключить календарь');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeSource = async (source: GoogleSource) => {
+    if (!window.confirm(
+      `Отключить «${source.name || source.google_calendar_id}»? Его события удалятся из календаря чата — `
+      + 'они были зеркалом и без источника обновлять их нечем. В самом Google ничего не изменится.'
+    )) return;
+    setBusy(true);
+    try {
+      const { data } = await superAdminApi.delete(`/calendar/google/admin/sources/${source.id}`);
+      setNote(`Календарь отключён, событий убрано: ${data.removed_events}`);
+      setError('');
+      await load();
+    } catch (e: any) {
+      setError(e.response?.data?.error || 'Не удалось отключить календарь');
     } finally {
       setBusy(false);
     }
@@ -972,15 +1038,15 @@ function GoogleCalendarPanel({ users }: { users: UserRow[] }) {
               disabled={busy || !calendars.length}
             >
               <option value="">— не выбран —</option>
-              {calendars.map((c) => (
+              {calendars.filter((c) => c.writable).map((c) => (
                 <option key={c.id} value={c.id}>{c.name}{c.primary ? ' (основной)' : ''}</option>
               ))}
             </select>
           </label>
           <p className="sa-hint">
-            Показаны только календари, куда у аккаунта есть право записи: синхронизация
-            двусторонняя, и в календарь «только для чтения» наши события не уедут.
-            Смена календаря сбрасывает связи и начинает обмен заново.
+            Сюда уезжают события, созданные в общем календаре чата, поэтому выбрать можно
+            только календарь с правом записи. Его содержимое попадает в общий календарь,
+            а не в отдельный слой. Смена сбрасывает связи и начинает обмен заново.
           </p>
 
           <label className="sa-google-field">
@@ -1018,6 +1084,80 @@ function GoogleCalendarPanel({ users }: { users: UserRow[] }) {
             Всё, что в гугл-календаре раньше этого момента, не импортируется: в нём может
             лежать многолетний архив, которому в общем календаре не место.
           </p>
+        </div>
+      )}
+
+      {status.connected && (
+        <div className="sa-card sa-card--compact">
+          <h2>Дополнительные календари</h2>
+          <p className="sa-hint">
+            Каждый показывается в календаре чата отдельным слоем со своим цветом — так же,
+            как «Другие календари» в самом Google. Они только читаются: право записи для
+            них не нужно, и события из чата в них не уезжают.
+          </p>
+
+          {status.sources.filter((s) => !s.is_main).length > 0 && (
+            <ul className="sa-google-sources">
+              {status.sources.filter((s) => !s.is_main).map((source) => (
+                <li key={source.id}>
+                  <span className={`sa-google-dot sa-google-dot--${source.color}`} />
+                  <span className="sa-google-source-name">
+                    {source.name || source.google_calendar_id}
+                    <em>
+                      {source.linked_count > 0
+                        ? `событий: ${source.linked_count}`
+                        : 'событий пока нет'}
+                      {source.read_only ? '' : ', есть право записи'}
+                    </em>
+                    {source.last_error && <em className="form-error">{source.last_error}</em>}
+                  </span>
+                  <button
+                    type="button"
+                    className="sa-btn-danger"
+                    onClick={() => removeSource(source)}
+                    disabled={busy}
+                  >
+                    Отключить
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="sa-google-add">
+            <select
+              value={newSourceId}
+              onChange={(e) => setNewSourceId(e.target.value)}
+              disabled={busy || !calendars.length}
+            >
+              <option value="">— выберите календарь —</option>
+              {calendars
+                .filter((c) => c.id !== status.calendar_id)
+                .filter((c) => !status.sources.some((s) => s.google_calendar_id === c.id))
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.writable ? '' : ' — только чтение'}
+                  </option>
+                ))}
+            </select>
+            <select
+              value={newSourceColor}
+              onChange={(e) => setNewSourceColor(e.target.value)}
+              disabled={busy}
+            >
+              {LAYER_COLORS.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={addSource}
+              disabled={busy || !newSourceId}
+            >
+              Подключить
+            </button>
+          </div>
         </div>
       )}
 
