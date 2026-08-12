@@ -1996,6 +1996,34 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-btn-ghost:hover { background: var(--paper-sunken); }
 .sa-btn-danger { border: none; background: none; color: var(--unread); font-size: 12.5px; cursor: pointer; padding: 4px 6px; }
 .sa-btn-danger:hover { text-decoration: underline; }
+/* Google Календарь: несколько карточек подряд вместо одной длинной формы —
+   настройка приложения, подключение аккаунта, выбор календаря и состояние
+   заполняются по очереди, и каждый следующий шаг имеет смысл только после
+   предыдущего. */
+.sa-google { display: flex; flex-direction: column; gap: 16px; }
+.sa-google .sa-card--compact { margin-bottom: 0; }
+.sa-google-form { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.sa-google-form label,
+.sa-google-field { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
+.sa-google-form label { margin-top: 0; }
+.sa-google-form label > span,
+.sa-google-field > span { font-size: 12.5px; color: var(--ink-dim); }
+.sa-google-form label em { font-style: normal; color: var(--accent); }
+.sa-google-form input,
+.sa-google-field input,
+.sa-google-field select {
+  border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink);
+  border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px; width: 100%;
+}
+.sa-google-form input:focus,
+.sa-google-field input:focus,
+.sa-google-field select:focus { outline: none; border-color: var(--accent); }
+.sa-google-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+/* .btn-primary растянут на всю ширину ради формы логина — в ряду с другими
+   кнопками он отжимал бы их за край, та же правка, что и в .sa-inline-form. */
+.sa-google-actions .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; }
+.sa-google .sa-btn-danger { margin-left: auto; }
+
 .sa-verified-badge { color: var(--accent); font-weight: 700; margin-left: 4px; }
 .sa-reaction-preview { display: flex; gap: 8px; font-size: 22px; margin: 4px 0 12px; }
 .sa-new-badge {

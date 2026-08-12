@@ -3,6 +3,7 @@ const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { listEvents, listVisibleEvents, listContactBirthdays } = require('../services/calendarEvents');
 const { notifyInvited } = require('../services/calendarNotify');
+const { recordLocalDeletion } = require('../services/googleCalendarSync');
 
 const router = express.Router();
 
@@ -304,6 +305,10 @@ router.delete('/events/:id', verifyToken, (req, res) => {
     if (!editableEvent(id, req.userId)) {
       return res.status(404).json({ error: 'Событие не найдено' });
     }
+
+    // До удаления строки: привязка к Google уходит по каскаду вместе с ней, и
+    // после удаления отправлять в гугл было бы уже нечего.
+    recordLocalDeletion(id);
 
     db.prepare('DELETE FROM calendar_task_completions WHERE event_id = ?').run(id);
     db.prepare('DELETE FROM calendar_event_guests WHERE event_id = ?').run(id);

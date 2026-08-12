@@ -53,7 +53,7 @@ interface CalendarData {
  * scope задаётся только для врезок вроде списка в карточке пространства — там
  * нужен один слой, а не весь календарь.
  */
-export function useCalendarData(scope?: CalendarScope): CalendarData {
+export function useCalendarData(scope?: CalendarScope, changeToken = 0): CalendarData {
   const [mode, setMode] = useState<CalendarViewMode>('month');
   const [anchor, setAnchor] = useState<DayKey>(todayKey);
   const [all, setAll] = useState<CalendarOccurrence[]>([]);
@@ -83,8 +83,11 @@ export function useCalendarData(scope?: CalendarScope): CalendarData {
 
     return () => { cancelled = true; };
     // scope — объект, в зависимостях он бы менялся каждый рендер; разбираем на поля.
+    // changeToken — сигнал извне, что события изменились не из этого окна:
+    // синхронизация с Google приносит их фоном, и без него импортированное
+    // появлялось бы только после перелистывания месяца.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope?.kind, scope?.id, from, to, reloadToken]);
+  }, [scope?.kind, scope?.id, from, to, reloadToken, changeToken]);
 
   const layers = useMemo(() => describeLayers(all), [all]);
 

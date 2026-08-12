@@ -358,6 +358,9 @@ const Chat: React.FC = () => {
   // Счётчик «задачи изменились»: сервер шлёт tasks_changed, панель задач по
   // изменению этого числа перечитывает список.
   const [tasksChangeToken, setTasksChangeToken] = useState(0);
+  // То же для календаря: синхронизация с Google приносит чужие события фоном,
+  // и без сигнала они появлялись бы только после перелистывания месяца.
+  const [calendarChangeToken, setCalendarChangeToken] = useState(0);
 
   const applyRecentChats = useCallback((data: unknown) => {
     if (!Array.isArray(data)) return;
@@ -1124,6 +1127,10 @@ const Chat: React.FC = () => {
     // на клиенте было некому: уведомлений по задачам не приходило вовсе, а
     // чужие изменения появлялись только после переключения вкладки.
     newSocket.on('tasks_changed', () => setTasksChangeToken(t => t + 1));
+
+    // Общий календарь изменился не из этого окна. Событие широковещательное:
+    // общий календарь один на всех, персонализации в нём нет.
+    newSocket.on('calendar_changed', () => setCalendarChangeToken(t => t + 1));
 
     newSocket.on('task_notification', (data: { type: string; taskId: number; title: string; body: string }) => {
       setTasksChangeToken(t => t + 1);
@@ -2789,7 +2796,11 @@ const Chat: React.FC = () => {
 
       {section === 'calendar' && (
         <main className="section-host">
-          <CalendarSection section={activeSection} onBack={() => goToSection('chats')} />
+          <CalendarSection
+            section={activeSection}
+            onBack={() => goToSection('chats')}
+            changeToken={calendarChangeToken}
+          />
         </main>
       )}
 

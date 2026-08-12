@@ -27,6 +27,8 @@ interface CalendarWidgetProps {
   /** Заголовок раздела; в карточке пространства шапка будет своя. */
   title?: string;
   onBack?: () => void;
+  /** Растёт, когда события изменил кто-то извне — сигнал перечитать диапазон. */
+  changeToken?: number;
 }
 
 const VIEW_LABELS: { value: CalendarViewMode; label: string }[] = [
@@ -42,12 +44,14 @@ interface DraftTarget {
   allDay: boolean;
 }
 
-const CalendarWidget: React.FC<CalendarWidgetProps> = ({ scope, title = 'Календарь', onBack }) => {
+const CalendarWidget: React.FC<CalendarWidgetProps> = ({
+  scope, title = 'Календарь', onBack, changeToken = 0,
+}) => {
   const {
     mode, setMode, anchor, setAnchor, occurrences,
     layers, isLayerEnabled, toggleLayer, canPublishGlobal,
     loading, error, reload,
-  } = useCalendarData(scope);
+  } = useCalendarData(scope, changeToken);
 
   const [draft, setDraft] = useState<DraftTarget | null>(null);
   const [details, setDetails] = useState<CalendarOccurrence | null>(null);

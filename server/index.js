@@ -19,6 +19,7 @@ const moderationRoutes = require('./routes/moderation');
 const devicesRoutes = require('./routes/devices');
 const updatesRoutes = require('./routes/updates');
 const calendarRoutes = require('./routes/calendar');
+const googleCalendarRoutes = require('./routes/googleCalendar');
 const sessionRoutes = require('./routes/session');
 const departmentsRoutes = require('./routes/departments');
 const groupsRoutes = require('./routes/groups');
@@ -39,6 +40,7 @@ const {
   shouldNotifyUser,
 } = require('./services/notificationPolicy');
 const calendarScheduler = require('./services/calendarScheduler');
+const googleCalendarSync = require('./services/googleCalendarSync');
 const {
   PollError,
   normalizePollDraft,
@@ -169,6 +171,9 @@ app.use('/api/contacts', contactsRoutes);
 app.use('/api/moderation', verifyToken, requireAdminRole, moderationRoutes);
 app.use('/api/devices', devicesRoutes);
 app.use('/api/updates', updatesRoutes);
+// Раньше общего календаря: у гугловых ручек своя проверка прав (супер-админ),
+// а у адреса возврата её нет и быть не может — см. комментарий в маршруте.
+app.use('/api/calendar/google', googleCalendarRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/session', sessionRoutes);
 app.use('/api/departments', departmentsRoutes);
@@ -1153,6 +1158,10 @@ server.listen(PORT, () => {
   // должны быть готовы. Состояния в памяти он не держит, так что перезапуск
   // сервера ничего не теряет.
   calendarScheduler.start(io);
+  // Синхронизация с Google — тоже после старта и по той же причине. Первый
+  // проход отложен внутри: упираться в чужую сеть прямо на запуске незачем,
+  // а если аккаунт не подключён, она просто ничего не делает.
+  googleCalendarSync.start(io);
   // Дедлайн должен завершать опрос сам, даже если в этот момент никто не
   // открыл сообщение и не попытался проголосовать. Обновление рассылается
   // персонально, чтобы анонимный опрос не раскрыл список участников.

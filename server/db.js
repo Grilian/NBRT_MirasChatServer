@@ -864,6 +864,87 @@ db.exec(`
   );
 `);
 
+// ===== Синхронизация с Google Календарём =====
+//
+// Подключённый гугл-аккаунт. Пока он один на организацию и синхронизируется с
+// общим календарём, но user_id заложен сразу: персональные подключения — это
+// те же строки с чужим владельцем, и добавлять колонку задним числом пришлось
+// бы вместе с миграцией уже накопленных привязок.
+//
+// 0, а не NULL, для «аккаунт организации» намеренно: в UNIQUE-индексе SQLite
+// значения NULL считаются различными, и второй такой же аккаунт спокойно
+// завёлся бы рядом с первым. Внешнего ключа на users поэтому нет.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS google_calendar_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 0,
+    google_email TEXT,
+    -- Токены лежат зашифрованными (см. services/googleOAuth.js): refresh_token
+    -- — это бессрочный доступ к чужому гугл-аккаунту, и в файле базы, который
+    -- попадает в бэкапы, ему нельзя лежать открытым текстом.
+    access_token TEXT,
+    refresh_token TEXT,
+    token_expires_at INTEGER,
+    -- Какой именно календарь аккаунта синхронизируем. У человека их обычно
+    -- несколько, и «primary» почти никогда не тот, который нужен организации.
+    calendar_id TEXT,
+    calendar_name TEXT,
+    -- От чьего имени заводить импортированные события: calendar_events.owner_id
+    -- ссылается на users и пустым быть не может, а супер-админ панели — это
+    -- отдельная сущность (super_admins), и его id туда не подставить.
+    owner_user_id INTEGER,
+    -- Курсор инкрементальной выборки Google. Пусто — значит следующий проход
+    -- полный (первый запуск либо курсор протух, см. 410 в googleCalendarSync).
+    sync_token TEXT,
+    -- Раньше этого момента чужие события не импортируем: в календаре может
+    -- лежать десятилетний архив, и тащить его целиком незачем.
+    sync_from INTEGER,
+    last_sync_at INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(user_id)
+  );
+
+  -- Связь нашего события с гугловым, одна к одному.
+  CREATE TABLE IF NOT EXISTS google_calendar_links (
+    event_id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL,
+    google_calendar_id TEXT NOT NULL,
+    google_event_id TEXT NOT NULL,
+    -- Что мы в последний раз видели на той стороне. По этим двум полям
+    -- отличается «прилетело эхо нашей же правки» от настоящего чужого
+    -- изменения — без них двусторонняя синхронизация зациклилась бы.
+    remote_updated_at INTEGER,
+    remote_etag TEXT,
+    -- calendar_events.updated_at на момент последней успешной отправки.
+    -- Стало больше — значит событие правили у нас и его пора отправить.
+    local_synced_at INTEGER,
+    -- Правило повтора, которое наша модель выразить не умеет (BYDAY и прочее).
+    -- Такое событие мы читаем, но обратно не отправляем НИКОГДА: отправить
+    -- значило бы переписать в гугле нашим упрощённым правилом то, что мы
+    -- сами же не смогли прочитать целиком.
+    push_blocked INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(google_calendar_id, google_event_id),
+    FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+  );
+
+  -- Надгробия удалённых событий. Наше удаление физически сносит строку, а
+  -- вместе с ней по каскаду и привязку, — и отправлять в гугл после этого
+  -- стало бы нечего. Поэтому удаление сначала пишет сюда, а разносит его
+  -- следующий проход синхронизации.
+  CREATE TABLE IF NOT EXISTS google_calendar_deletions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    google_calendar_id TEXT NOT NULL,
+    google_event_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(google_calendar_id, google_event_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_google_links_account ON google_calendar_links(account_id);
+`);
+
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {
   const initialUsername = process.env.SUPERADMIN_USERNAME || 'superadmin';
