@@ -150,3 +150,9 @@ server/backups/
 # Ключ сервисного аккаунта Firebase — доступ на отправку пушей от имени проекта
 server/fcm-service-account.json
 .claude/launch.json
+
+# Собранные билды: сюда складываются .exe и .apk перед выкладкой на прод.
+# В репозитории им не место — под сотню мегабайт на каждый выпуск.
+release/
+mobile/release/
+desktop/release/
