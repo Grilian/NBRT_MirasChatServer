@@ -1078,24 +1078,70 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   background: var(--paper); color: var(--ink-muted); border-color: var(--line);
 }
 
-/* Убранные смайлики — свёрнуты: они существуют только чтобы их можно было
-   вернуть, и в развёрнутом виде отвлекали бы от рабочего состава пака. */
-.sa-emoji-retired > summary { font-size: 12px; color: var(--ink-muted); cursor: pointer; }
-.sa-emoji-retired-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.sa-emoji-retired-item {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  border: 1px dashed var(--line); border-radius: var(--radius-md);
-  padding: 6px 8px; font-size: 11px; color: var(--ink-muted); max-width: 110px;
+/* Пак — строка-аккордеон: их немного, но в каждом сотни картинок, и развёрнутые
+   разом они не помещаются никуда. */
+.sa-emoji-pack-toggle {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  padding: 8px 4px; background: none; border: 0; cursor: pointer;
+  color: var(--ink); font-size: 14px; text-align: left;
 }
-/* Приглушены намеренно: в обороте их нет, и выглядеть как рабочие они не должны. */
-.sa-emoji-retired-item img { width: 32px; height: 32px; object-fit: contain; opacity: 0.5; }
-.sa-emoji-retired-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.sa-emoji-retired-item button, .sa-emoji-retired-item select {
-  font-size: 11px; padding: 2px 8px; cursor: pointer; max-width: 100%;
-  border: 1px solid var(--line); border-radius: var(--radius-sm);
-  background: var(--paper); color: var(--ink-muted);
+.sa-emoji-pack-chevron { width: 12px; color: var(--ink-muted); }
+.sa-emoji-pack-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-emoji-pack.is-open { border-color: var(--accent); }
+.sa-emoji-pack-body { padding-top: 6px; }
+.sa-emoji-pack-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.sa-emoji-pack-tools .sa-emoji-pack-name { flex: 1; min-width: 0; }
+.sa-emoji-pack-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin-top: 10px; }
+.sa-emoji-unicode-add { display: flex; gap: 6px; align-items: center; }
+.sa-emoji-unicode-add input {
+  width: 64px; text-align: center; font-size: 18px; padding: 4px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper);
 }
-.sa-emoji-retired-item button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+
+/* Плитка смайлика — намеренно минимальная: картинка и имя. Всё остальное живёт
+   в карточке по нажатию, иначе полсотни плиток с полями внутри превращают
+   экран в кашу. */
+.sa-emoji-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.sa-emoji-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  width: 72px; padding: 6px 4px; cursor: grab;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--paper-sunken); color: var(--ink-muted); font-size: 10px;
+  /* Палец не должен таскать плитку при обычной прокрутке: перетаскивание
+     начинается только после удержания, и глушится оно вручную (см. сетку). */
+  touch-action: pan-y;
+}
+.sa-emoji-tile:hover { border-color: var(--accent); }
+.sa-emoji-tile.is-dragging { opacity: 0.5; cursor: grabbing; border-style: dashed; }
+.sa-emoji-tile.is-retired { opacity: 0.45; border-style: dashed; }
+.sa-emoji-tile img { width: 32px; height: 32px; object-fit: contain; pointer-events: none; }
+.sa-emoji-tile-char { font-size: 26px; line-height: 32px; }
+.sa-emoji-tile-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Карточка смайлика */
+.sa-emoji-modal { max-width: 460px; width: 100%; }
+.sa-emoji-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sa-emoji-modal-head h3 { margin: 0; font-size: 16px; }
+.sa-emoji-modal-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.sa-emoji-modal-row > span { width: 120px; flex: none; font-size: 13px; color: var(--ink-muted); }
+.sa-emoji-modal-row input {
+  flex: 1; min-width: 0; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); color: var(--ink);
+}
+.sa-emoji-modal-row input[readonly] { color: var(--ink-muted); background: var(--paper-sunken); }
+.sa-emoji-modal-images { display: flex; gap: 10px; margin: 12px 0; }
+.sa-emoji-modal-image {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px; font-size: 12px; color: var(--ink-muted);
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper-sunken);
+}
+.sa-emoji-modal-image img { width: 48px; height: 48px; object-fit: contain; }
+.sa-emoji-modal-empty {
+  width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm); font-size: 11px;
+}
+.sa-emoji-modal-image label { cursor: pointer; }
+.sa-emoji-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
 /* Кастомный смайлик в тексте: по высоте строки и с выравниванием по базовой
    линии, иначе он растаскивает межстрочный интервал в абзаце. */

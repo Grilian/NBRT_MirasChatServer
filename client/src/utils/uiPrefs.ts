@@ -12,6 +12,13 @@ export interface UiPrefs {
   groupContacts: boolean;
   /** Ширина списка чатов на широком экране, px. */
   rosterWidth: number;
+  /**
+   * Показывать анимированные версии смайликов в переписке. По умолчанию да —
+   * ради них анимацию и загружают. Выключение оставляет статичную картинку:
+   * движение на экране мешает части людей читать, а на слабых машинах десяток
+   * анимаций в ленте заметно греет процессор.
+   */
+  animatedEmoji: boolean;
 }
 
 export const ROSTER_MIN_WIDTH = 240;
@@ -20,6 +27,7 @@ export const ROSTER_MAX_WIDTH = 560;
 export const DEFAULT_UI_PREFS: UiPrefs = {
   groupContacts: false,
   rosterWidth: 320,
+  animatedEmoji: true,
 };
 
 const STORAGE_KEY = 'uiPrefs';
@@ -36,6 +44,7 @@ export function getUiPrefs(): UiPrefs {
     return {
       groupContacts: typeof parsed.groupContacts === 'boolean' ? parsed.groupContacts : DEFAULT_UI_PREFS.groupContacts,
       rosterWidth: typeof parsed.rosterWidth === 'number' ? clampWidth(parsed.rosterWidth) : DEFAULT_UI_PREFS.rosterWidth,
+      animatedEmoji: typeof parsed.animatedEmoji === 'boolean' ? parsed.animatedEmoji : DEFAULT_UI_PREFS.animatedEmoji,
     };
   } catch {
     return { ...DEFAULT_UI_PREFS };

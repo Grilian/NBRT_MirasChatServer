@@ -33,7 +33,7 @@ import ThreadPanel from '../components/ThreadPanel';
 import ThreadInbox from '../components/ThreadInbox';
 import { Poll, PollDraft } from '../types/poll';
 import { ThreadInboxItem, ThreadSummary } from '../types/thread';
-import { CustomEmojiMap, buildEmojiMap, toPlainText } from '../utils/customEmoji';
+import { CustomEmojiMap, buildEmojiMap, toPlainText, setEmojiAnimationEnabled } from '../utils/customEmoji';
 import { invalidateEmojiPackCache } from '../components/EmojiPicker';
 import {
   ensureMobileNotificationPermission,
@@ -646,6 +646,12 @@ const Chat: React.FC = () => {
   // То же самое для настроек интерфейса (группировка контактов, ширина списка).
   const [uiPrefs, setUiPrefs] = useState<UiPrefs>(getUiPrefs);
   useEffect(() => onUiPrefsChanged(setUiPrefs), []);
+
+  // Анимация смайликов — не проп, а модульный флаг: смайлики рисуются в
+  // десятке мест (лента, ветка, цитаты, превью, реакции), и прокидывать его
+  // в каждое — верный способ забыть половину. Держим в курсе на каждое
+  // изменение настройки.
+  useEffect(() => { setEmojiAnimationEnabled(uiPrefs.animatedEmoji); }, [uiPrefs.animatedEmoji]);
 
   // Растягивание списка чатов мышью. Ширина во время перетаскивания живёт в
   // состоянии (перерисовка на каждый кадр), а в localStorage уходит один раз,

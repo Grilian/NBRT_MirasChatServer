@@ -11,22 +11,36 @@ export interface CustomEmoji {
 }
 
 /** name → чем его показывать. Плоская карта: в тексте пака нет, только :name:. */
-export type CustomEmojiMap = Record<string, { filePath: string; fallback: string }>;
+export type CustomEmojiMap = Record<string, { filePath: string; animatedPath?: string | null; fallback: string }>;
 
 // Подставляется, когда базовый эмодзи у смайлика не задан. Одно место на весь
 // клиент — старые записи в БД бэкфиллить не нужно.
 export const DEFAULT_EMOJI_FALLBACK = '🙂';
 
 export const buildEmojiMap = (
-  items: { name: string; file_path: string; fallback?: string | null }[],
+  items: { name: string; file_path: string; animated_path?: string | null; fallback?: string | null }[],
 ): CustomEmojiMap => {
   const map: CustomEmojiMap = {};
   for (const item of items) {
     if (!item?.name || !item.file_path) continue;
-    map[item.name] = { filePath: item.file_path, fallback: item.fallback || DEFAULT_EMOJI_FALLBACK };
+    map[item.name] = {
+      filePath: item.file_path,
+      animatedPath: item.animated_path || null,
+      fallback: item.fallback || DEFAULT_EMOJI_FALLBACK,
+    };
   }
   return map;
 };
+
+/**
+ * Показывать ли анимированные версии. Читается на каждой отрисовке из общей
+ * настройки устройства, а не прокидывается пропсом через всю переписку: смайлики
+ * рисуются в десятке разных мест (лента, цитаты, превью, реакции), и тащить
+ * флаг в каждое — верный способ забыть его в половине из них.
+ */
+let animationEnabled = true;
+export const setEmojiAnimationEnabled = (enabled: boolean): void => { animationEnabled = enabled; };
+export const isEmojiAnimationEnabled = (): boolean => animationEnabled;
 
 // Тот же формат, что на сервере (routes/emoji.js): только латиница нижнего
 // регистра, цифры и подчёркивание, от двух символов. Специально узкий, чтобы
@@ -80,7 +94,9 @@ export function renderTextWithEmoji(
       if (match.index > last) nodes.push(text.slice(last, match.index));
       nodes.push(React.createElement(CustomEmojiImage, {
         key: `${keyPrefix}-${index}`,
-        filePath: item.filePath,
+        // Анимированная версия — только в переписке и только если человек её
+        // не выключил; статичная есть всегда и служит запасным вариантом.
+        filePath: (animationEnabled && item.animatedPath) || item.filePath,
         fallback: item.fallback,
       }));
       index += 1;
