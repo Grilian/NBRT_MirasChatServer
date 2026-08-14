@@ -1,4 +1,6 @@
-import { ROSTER_MAX_WIDTH, ROSTER_MIN_WIDTH } from './uiPrefs';
+import {
+  RIGHT_PANEL_MAX_WIDTH, RIGHT_PANEL_MIN_WIDTH, ROSTER_MAX_WIDTH, ROSTER_MIN_WIDTH,
+} from './uiPrefs';
 
 // Единая адаптивная раскладка приложения: FULL → STANDARD → COMPACT → MOBILE.
 //
@@ -36,9 +38,9 @@ export const LAYOUT_SIZES = {
    * приложение проскакивало бы сразу в мобильный.
    */
   chatMin: 520,
-  /** Минимум правой области (ветка/о чате/файлы) — из .thread-panel. */
-  rightMin: 350,
-  rightMax: 420,
+  /** Пределы правой области — те же, что у её ручного изменения ширины. */
+  rightMin: RIGHT_PANEL_MIN_WIDTH,
+  rightMax: RIGHT_PANEL_MAX_WIDTH,
 } as const;
 
 /**
@@ -64,6 +66,8 @@ export interface LayoutInput {
    * тогда состоянием распоряжается адаптив.
    */
   rosterCollapsedByUser: boolean | null;
+  /** Ширина правой области, выбранная пользователем. */
+  rightPanelWidth?: number;
 }
 
 export interface LayoutState {
@@ -79,6 +83,8 @@ export interface LayoutState {
   rightPanelAutoClosed: boolean;
   /** Фактическая ширина списка после ограничений, px. */
   rosterWidth: number;
+  /** Фактическая ширина правой области, px. Ноль — она закрыта. */
+  rightPanelWidth: number;
   /** Сколько остаётся переписке — для отладки и проверок. */
   chatWidth: number;
 }
@@ -101,7 +107,7 @@ function fits(width: number, parts: number[]): boolean {
  * этого всё и делается.
  */
 export function resolveLayout(input: LayoutInput): LayoutState {
-  const { navRail, rosterMin, rosterMax, rosterCompact, chatMin, rightMin } = LAYOUT_SIZES;
+  const { navRail, rosterMin, rosterMax, rosterCompact, chatMin, rightMin, rightMax } = LAYOUT_SIZES;
   const width = Math.max(0, input.width);
 
   if (width <= MOBILE_MAX_WIDTH) {
@@ -114,6 +120,7 @@ export function resolveLayout(input: LayoutInput): LayoutState {
       rightPanelOpen: input.rightPanelRequested,
       rightPanelAutoClosed: false,
       rosterWidth: input.rosterWidth,
+      rightPanelWidth: 0,
       chatWidth: width,
     };
   }
@@ -136,6 +143,7 @@ export function resolveLayout(input: LayoutInput): LayoutState {
       rightPanelOpen: input.rightPanelRequested,
       rightPanelAutoClosed: false,
       rosterWidth: input.rosterWidth,
+      rightPanelWidth: 0,
       chatWidth: width,
     };
   }
@@ -155,11 +163,19 @@ export function resolveLayout(input: LayoutInput): LayoutState {
   const rightPanelOpen = input.rightPanelRequested && rightFits;
   const rightPanelAutoClosed = input.rightPanelRequested && !rightFits;
 
+  // Правая область тоже ужимается до своего минимума, прежде чем отбирать
+  // место у списка: сначала уступает та панель, чью ширину человек задал
+  // последней, а закрывается она только когда и минимума не остаётся.
+  const desiredRight = clamp(input.rightPanelWidth ?? rightMin, rightMin, rightMax);
+  const rightWidth = rightPanelOpen
+    ? clamp(width - navRail - rosterFloor - chatMin, rightMin, desiredRight)
+    : 0;
+
   if (rightPanelOpen && !compact) {
-    rosterActual = clamp(width - navRail - chatMin - rightMin, rosterMin, desiredRoster);
+    rosterActual = clamp(width - navRail - chatMin - rightWidth, rosterMin, desiredRoster);
   }
 
-  const chatWidth = width - navRail - rosterActual - (rightPanelOpen ? rightMin : 0);
+  const chatWidth = width - navRail - rosterActual - rightWidth;
 
   return {
     mode: rightPanelOpen ? 'full' : (compact ? 'compact' : 'standard'),
@@ -167,6 +183,7 @@ export function resolveLayout(input: LayoutInput): LayoutState {
     rightPanelOpen,
     rightPanelAutoClosed,
     rosterWidth: rosterActual,
+    rightPanelWidth: rightWidth,
     chatWidth,
   };
 }

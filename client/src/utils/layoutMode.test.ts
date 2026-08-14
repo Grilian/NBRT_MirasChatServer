@@ -4,6 +4,7 @@ const base = {
   rosterWidth: 320,
   rightPanelRequested: false,
   rosterCollapsedByUser: null as boolean | null,
+  rightPanelWidth: undefined as number | undefined,
 };
 
 const at = (width: number, over: Partial<typeof base> = {}) =>
@@ -131,5 +132,37 @@ describe('переходы обратимы', () => {
     resolveLayout({ ...input, width: 700 });
     const wideAfter = resolveLayout({ ...input, width: 1500 });
     expect(wideAfter).toEqual(wideBefore);
+  });
+});
+
+describe('ручная ширина правой области', () => {
+  test('заданная человеком ширина применяется, пока помещается', () => {
+    const state = at(1800, { rightPanelRequested: true, rightPanelWidth: 560 });
+    expect(state.rightPanelOpen).toBe(true);
+    expect(state.rightPanelWidth).toBe(560);
+    expect(state.chatWidth).toBeGreaterThanOrEqual(LAYOUT_SIZES.chatMin);
+  });
+
+  test('на узком окне правая область ужимается до минимума, но не закрывается', () => {
+    // Места хватает ровно на минимальный набор — широкая панель обязана
+    // уступить, а не захлопнуться: закрытие это уже смена структуры.
+    const width = LAYOUT_SIZES.navRail + LAYOUT_SIZES.rosterMin
+      + LAYOUT_SIZES.chatMin + LAYOUT_SIZES.rightMin;
+    const state = at(width, { rightPanelRequested: true, rightPanelWidth: 620 });
+
+    expect(state.rightPanelOpen).toBe(true);
+    expect(state.rightPanelWidth).toBe(LAYOUT_SIZES.rightMin);
+    expect(state.chatWidth).toBeGreaterThanOrEqual(LAYOUT_SIZES.chatMin);
+  });
+
+  test('ширины областей никогда не превышают окно', () => {
+    for (let width = MOBILE_MAX_WIDTH + 1; width <= 2200; width += 11) {
+      for (const rightPanelWidth of [350, 480, 620]) {
+        const s = at(width, { rightPanelRequested: true, rightPanelWidth });
+        if (s.mode === 'mobile') continue;
+        const used = LAYOUT_SIZES.navRail + s.rosterWidth + s.chatWidth + s.rightPanelWidth;
+        expect(used).toBeLessThanOrEqual(width);
+      }
+    }
   });
 });

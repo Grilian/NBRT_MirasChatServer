@@ -60,6 +60,8 @@ import {
 } from '../utils/notificationPrefs';
 import {
   DEFAULT_UI_PREFS,
+  RIGHT_PANEL_MAX_WIDTH,
+  RIGHT_PANEL_MIN_WIDTH,
   ROSTER_MAX_WIDTH,
   ROSTER_MIN_WIDTH,
   UiPrefs,
@@ -68,6 +70,7 @@ import {
   saveUiPrefs
 } from '../utils/uiPrefs';
 import { useLayoutMode } from '../utils/useLayoutMode';
+import { widthNeededForRightPanel } from '../utils/layoutMode';
 import {
   OutgoingMessage,
   OutgoingPayload,
@@ -618,12 +621,42 @@ const Chat: React.FC = () => {
   // — то, помещается ли она сейчас. Разделять обязательно: закрытую из-за
   // нехватки места ветку надо вернуть саму, когда место появится, а закрытую
   // человеком — не возвращать никогда (см. layoutMode.ts).
+  // Сведения о чате и профиль занимают ту же правую область, что и ветка,
+  // поэтому в раскладку они входят одним намерением: место нужно и тем, и
+  // другим, а показывается за раз что-то одно.
+  const infoRequested = generalInfoOpen || groupInfoId !== null || infoModalUserId !== null;
+
   const layout = useLayoutMode({
     rosterWidth: uiPrefs.rosterWidth,
-    rightPanelRequested: activeThread !== null,
+    rightPanelRequested: activeThread !== null || infoRequested,
     rosterCollapsedByUser: uiPrefs.rosterCollapsed,
+    rightPanelWidth: uiPrefs.rightPanelWidth,
   });
   const narrowLayout = layout.mode === 'mobile';
+
+  // Открытие правой области в узком окне раздвигает окно, а не наезжает на
+  // переписку. Человек фактически возвращает область, которую адаптив закрыл
+  // сам при сужении, — значит и места под неё приложение должно найти само.
+  // В браузере раздвигать нечего: там панель просто не откроется, пока окно
+  // узкое, и это честнее, чем перекрыть переписку.
+  const ensureRoomForRightPanel = useCallback(() => {
+    if (narrowLayout) return; // на телефоне правая область — отдельный экран
+    const needed = widthNeededForRightPanel(uiPrefsRef.current.rosterWidth, layout.rosterCompact);
+    void window.electronAPI?.ensureWindowWidth?.(needed);
+  }, [narrowLayout, layout.rosterCompact]);
+
+  // Раздвигаем окно на САМО намерение открыть правую область, а не по месту
+  // вызова: точек открытия много (ветка из ленты, из списка веток, профиль из
+  // списка чатов, из сообщения, из «Людей», сведения из шапки), и обвешивать
+  // каждую значит забыть половину.
+  const rightPanelIntent = activeThread !== null || infoRequested;
+  useEffect(() => {
+    if (rightPanelIntent) ensureRoomForRightPanel();
+    // ensureRoomForRightPanel намеренно не в зависимостях: он пересоздаётся при
+    // смене режима, и от этого окно раздвигалось бы повторно уже после того,
+    // как человек сам уменьшил его обратно.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rightPanelIntent]);
   useEffect(() => onUiPrefsChanged(setUiPrefs), []);
 
   // Анимация смайликов — не проп, а модульный флаг: смайлики рисуются в
@@ -638,6 +671,32 @@ const Chat: React.FC = () => {
   // состоянии (перерисовка на каждый кадр), а в localStorage уходит один раз,
   // на отпускании: писать туда на каждое движение мыши незачем.
   const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const rightResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  // Правая область тянется за СВОЮ левую границу, поэтому знак смещения
+  // обратный списку: тянем влево — панель шире.
+  const handleRightResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    rightResizeStateRef.current = { startX: e.clientX, startWidth: uiPrefsRef.current.rightPanelWidth };
+  };
+
+  const handleRightResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const state = rightResizeStateRef.current;
+    if (!state) return;
+    const next = Math.min(
+      RIGHT_PANEL_MAX_WIDTH,
+      Math.max(RIGHT_PANEL_MIN_WIDTH, state.startWidth - (e.clientX - state.startX))
+    );
+    setUiPrefs((prev) => (prev.rightPanelWidth === next ? prev : { ...prev, rightPanelWidth: next }));
+  };
+
+  const handleRightResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!rightResizeStateRef.current) return;
+    rightResizeStateRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    saveUiPrefs(uiPrefsRef.current);
+  };
 
   const handleResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -2545,8 +2604,66 @@ const Chat: React.FC = () => {
   // Защита раскладки: устаревшее состояние чата не должно влиять на другие
   // разделы. На узком экране ветка занимает весь экран (это отдельный экран
   // мобильной навигации), на десктопе — только если для неё есть место.
+  // Сведения, открытые последними, занимают правую область поверх ветки:
+  // человек только что попросил именно их. Закроет — ветка вернётся, её
+  // состояние никуда не делось.
+  const infoInPanel = !narrowLayout && infoRequested && layout.rightPanelOpen;
   const threadPaneOpen = showConversation && activeThread !== null
-    && (narrowLayout || layout.rightPanelOpen);
+    && !infoInPanel && (narrowLayout || layout.rightPanelOpen);
+
+  // Содержимое правой области, когда там не ветка, а сведения. Собирается
+  // один раз и рисуется либо в панели, либо модальным окном — разметка одна.
+  const infoContent = generalInfoOpen ? (
+    <GeneralChatInfoModal
+      currentUserId={currentUserId}
+      notificationsMuted={mutedChatIds.has(GENERAL_CHAT_ID)}
+      onToggleNotifications={(muted) => updateChatNotificationMute(GENERAL_CHAT_ID, muted)}
+      onClose={() => setGeneralInfoOpen(false)}
+    />
+  ) : groupInfoId !== null ? (
+    <GroupInfoModal
+      groupId={groupInfoId}
+      currentUserId={currentUserId}
+      notificationsMuted={mutedChatIds.has(`group_${groupInfoId}`)}
+      onToggleNotifications={(muted) => updateChatNotificationMute(`group_${groupInfoId}`, muted)}
+      onClose={() => setGroupInfoId(null)}
+      onUpdated={(group) => {
+        setChatGroups(prev => prev.map(g => g.id === group.id
+          ? { ...g, name: group.name, member_count: group.member_count }
+          : g));
+      }}
+      onGone={(chatId) => {
+        setChatGroups(prev => prev.filter(g => g.chat_id !== chatId));
+        setGroupInfoId(null);
+        if (activeChat === chatId) { setActiveChat(null); setView(VIEW_CHAT_LIST); }
+      }}
+    />
+  ) : infoModalUser ? (
+    <UserInfoModal
+      user={{
+        id: infoModalUser.id,
+        username: infoModalUser.username,
+        display_name: infoModalUser.display_name,
+        avatarPath: infoModalUser.avatarPath,
+        groupName: infoModalUser.groupName,
+        bio: infoModalUser.bio,
+        phone: infoModalUser.phone,
+        department: infoModalUser.department,
+        position: infoModalUser.position,
+        birthDate: infoModalUser.birthDate,
+      }}
+      online={onlineUsers.includes(infoModalUser.id)}
+      notificationsMuted={mutedChatIds.has(chatIdFor(currentUserId, infoModalUser.id))}
+      onToggleNotifications={(muted) => updateChatNotificationMute(
+        chatIdFor(currentUserId, infoModalUser.id), muted
+      )}
+      canModerate={currentUserRole === 'admin'}
+      groups={groups}
+      comment={comments[infoModalUser.id]?.comment || ''}
+      onUpdateComment={(comment) => updateComment(infoModalUser.id, comment)}
+      onClose={() => setInfoModalUserId(null)}
+    />
+  ) : null;
 
   return (
     <div
@@ -2556,8 +2673,12 @@ const Chat: React.FC = () => {
         + (layout.rosterCompact ? ' is-roster-compact' : '')
         + (conversationOpen ? ' is-conversation-view' : '')
         + (threadPaneOpen ? ' is-thread-open' : '')
+        + (infoInPanel ? ' is-right-open' : '')
         + (skipPaneAnim ? ' is-no-pane-anim' : '')}
-      style={{ ['--roster-w' as string]: `${uiPrefs.rosterWidth}px` }}
+      style={{
+        ['--roster-w' as string]: `${uiPrefs.rosterWidth}px`,
+        ['--right-w' as string]: `${uiPrefs.rightPanelWidth}px`,
+      }}
     >
       <NotificationStack
         toasts={toasts}
@@ -2656,59 +2777,6 @@ const Chat: React.FC = () => {
             recordRecentOpening(group.chat_id);
             setView(VIEW_CONVERSATION);
           }}
-        />
-      )}
-      {generalInfoOpen && (
-        <GeneralChatInfoModal
-          currentUserId={currentUserId}
-          notificationsMuted={mutedChatIds.has(GENERAL_CHAT_ID)}
-          onToggleNotifications={(muted) => updateChatNotificationMute(GENERAL_CHAT_ID, muted)}
-          onClose={() => setGeneralInfoOpen(false)}
-        />
-      )}
-      {groupInfoId !== null && (
-        <GroupInfoModal
-          groupId={groupInfoId}
-          currentUserId={currentUserId}
-          notificationsMuted={mutedChatIds.has(`group_${groupInfoId}`)}
-          onToggleNotifications={(muted) => updateChatNotificationMute(`group_${groupInfoId}`, muted)}
-          onClose={() => setGroupInfoId(null)}
-          onUpdated={(group) => {
-            setChatGroups(prev => prev.map(g => g.id === group.id
-              ? { ...g, name: group.name, member_count: group.member_count }
-              : g));
-          }}
-          onGone={(chatId) => {
-            setChatGroups(prev => prev.filter(g => g.chat_id !== chatId));
-            setGroupInfoId(null);
-            if (activeChat === chatId) { setActiveChat(null); setView(VIEW_CHAT_LIST); }
-          }}
-        />
-      )}
-      {infoModalUser && (
-        <UserInfoModal
-          user={{
-            id: infoModalUser.id,
-            username: infoModalUser.username,
-            display_name: infoModalUser.display_name,
-            avatarPath: infoModalUser.avatarPath,
-            groupName: infoModalUser.groupName,
-            bio: infoModalUser.bio,
-            phone: infoModalUser.phone,
-            department: infoModalUser.department,
-            position: infoModalUser.position,
-            birthDate: infoModalUser.birthDate,
-          }}
-          online={onlineUsers.includes(infoModalUser.id)}
-          notificationsMuted={mutedChatIds.has(chatIdFor(currentUserId, infoModalUser.id))}
-          onToggleNotifications={(muted) => updateChatNotificationMute(
-            chatIdFor(currentUserId, infoModalUser.id), muted
-          )}
-          canModerate={currentUserRole === 'admin'}
-          groups={groups}
-          comment={comments[infoModalUser.id]?.comment || ''}
-          onUpdateComment={(comment) => updateComment(infoModalUser.id, comment)}
-          onClose={() => setInfoModalUserId(null)}
         />
       )}
       {section === 'settings' && (
@@ -3009,9 +3077,37 @@ const Chat: React.FC = () => {
           бы вернуть саму при расширении окна. Но РИСОВАТЬ панель в этот момент
           нельзя: колонки под неё в гриде нет, и панель складывалась в 92px
           поверх рельса (поймано при проверке). */}
+      {/* Сведения о чате и профиль на десктопе живут в ПРАВОЙ ОБЛАСТИ, а не
+          поверх переписки: их открывают, чтобы посмотреть и вернуться к делу,
+          и модальное окно ради этого закрывало собой ровно то, о чём человек
+          читает. На узком экране это по-прежнему отдельный экран поверх —
+          класть панель рядом там некуда.
+
+          Компоненты те же самые: в панели их оборачивает .right-panel-host,
+          который снимает с .modal-overlay позиционирование поверх экрана.
+          Вторых версий этих окон не заводим. */}
+      {infoRequested && (
+        infoInPanel
+          ? <aside className="right-panel-host" aria-label="Сведения">{infoContent}</aside>
+          : infoContent
+      )}
       {threadPaneOpen && activeThread && socket && (
         <ThreadPanel
           key={activeThread.rootId}
+          resizeHandle={!narrowLayout && (
+            <div
+              className="right-panel-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Ширина правой панели"
+              onPointerDown={handleRightResizeStart}
+              onPointerMove={handleRightResizeMove}
+              onPointerUp={handleRightResizeEnd}
+              onPointerCancel={handleRightResizeEnd}
+              onDoubleClick={() => saveUiPrefs({ ...uiPrefsRef.current, rightPanelWidth: DEFAULT_UI_PREFS.rightPanelWidth })}
+              title="Потяните, чтобы изменить ширину. Двойной клик — вернуть по умолчанию"
+            />
+          )}
           rootId={activeThread.rootId}
           currentUserId={currentUserId}
           socket={socket}

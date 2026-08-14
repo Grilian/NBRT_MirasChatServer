@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen, shell, nativeImage, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -28,8 +28,19 @@ const DEFAULT_STATE = { width: 1200, height: 800, x: undefined, y: undefined, is
 // завершают приложение помимо нашей воли, поэтому режим пишется на каждое
 // изменение, а не только при выходе.
 const WINDOW_MODES = ['normal', 'minimized', 'tray'];
-const MIN_WIDTH = 860;
-const MIN_HEIGHT = 560;
+// Нижняя граница окна — мобильная ширина, а не десктопная.
+//
+// Было 860, и это ровно та причина, по которой узкие режимы приложения
+// оказывались недостижимы: компактный список чатов начинается с 852px, а
+// мобильный вид — с 760px, то есть окно упиралось в минимум РАНЬШЕ, чем
+// приложение успевало до них дойти. Человек тянул рамку, окно останавливалось,
+// и выглядело это как «дальше не сужается».
+//
+// 380px — ширина телефона: в этом окне работает настоящий мобильный интерфейс
+// (нижняя навигация, экраны по очереди), и им же удобно проверять мобильную
+// вёрстку не собирая APK.
+const MIN_WIDTH = 380;
+const MIN_HEIGHT = 520;
 
 let mainWindow = null;
 let tray = null;
@@ -575,6 +586,36 @@ ipcMain.on('window:focus', () => {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+});
+
+/**
+ * Раздвинуть окно вправо под правую область приложения.
+ *
+ * Требование интерфейса: открытие ветки (или сведений о чате) в узком окне не
+ * должно ни наезжать на переписку, ни молча не срабатывать — приложение
+ * выходит из узкого состояния и освобождает место. Растём именно вправо,
+ * оставляя левый край на месте: окно не должно «прыгать» под курсором.
+ *
+ * Развёрнутое окно не трогаем — оно и так во весь экран, и если панель туда не
+ * влезла, раздвигать нечего.
+ */
+ipcMain.handle('window:ensure-width', (event, requested) => {
+  const target = Math.round(Number(requested) || 0);
+  if (!mainWindow || !Number.isFinite(target) || target <= 0) return false;
+  if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return false;
+
+  const bounds = mainWindow.getBounds();
+  if (bounds.width >= target) return false;
+
+  // Шире рабочей области экрана не растём и за её правый край не вылезаем:
+  // окно, уехавшее под панель задач или на несуществующий монитор, человек
+  // потом не найдёт.
+  const area = screen.getDisplayMatching(bounds).workArea;
+  const width = Math.min(target, area.width);
+  const x = Math.min(Math.max(bounds.x, area.x), area.x + area.width - width);
+
+  mainWindow.setBounds({ x, y: bounds.y, width, height: bounds.height }, true);
+  return true;
 });
 
 // Системные уведомления рисует главный процесс, а не рендерер.

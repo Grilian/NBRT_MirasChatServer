@@ -16,6 +16,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
   setUnreadBadge: (count, badgeDataUrl) => ipcRenderer.send('unread:set', count, badgeDataUrl),
   focusWindow: () => ipcRenderer.send('window:focus'),
+  /**
+   * Раздвинуть окно вправо до нужной ширины, если оно уже, чем требуется.
+   * Открытие ветки в узком окне не должно наезжать на переписку — вместо
+   * этого приложение выходит из узкого состояния (см. layoutMode.ts).
+   */
+  ensureWindowWidth: (width) => ipcRenderer.invoke('window:ensure-width', width),
   flashWindow: () => ipcRenderer.send('window:flash'),
   onFocusChange: (callback) => {
     const listener = (_event, isFocused) => callback(isFocused);

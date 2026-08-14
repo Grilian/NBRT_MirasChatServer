@@ -30,22 +30,32 @@ export interface UiPrefs {
    * действительно нет.
    */
   rosterCollapsed: boolean | null;
+  /** Ширина правой области (ветка, сведения о чате, профиль), px. */
+  rightPanelWidth: number;
 }
 
 export const ROSTER_MIN_WIDTH = 240;
 export const ROSTER_MAX_WIDTH = 560;
+/** Пределы правой области. Минимум — из .thread-panel: уже ветка нечитаема. */
+export const RIGHT_PANEL_MIN_WIDTH = 350;
+export const RIGHT_PANEL_MAX_WIDTH = 620;
 
 export const DEFAULT_UI_PREFS: UiPrefs = {
   groupContacts: false,
   rosterWidth: 320,
   animatedEmoji: true,
   rosterCollapsed: null,
+  rightPanelWidth: 400,
 };
 
 const STORAGE_KEY = 'uiPrefs';
 
 function clampWidth(value: number): number {
   return Math.min(ROSTER_MAX_WIDTH, Math.max(ROSTER_MIN_WIDTH, Math.round(value)));
+}
+
+function clampRightWidth(value: number): number {
+  return Math.min(RIGHT_PANEL_MAX_WIDTH, Math.max(RIGHT_PANEL_MIN_WIDTH, Math.round(value)));
 }
 
 export function getUiPrefs(): UiPrefs {
@@ -60,6 +70,9 @@ export function getUiPrefs(): UiPrefs {
       // Именно `=== 'boolean'`, а не `??`: отсутствие ключа и записанный null
       // значат одно и то же — «человек не высказывался».
       rosterCollapsed: typeof parsed.rosterCollapsed === 'boolean' ? parsed.rosterCollapsed : null,
+      rightPanelWidth: typeof parsed.rightPanelWidth === 'number'
+        ? clampRightWidth(parsed.rightPanelWidth)
+        : DEFAULT_UI_PREFS.rightPanelWidth,
     };
   } catch {
     return { ...DEFAULT_UI_PREFS };
@@ -67,7 +80,11 @@ export function getUiPrefs(): UiPrefs {
 }
 
 export function saveUiPrefs(prefs: UiPrefs): void {
-  const normalized: UiPrefs = { ...prefs, rosterWidth: clampWidth(prefs.rosterWidth) };
+  const normalized: UiPrefs = {
+    ...prefs,
+    rosterWidth: clampWidth(prefs.rosterWidth),
+    rightPanelWidth: clampRightWidth(prefs.rightPanelWidth),
+  };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   } catch {
