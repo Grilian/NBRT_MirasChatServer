@@ -73,14 +73,13 @@
         }
       ],
       "icon": "assets/icon.png",
-      "category": "Network",
+      "category": "Network;InstantMessaging;",
       "synopsis": "Корпоративный мессенджер MIRAS",
       "description": "MirasChat — корпоративный мессенджер: переписка, группы, задачи, календарь.",
       "maintainer": "MIRAS <cagrizzzca@gmail.com>",
       "desktop": {
         "Name": "MirasChat",
         "Comment": "Корпоративный мессенджер MIRAS",
-        "Categories": "Network;InstantMessaging;",
         "Keywords": "chat;messenger;мессенджер;чат;",
         "StartupWMClass": "MirasChat"
       }
