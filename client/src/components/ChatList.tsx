@@ -64,6 +64,17 @@ interface ChatListProps {
   onOpenSettings: () => void;
   /** Ручка растягивания панели — только на широком экране, рисует Chat.tsx. */
   resizeHandle?: React.ReactNode;
+  /**
+   * Компактный список — только аватары и индикаторы.
+   *
+   * Это ФЛАГ ПРЕДСТАВЛЕНИЯ у того же компонента, а не отдельный «CompactChatList»:
+   * список остаётся один, с той же логикой отбора, сортировки и обработки
+   * нажатий, — прячется лишь то, чему не хватает ширины. Второй компонент
+   * означал бы вторую реализацию тех же правил, расходящуюся с первой.
+   */
+  compact?: boolean;
+  /** Развернуть список обратно — кнопка внутри компактного состояния. */
+  onExpand?: () => void;
 }
 
 function renderAvatar(
@@ -113,6 +124,8 @@ const ChatList: React.FC<ChatListProps> = ({
   lastMessages, unreadCounts, favorites, onToggleFavorite,
   onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo, onCreateGroup, onOpenSettings,
   resizeHandle,
+  compact = false,
+  onExpand,
   selfName, selfAvatarPath, statusPreset, statusCustom, onOpenStatus, customEmoji = {},
 }) => {
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -160,8 +173,15 @@ const ChatList: React.FC<ChatListProps> = ({
 
 
   return (
-    <aside className={'roster' + (mobileSearchCollapsed ? ' is-search-collapsed' : '')}>
+    <aside className={'roster' + (mobileSearchCollapsed ? ' is-search-collapsed' : '') + (compact ? ' is-compact' : '')}>
       {resizeHandle}
+      {compact && onExpand && (
+        // Компактный список — полноценное состояние панели, из него обязан
+        // быть выход без изменения размера всего окна.
+        <button type="button" className="roster-expand-btn" onClick={onExpand} title="Развернуть список чатов" aria-label="Развернуть список чатов">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+        </button>
+      )}
       <div className="roster-head">
         {/* Свой аватар со статусом. На телефоне блок «себя» с рельса скрыт
             (там шесть вкладок), и до статуса приходилось идти через настройки

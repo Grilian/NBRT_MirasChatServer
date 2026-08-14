@@ -67,6 +67,7 @@ import {
   onUiPrefsChanged,
   saveUiPrefs
 } from '../utils/uiPrefs';
+import { useLayoutMode } from '../utils/useLayoutMode';
 import {
   OutgoingMessage,
   OutgoingPayload,
@@ -228,48 +229,6 @@ const VIEW_CHAT_LIST: ChatView = { section: 'chats', conversation: false, settin
 // чуть дольше самого перехода (.3s), чтобы захватить и перестроение WebView.
 const PANE_ANIM_SKIP_MS = 400;
 
-// Порог узкого экрана. Должен совпадать с @media (max-width: 760px) в theme.css.
-const NARROW_LAYOUT_QUERY = '(max-width: 760px)';
-
-/**
- * Узкий экран (телефон) — здесь панели не соседствуют, а заменяют друг друга.
- *
- * Раскладка нужна именно в JS, а не только в CSS: на телефоне список чатов и
- * переписка должны существовать по очереди, а не одновременно. Раньше обе
- * панели были в DOM всегда, а переписка пряталась `transform: translateX(100%)`
- * — и стоило этому трансформу не примениться (композитор WebView роняет слой
- * при перестроении под клавиатуру, при возврате из фона, при оборванном
- * переходе), как переписка оставалась поверх списка. Экран выглядел как
- * открытый чат, а состояние при этом уже было «список»: кнопка «назад» вела
- * туда, где мы и так находимся, рельс — в раздел, который уже открыт, и выйти
- * было нечем. Ровно это и называлось «чат-ловушкой».
- */
-function useNarrowLayout(): boolean {
-  const [narrow, setNarrow] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(NARROW_LAYOUT_QUERY).matches
-  );
-
-  useEffect(() => {
-    const media = window.matchMedia(NARROW_LAYOUT_QUERY);
-    const update = () => setNarrow(media.matches);
-    update();
-    // resize вдобавок к change у самого media query: событие change приходит
-    // не во всех WebView (и не при программном изменении размера), а промах
-    // здесь означает, что на телефоне в DOM окажутся сразу обе панели — то
-    // самое состояние, из-за которого экран и запирался.
-    media.addEventListener('change', update);
-    window.addEventListener('resize', update);
-    window.addEventListener('orientationchange', update);
-    return () => {
-      media.removeEventListener('change', update);
-      window.removeEventListener('resize', update);
-      window.removeEventListener('orientationchange', update);
-    };
-  }, []);
-
-  return narrow;
-}
-
 // Больше четырёх карточек на экране — уже не уведомление, а стена, за которой
 // не видно приложения. Самые старые уступают место новым (в них всё равно
 // показано только последнее сообщение чата).
@@ -416,7 +375,6 @@ const Chat: React.FC = () => {
   // Ещё один пояс: даже если переписка каким-то образом окажется помеченной
   // открытой вне раздела «Чаты», показывать её мы не станем.
   const conversationOpen = view.section === 'chats' && view.conversation;
-  const narrowLayout = useNarrowLayout();
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
   const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
@@ -654,6 +612,18 @@ const Chat: React.FC = () => {
 
   // То же самое для настроек интерфейса (группировка контактов, ширина списка).
   const [uiPrefs, setUiPrefs] = useState<UiPrefs>(getUiPrefs);
+
+  // Единая адаптивная раскладка: FULL → STANDARD → COMPACT → MOBILE.
+  // `activeThread` — НАМЕРЕНИЕ открыть правую область, а `layout.rightPanelOpen`
+  // — то, помещается ли она сейчас. Разделять обязательно: закрытую из-за
+  // нехватки места ветку надо вернуть саму, когда место появится, а закрытую
+  // человеком — не возвращать никогда (см. layoutMode.ts).
+  const layout = useLayoutMode({
+    rosterWidth: uiPrefs.rosterWidth,
+    rightPanelRequested: activeThread !== null,
+    rosterCollapsedByUser: uiPrefs.rosterCollapsed,
+  });
+  const narrowLayout = layout.mode === 'mobile';
   useEffect(() => onUiPrefsChanged(setUiPrefs), []);
 
   // Анимация смайликов — не проп, а модульный флаг: смайлики рисуются в
@@ -675,14 +645,31 @@ const Chat: React.FC = () => {
     resizeStateRef.current = { startX: e.clientX, startWidth: uiPrefs.rosterWidth };
   };
 
+  // Сколько нужно утащить границу ЗА минимум, чтобы список свернулся в иконки.
+  // Без этого запаса панель схлопывалась бы от случайного лишнего пикселя при
+  // обычной подгонке ширины у самого края.
+  const ROSTER_COLLAPSE_SLACK = 40;
+
   const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const state = resizeStateRef.current;
     if (!state) return;
-    const next = Math.min(
-      ROSTER_MAX_WIDTH,
-      Math.max(ROSTER_MIN_WIDTH, state.startWidth + (e.clientX - state.startX))
-    );
-    setUiPrefs((prev) => (prev.rosterWidth === next ? prev : { ...prev, rosterWidth: next }));
+    const raw = state.startWidth + (e.clientX - state.startX);
+
+    // Ручное изменение ширины — тоже способ переключить состояние панели:
+    // дотянул до минимума и дальше — получил «только иконки», потянул обратно
+    // — вернул полный список. Это осознанное действие человека, поэтому оно
+    // записывается в rosterCollapsed и переживает изменение размера окна.
+    if (raw < ROSTER_MIN_WIDTH - ROSTER_COLLAPSE_SLACK) {
+      setUiPrefs((prev) => (prev.rosterCollapsed === true ? prev : { ...prev, rosterCollapsed: true }));
+      return;
+    }
+
+    const next = Math.min(ROSTER_MAX_WIDTH, Math.max(ROSTER_MIN_WIDTH, raw));
+    setUiPrefs((prev) => (
+      prev.rosterWidth === next && prev.rosterCollapsed === false
+        ? prev
+        : { ...prev, rosterWidth: next, rosterCollapsed: false }
+    ));
   };
 
   const handleResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -2552,16 +2539,21 @@ const Chat: React.FC = () => {
 
   // На узком экране список и переписка не сосуществуют: рисуется ровно одна
   // панель. Спрятанная трансформом переписка (как было раньше) при сбое
-  // композитора оставалась поверх списка и запирала экран — см. useNarrowLayout.
+  // композитора оставалась поверх списка и запирала экран — см. layoutMode.ts.
   const showRoster = isChats && (!narrowLayout || !conversationOpen);
   const showConversation = isChats && (!narrowLayout || conversationOpen);
-  // Защита раскладки: устаревшее состояние чата не должно влиять на другие разделы.
-  const threadPaneOpen = showConversation && activeThread !== null;
+  // Защита раскладки: устаревшее состояние чата не должно влиять на другие
+  // разделы. На узком экране ветка занимает весь экран (это отдельный экран
+  // мобильной навигации), на десктопе — только если для неё есть место.
+  const threadPaneOpen = showConversation && activeThread !== null
+    && (narrowLayout || layout.rightPanelOpen);
 
   return (
     <div
       className={'chat-layout'
+        + ` is-mode-${layout.mode}`
         + (isChats ? '' : ' is-single-pane')
+        + (layout.rosterCompact ? ' is-roster-compact' : '')
         + (conversationOpen ? ' is-conversation-view' : '')
         + (threadPaneOpen ? ' is-thread-open' : '')
         + (skipPaneAnim ? ' is-no-pane-anim' : '')}
@@ -2625,6 +2617,8 @@ const Chat: React.FC = () => {
         onOpenGeneralInfo={() => setGeneralInfoOpen(true)}
         onCreateGroup={() => setCreateGroupOpen(true)}
         onOpenSettings={() => goToSection('settings')}
+        compact={layout.rosterCompact}
+        onExpand={() => saveUiPrefs({ ...uiPrefsRef.current, rosterCollapsed: false })}
         resizeHandle={!narrowLayout && (
           <div
             className="roster-resizer"
@@ -3010,7 +3004,12 @@ const Chat: React.FC = () => {
           />
         </main>
       ))}
-      {showConversation && activeThread && socket && (
+      {/* Именно threadPaneOpen, а не сам activeThread: намерение открыть ветку
+          сохраняется и тогда, когда для неё нет места, — иначе её нельзя было
+          бы вернуть саму при расширении окна. Но РИСОВАТЬ панель в этот момент
+          нельзя: колонки под неё в гриде нет, и панель складывалась в 92px
+          поверх рельса (поймано при проверке). */}
+      {threadPaneOpen && activeThread && socket && (
         <ThreadPanel
           key={activeThread.rootId}
           rootId={activeThread.rootId}

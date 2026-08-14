@@ -313,9 +313,35 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Ширину списка чатов человек тянет мышью — она приезжает инлайновой
    переменной из Chat.tsx (см. uiPrefs.rosterWidth), 320px — запасное значение
    на случай, если переменной почему-то нет. */
-.chat-layout { position: relative; display: grid; grid-template-columns: 92px var(--roster-w, 320px) 1fr; width: 100%; height: 100%; overflow: hidden; }
+/* ---- Адаптивная раскладка: FULL → STANDARD → COMPACT → MOBILE ----
+   Режим выбирает JS (см. utils/layoutMode.ts) и вешает класс is-mode-*, а
+   непрерывную часть — сколько именно пикселей достаётся списку и переписке —
+   считает грид. Разделение принципиально: перерисовывать React на каждый
+   пиксель перетаскивания рамки значит заставить окно ехать за курсором.
+
+   Ширину списка ограничивает clamp прямо здесь: сколько бы человек ни
+   растянул панель, ей не дадут отобрать у переписки её минимум (520px). При
+   нехватке места сужается список, а не переписка — это и есть правило
+   «основной чат имеет главный приоритет». */
+.chat-layout {
+  position: relative; display: grid; width: 100%; height: 100%; overflow: hidden;
+  --roster-actual: clamp(240px, min(var(--roster-w, 320px), calc(100% - 92px - 520px)), 560px);
+  grid-template-columns: 92px var(--roster-actual) minmax(0, 1fr);
+}
 .chat-layout.is-single-pane { grid-template-columns: 92px 1fr; }
-.chat-layout.is-thread-open { grid-template-columns: 92px var(--roster-w, 320px) minmax(300px, 1fr) minmax(350px, 420px); }
+/* COMPACT — минимальный десктоп: рельс, иконки чатов, переписка. */
+.chat-layout.is-roster-compact { grid-template-columns: 92px 68px minmax(0, 1fr); }
+/* FULL — правая область встаёт рядом, НЕ поверх переписки. JS открывает её
+   только тогда, когда она действительно помещается, поэтому здесь можно
+   спокойно задавать ей твёрдый минимум. */
+/* С открытой правой областью список ужимается и под неё тоже — тот же расчёт,
+   что в layoutMode.ts (ужать панели в допустимых пределах прежде, чем менять
+   структуру). Разойдись эти две формулы — грид переполнил бы контейнер. */
+.chat-layout.is-thread-open {
+  --roster-actual: clamp(240px, min(var(--roster-w, 320px), calc(100% - 92px - 520px - 350px)), 560px);
+  grid-template-columns: 92px var(--roster-actual) minmax(520px, 1fr) minmax(350px, 420px);
+}
+.chat-layout.is-thread-open.is-roster-compact { grid-template-columns: 92px 68px minmax(520px, 1fr) minmax(350px, 420px); }
 
 /* ---- Рельс разделов ---- */
 .nav-rail {
@@ -425,6 +451,65 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 /* ---- Roster (sidebar) ---- */
 .roster { position: relative; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--sidebar); }
+
+/* ---- Компактный список чатов: только иконки ----
+   Полноценное состояние панели, а не «сломанный узкий список»: остаются
+   аватар, отметка выбранного чата и индикаторы непрочитанного — всё, по чему
+   чат узнают и без подписи. Прячется то, чему нужна ширина: имена, превью,
+   время, действия строки, поиск.
+
+   Это тот же компонент ChatList с флагом compact, поэтому здесь именно
+   сокрытие, а не вторая вёрстка списка: правила отбора и порядок чатов
+   остаются ровно одни. */
+.roster.is-compact { align-items: stretch; overflow: hidden; }
+.roster.is-compact .roster-head,
+.roster.is-compact .roster-section,
+.roster.is-compact .row-top,
+.roster.is-compact .row-comment,
+.roster.is-compact .row-preview,
+.roster.is-compact .recent-chats { display: none; }
+/* .row-body не скрывается целиком, а выводится из потока: у строки «Ветки»
+   счётчик непрочитанного лежит именно внутри неё, и display:none убирал бы
+   индикатор, который в компактном списке обязан остаться. Absolute заодно
+   освобождает место — иначе пустой блок сдвигал бы аватар с центра. */
+.roster.is-compact .row-body {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none; min-width: 0;
+}
+.roster.is-compact .row-bottom { position: absolute; top: 1px; right: 8px; }
+.roster.is-compact .roster-list { padding: 6px 0; overflow-x: hidden; }
+.roster.is-compact .row {
+  justify-content: center; padding: 5px 0; gap: 0; border-radius: 0;
+}
+/* Выбранный чат в компактном виде отмечается полосой у края: заливка всей
+   строки шириной 68px читается как большой цветной блок, а не как отметка. */
+.roster.is-compact .row.is-active { background: none; }
+.roster.is-compact .row.is-active::before {
+  content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.roster.is-compact .row.is-active .avatar { box-shadow: 0 0 0 2px var(--accent); }
+/* Счётчик непрочитанного переезжает на угол аватара — своей строки под него в
+   компактном списке нет. Привязан к самой строке, а не к аватару: обёрток у
+   аватара несколько (.row-avatar-btn у чатов, .avatar-self у «Избранного»,
+   .threads-roster-icon у веток), и целиться в каждую значило бы потерять
+   счётчик там, где обёртка окажется другой. */
+.roster.is-compact .row-actions {
+  display: block; position: absolute; inset: 0; pointer-events: none;
+}
+.roster.is-compact .row-actions > .icon-btn-ghost { display: none; }
+.roster.is-compact .row-unread {
+  position: absolute; top: 1px; right: 8px; z-index: 2;
+  min-width: 17px; padding: 0 4px; border-radius: var(--radius-pill);
+  background: var(--unread-badge); color: #fff;
+  font-size: 10.5px; line-height: 17px; text-align: center;
+  box-shadow: 0 0 0 2px var(--sidebar);
+}
+.roster-expand-btn {
+  flex: none; margin: 6px auto 0; width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink-muted);
+}
+.roster-expand-btn:hover { color: var(--accent); border-color: var(--accent); }
 .roster-resizer {
   position: absolute; top: 0; right: -3px; width: 7px; height: 100%; z-index: 6;
   cursor: col-resize; touch-action: none; background: transparent;
@@ -773,10 +858,13 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .thread-state { flex: 1; display: grid; place-items: center; padding: 20px; color: var(--ink-muted); text-align: center; }
 .thread-state.is-error { color: var(--unread); }
 
-@media (max-width: 1050px) and (min-width: 761px) {
-  .chat-layout.is-thread-open { grid-template-columns: 92px var(--roster-w, 320px) 1fr; }
-  .thread-panel { position: absolute; inset: 0 0 0 auto; width: min(460px, calc(100% - 92px)); }
-}
+/* Раньше здесь при 761–1050px ветка превращалась в overlay поверх переписки.
+   Так делать нельзя: человек терял из виду тот самый чат, на сообщение в
+   котором отвечал, и получал две накрывающие друг друга ленты вместо двух
+   соседних. Теперь при нехватке места правая область просто ЗАКРЫВАЕТСЯ
+   (решает layoutMode.ts), а её содержимое запоминается и возвращается, когда
+   место появится. Overlay остался только в мобильном режиме — там это не
+   наложение, а отдельный экран навигации. */
 
 /* Разделитель дня — «плашка» поверх обоев, залипает при прокрутке */
 .date-sep {

@@ -19,6 +19,17 @@ export interface UiPrefs {
    * анимаций в ленте заметно греет процессор.
    */
   animatedEmoji: boolean;
+  /**
+   * Список чатов свёрнут в иконки по решению ЧЕЛОВЕКА.
+   *
+   * `null` — он не высказывался, и состоянием распоряжается адаптив (свернёт
+   * сам, когда полный список перестанет помещаться). Ровно поэтому здесь три
+   * значения, а не булево: «свёрнут сейчас» и «человек велел свернуть» —
+   * разные вещи, и путать их значит либо разворачивать список против воли
+   * человека при расширении окна, либо не сворачивать его тогда, когда места
+   * действительно нет.
+   */
+  rosterCollapsed: boolean | null;
 }
 
 export const ROSTER_MIN_WIDTH = 240;
@@ -28,6 +39,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   groupContacts: false,
   rosterWidth: 320,
   animatedEmoji: true,
+  rosterCollapsed: null,
 };
 
 const STORAGE_KEY = 'uiPrefs';
@@ -45,6 +57,9 @@ export function getUiPrefs(): UiPrefs {
       groupContacts: typeof parsed.groupContacts === 'boolean' ? parsed.groupContacts : DEFAULT_UI_PREFS.groupContacts,
       rosterWidth: typeof parsed.rosterWidth === 'number' ? clampWidth(parsed.rosterWidth) : DEFAULT_UI_PREFS.rosterWidth,
       animatedEmoji: typeof parsed.animatedEmoji === 'boolean' ? parsed.animatedEmoji : DEFAULT_UI_PREFS.animatedEmoji,
+      // Именно `=== 'boolean'`, а не `??`: отсутствие ключа и записанный null
+      // значат одно и то же — «человек не высказывался».
+      rosterCollapsed: typeof parsed.rosterCollapsed === 'boolean' ? parsed.rosterCollapsed : null,
     };
   } catch {
     return { ...DEFAULT_UI_PREFS };
