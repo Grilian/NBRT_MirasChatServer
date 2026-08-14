@@ -78,13 +78,11 @@
       "description": "MirasChat — корпоративный мессенджер: переписка, группы, задачи, календарь.",
       "maintainer": "MIRAS <cagrizzzca@gmail.com>",
       "desktop": {
-        "entry": {
-          "Name": "MirasChat",
-          "Comment": "Корпоративный мессенджер MIRAS",
-          "Categories": "Network;InstantMessaging;",
-          "Keywords": "chat;messenger;мессенджер;чат;",
-          "StartupWMClass": "MirasChat"
-        }
+        "Name": "MirasChat",
+        "Comment": "Корпоративный мессенджер MIRAS",
+        "Categories": "Network;InstantMessaging;",
+        "Keywords": "chat;messenger;мессенджер;чат;",
+        "StartupWMClass": "MirasChat"
       }
     },
     "deb": {
