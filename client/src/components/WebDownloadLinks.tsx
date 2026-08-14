@@ -6,6 +6,7 @@ const UPDATES_ROOT = '/miraschat/updates/';
 type DownloadLinks = {
   windows?: string;
   android?: string;
+  linux?: string;
 };
 
 function updateUrl(fileName: string) {
@@ -41,11 +42,25 @@ const WebDownloadLinks: React.FC = () => {
           if (!manifest.url) throw new Error('В android.json отсутствует url');
           return new URL(manifest.url, window.location.origin).toString();
         }),
-    ]).then(([windows, android]) => {
+      // Astra — Debian-совместимая, поэтому раздаём .deb. Свой манифест, а не
+      // общий с Windows: latest.yml принадлежит electron-updater, у него свой
+      // формат и своё назначение (автообновление), и дописывать в него чужую
+      // платформу значило бы ломать то, чем он на самом деле является.
+      fetch(updateUrl('linux.json'), { signal: controller.signal, cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) throw new Error(`linux.json: ${response.status}`);
+          return response.json();
+        })
+        .then((manifest: { url?: string }) => {
+          if (!manifest.url) throw new Error('В linux.json отсутствует url');
+          return new URL(manifest.url, window.location.origin).toString();
+        }),
+    ]).then(([windows, android, linux]) => {
       if (controller.signal.aborted) return;
       setLinks({
         windows: windows.status === 'fulfilled' ? windows.value : undefined,
         android: android.status === 'fulfilled' ? android.value : undefined,
+        linux: linux.status === 'fulfilled' ? linux.value : undefined,
       });
     });
 
@@ -73,6 +88,17 @@ const WebDownloadLinks: React.FC = () => {
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.1 7.2-1.5-2.6.8-.5L8 6.8a9.6 9.6 0 0 1 8 0l1.6-2.7.8.5-1.5 2.6A7.8 7.8 0 0 1 20 13.4H4a7.8 7.8 0 0 1 3.1-6.2ZM8.3 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm7.4 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM4 14.4h16v4.1a2 2 0 0 1-2 2h-1v1.1a1 1 0 0 1-2 0v-1.1H9v1.1a1 1 0 0 1-2 0v-1.1H6a2 2 0 0 1-2-2v-4.1Z" /></svg>
         <span>Android</span>
+      </a>
+      {/* Значок — коробка пакета, а не фирменный знак Astra: рисовать чужой
+          логотип по памяти нельзя, а .deb это ровно пакет и есть. */}
+      <a
+        className={links.linux ? '' : 'is-disabled'}
+        href={links.linux || undefined}
+        aria-disabled={!links.linux}
+        title="Скачать последнюю версию для Astra Linux (пакет .deb)"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.9 2.2a2 2 0 0 0-1.8 0L3.7 6 12 10.1 20.3 6l-7.4-3.8Z" /><path d="M21.4 7.6 12.8 11.9v9.7l7.5-3.8a2 2 0 0 0 1.1-1.8V7.6Z" /><path d="M2.6 7.6v8.4c0 .8.4 1.5 1.1 1.8l7.5 3.8v-9.7L2.6 7.6Z" /></svg>
+        <span>Astra</span>
       </a>
     </div>
   );

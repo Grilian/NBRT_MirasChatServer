@@ -439,20 +439,27 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .roster-account { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-height: 30px; }
 .roster-heading { flex: 1; min-width: 0; font: 600 18px/1.2 var(--font-display); color: var(--ink); }
 
+/* Только значки, без подписей.
+   Раньше подписи прятались медиазапросом по ширине ОКНА (max-width: 1180px),
+   но список чатов шириной 320px и не думает растягиваться вместе с окном:
+   с появлением третьей платформы ряд перестал помещаться на любом экране,
+   хоть на 1920 (замерено: нужно 321px, есть 295px). Значок с подсказкой —
+   единственный вариант, который переживёт и четвёртую платформу. */
 .web-download-links { display: flex; flex: none; align-items: center; gap: 3px; }
 .web-download-links a {
-  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
   border-radius: var(--radius-pill); color: var(--ink-muted); background: var(--paper-sunken);
-  text-decoration: none; font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  text-decoration: none; white-space: nowrap;
   transition: color var(--ease), background var(--ease);
 }
 .web-download-links a:hover { color: var(--accent); background: var(--row-hover); }
 .web-download-links a.is-disabled { opacity: .4; pointer-events: none; }
 .web-download-links svg { width: 13px; height: 13px; fill: currentColor; flex: none; }
-
-@media (max-width: 1180px) {
-  .web-download-links a { width: 26px; padding: 0; justify-content: center; }
-  .web-download-links span { display: none; }
+/* Подпись остаётся в разметке ради озвучивания экранными читалками. */
+.web-download-links span {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 
 .mark-all-read-btn {
