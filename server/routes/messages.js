@@ -98,6 +98,18 @@ router.post('/upload-image', verifyToken, (req, res) => {
       return res.status(400).json({ error: 'Файл не распознан как изображение (jpeg/png/webp/gif)' });
     }
 
+    // Недописанный файл — не повод отказать в отправке.
+    //
+    // На части устройств (ловили на Vivo V21e) «сделал скриншот и сразу
+    // поделился» отдаёт файл раньше, чем система дописала его на диск: до
+    // сервера доезжает обрезанный хвост, sharp по умолчанию считает это
+    // фатальной ошибкой, и отправка вставала намертво. То же изображение,
+    // открытое и пересохранённое в редакторе, уходило сразу — им и опознали
+    // причину. failOn: 'none' велит разобрать столько, сколько есть: в худшем
+    // случае у кадра будет смазана нижняя полоса, и это несравнимо лучше, чем
+    // «картинка не отправляется, и сделать с ней ничего нельзя».
+    const decode = (buffer) => sharp(buffer, { failOn: 'none' });
+
     try {
       // Прозрачность нужна клиенту, чтобы не подкладывать под наклейку плашку
       // и не обводить её рамкой. Метку кладём В ИМЯ ФАЙЛА (суффикс `_a`), а не
@@ -109,12 +121,21 @@ router.post('/upload-image', verifyToken, (req, res) => {
       // хоть один прозрачный пиксель. Скриншоты и любой PNG из canvas почти
       // всегда идут с альфа-каналом, будучи полностью непрозрачными, — по
       // hasAlpha рамку потеряли бы почти все картинки.
-      const { isOpaque } = await sharp(req.file.buffer).stats();
+      // Статистика читает КАЖДЫЙ пиксель, и на обрезанном файле спотыкается
+      // чаще самой перекодировки. Прозрачность — деталь оформления: не смогли
+      // выяснить, считаем картинку непрозрачной (как и все старые) и всё равно
+      // отправляем, вместо того чтобы ронять из-за неё всю загрузку.
+      let isOpaque = true;
+      try {
+        ({ isOpaque } = await decode(req.file.buffer).stats());
+      } catch {
+        isOpaque = true;
+      }
       const suffix = isOpaque ? '' : '_a';
       const filename = `msg_${req.userId}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${suffix}.webp`;
       const outputPath = path.join(CHAT_IMAGES_DIR, filename);
 
-      const image = sharp(req.file.buffer).rotate();
+      const image = decode(req.file.buffer).rotate();
       const resized = image.resize(CHAT_IMAGE_MAX_DIMENSION, CHAT_IMAGE_MAX_DIMENSION, {
         fit: 'inside',
         withoutEnlargement: true,
@@ -127,7 +148,11 @@ router.post('/upload-image', verifyToken, (req, res) => {
         file_height: info.height,
       });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      // Файл дошёл, но изображением не оказался вовсе — это отказ клиенту
+      // (400), а не поломка сервера: повторять такую отправку бессмысленно, и
+      // человек должен увидеть внятную причину, а не «ошибка 500».
+      console.error('[upload-image] не удалось обработать изображение:', e.message);
+      res.status(400).json({ error: 'Не удалось обработать изображение. Попробуйте отправить другой файл.' });
     }
   });
 });

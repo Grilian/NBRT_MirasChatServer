@@ -340,6 +340,19 @@ const MessageInput: React.FC<MessageInputProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
+  // «Ответить» само отдаёт фокус полю: человек выбрал сообщение именно затем,
+  // чтобы написать ответ, и лишний тап по полю тут — чистая работа впустую.
+  // На мобильном фокус поднимает и клавиатуру (обычный путь handleMobileFieldFocus),
+  // что здесь как раз и требуется.
+  const replyingId = replying?.id ?? null;
+  useEffect(() => {
+    if (replyingId === null || disabled) return undefined;
+    // Кадр задержки: панель ответа только появилась, и композер ещё меняет
+    // высоту — фокус до перестройки на Android теряется вместе с ней.
+    const frame = requestAnimationFrame(() => richRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [replyingId, disabled]);
+
   const clearField = () => {
     setText('');
     richRef.current?.clear();
@@ -566,6 +579,29 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    void submit();
+  };
+
+  // Отправка тапом по кнопке НЕ должна уводить фокус из поля.
+  //
+  // Кнопка была обычным type="submit", и на Android тап по ней переносил фокус
+  // на саму кнопку — contentEditable его терял, IME закрывалась, и каждое
+  // следующее сообщение подряд требовало нового тапа по полю. Ровно этим же
+  // приёмом (pointerdown + preventDefault) уже пользуется кнопка смайликов.
+  //
+  // Из-за preventDefault на touch браузер может не досылать click (см. правило
+  // про синтетический click в CLAUDE.md), поэтому отправку делаем прямо тут, а
+  // click оставляем ради клавиатурной доступности на ПК — с отметкой времени,
+  // чтобы одно нажатие не отправило сообщение дважды.
+  const pointerSubmitAtRef = useRef(0);
+  const handleSendPointerDown = (e: React.PointerEvent) => {
+    if (disabled || submitting) return;
+    e.preventDefault();
+    pointerSubmitAtRef.current = Date.now();
+    void submit();
+  };
+  const handleSendClick = () => {
+    if (Date.now() - pointerSubmitAtRef.current < 700) return;
     void submit();
   };
 
@@ -848,8 +884,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
       </div>
 
       <button
-        type="submit"
+        type="button"
         className="send-btn"
+        onPointerDown={handleSendPointerDown}
+        onClick={handleSendClick}
         disabled={disabled || submitting || (editing
           ? !text.trim()
           : (!text.trim() && staged.length === 0))}

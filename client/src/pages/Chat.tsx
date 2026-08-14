@@ -1400,6 +1400,12 @@ const Chat: React.FC = () => {
       if (!focused) {
         if (isNativeMobile) {
           showMobileNotification(message.id, `MirasChat — ${chatName}`, body, chatId);
+          // Свёрнутое приложение получает сокет-событие ещё некоторое время,
+          // пока Android не заморозил JS. Сервер в этот момент уже готовит
+          // пуш — сообщаем, что уведомление показано, и отложенный пуш
+          // снимается. Без этого на одно сообщение приходило две карточки:
+          // локальная и пуш (см. schedulePush в server/index.js).
+          socket.emit('message_notified', { messageId: message.id });
         } else if (prefs.system || forced) {
           showDesktopNotification({
             title: chatName,
@@ -1518,8 +1524,12 @@ const Chat: React.FC = () => {
         isGroup: !!group,
       });
       if (!live.windowFocused) {
-        if (isNativeMobile) showMobileNotification(message.id, `MirasChat — Ветка · ${chatName}`, body, message.chat_id, Number(message.root_id));
-        else if (live.prefs.system || forced) {
+        if (isNativeMobile) {
+          showMobileNotification(message.id, `MirasChat — Ветка · ${chatName}`, body, message.chat_id, Number(message.root_id));
+          // См. такой же вызов для обычного сообщения: снимаем отложенный пуш,
+          // раз уведомление уже показано своими силами.
+          socket.emit('message_notified', { messageId: message.id });
+        } else if (live.prefs.system || forced) {
           showDesktopNotification({
             title: `Ветка · ${chatName}`,
             body,
@@ -2486,6 +2496,15 @@ const Chat: React.FC = () => {
     }));
   const visibleMessages = [...messages, ...optimisticMessages];
 
+  // Отмена отправки. Сообщение до сих пор нигде, кроме этой очереди, не
+  // существует — на сервер оно не ушло, поэтому «удалять» нечего: убираем
+  // строку очереди и приложенный к ней файл. Единственный способ избавиться от
+  // застрявшей отправки (битый скриншот, пропавшая сеть) — раньше такое
+  // сообщение висело в ленте вечно.
+  const cancelOutgoing = useCallback((clientMessageId: string) => {
+    removeOutgoing(clientMessageId);
+  }, [removeOutgoing]);
+
   const retryOutgoing = useCallback((clientMessageId: string) => {
     setOutgoingQueue((previous) => previous.map((item) => (
       item.clientMessageId === clientMessageId
@@ -2941,6 +2960,7 @@ const Chat: React.FC = () => {
             onAddPollOption={handleAddPollOption}
             onStopPoll={handleStopPoll}
             onRetryOutgoing={retryOutgoing}
+            onCancelOutgoing={cancelOutgoing}
             onOpenThread={(rootId, autoFocus) => {
               closeKeyboard();
               setActiveThread({ rootId, autoFocus });

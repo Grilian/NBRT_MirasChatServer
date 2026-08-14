@@ -61,3 +61,23 @@ test('only an administrator can request a forced notification', () => {
       && error.code === 'force_notification_forbidden'
   );
 });
+
+// Общий чат — такой же chat_id, как любой другой, и правило глушения обязано
+// работать для него ровно так же. Проверяем отдельно: переключатель в карточке
+// общего чата есть, но его сквозной путь (панель → REST → эта проверка перед
+// отправкой пуша) до сих пор ничем не был закреплён.
+test('muting the general chat suppresses its notifications', () => {
+  const recipientId = createUser('notification_general_recipient');
+
+  assert.equal(shouldNotifyUser(recipientId, 'general', false), true);
+
+  setChatMuted(recipientId, 'general', true);
+  assert.equal(shouldNotifyUser(recipientId, 'general', false), false);
+  // Глушение общего чата не должно задевать личную переписку.
+  assert.equal(shouldNotifyUser(recipientId, 'chat_1_2', false), true);
+  // Принудительное уведомление админа сильнее глушения — здесь тоже.
+  assert.equal(shouldNotifyUser(recipientId, 'general', true), true);
+
+  setChatMuted(recipientId, 'general', false);
+  assert.equal(shouldNotifyUser(recipientId, 'general', false), true);
+});

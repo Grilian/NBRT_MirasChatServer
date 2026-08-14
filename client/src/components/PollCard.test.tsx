@@ -89,3 +89,42 @@ test('keeps the voters window open during mousedown and closes it on backdrop cl
   fireEvent.click(layer);
   expect(screen.queryByRole('dialog', { name: 'Голоса в опросе' })).not.toBeInTheDocument();
 });
+
+test('открытый список голосов не пропускает жесты к сообщению под собой', () => {
+  const poll = pollFixture({
+    total_voters: 1,
+    options: [
+      {
+        id: 1, text: 'Москва', position: 0, created_by: 1, vote_count: 1, percentage: 100, is_winner: true,
+        voters: [{ id: 2, username: 'bob', display_name: 'Борис', avatar_path: null, voted_at: Date.now() }],
+      },
+      { id: 2, text: 'Казань', position: 1, created_by: 1, vote_count: 0, percentage: 0, is_winner: false, voters: [] },
+    ],
+    closed_at: Date.now(),
+  });
+
+  // Карточка опроса живёт ВНУТРИ пузыря сообщения, поэтому события из неё
+  // всплывают прямо в жесты строки .msg: тап по списку голосов открывал
+  // контекстное меню сообщения под панелью, а удержание — режим выделения.
+  const onTouchStart = jest.fn();
+  const onContextMenu = jest.fn();
+  const onPointerDown = jest.fn();
+
+  const { container } = render(
+    <div onTouchStart={onTouchStart} onContextMenu={onContextMenu} onPointerDown={onPointerDown}>
+      <PollCard poll={poll} onVote={() => {}} onAddOption={() => {}} />
+    </div>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /Посмотреть голоса/ }));
+  const layer = container.querySelector('.poll-voters-layer') as HTMLElement;
+  expect(layer).toBeInTheDocument();
+
+  fireEvent.touchStart(layer, { touches: [{ clientX: 10, clientY: 10 }] });
+  fireEvent.pointerDown(layer);
+  fireEvent.contextMenu(layer);
+
+  expect(onTouchStart).not.toHaveBeenCalled();
+  expect(onPointerDown).not.toHaveBeenCalled();
+  expect(onContextMenu).not.toHaveBeenCalled();
+});

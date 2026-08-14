@@ -85,6 +85,8 @@ interface ChatWindowProps {
   onAddPollOption?: (pollId: number, text: string) => void;
   onStopPoll?: (pollId: number) => void;
   onRetryOutgoing?: (clientMessageId: string) => void;
+  /** Убрать сообщение из очереди отправки — оно ещё не ушло на сервер. */
+  onCancelOutgoing?: (clientMessageId: string) => void;
   onOpenThread?: (messageId: number, focusComposer: boolean) => void;
 }
 
@@ -210,7 +212,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, onToggleReaction, onRemoveReaction,
-  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onOpenThread,
+  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
+  onOpenThread,
 }) => {
   // В группе можно создать новую ветку прямо из ленты. В личной переписке
   // пустое предложение «Ответить» не показываем, но существующая ветка обязана
@@ -412,6 +415,43 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       window.removeEventListener('miras-composer-resize', onComposerResize);
       if (composerPinFrameRef.current !== null) cancelAnimationFrame(composerPinFrameRef.current);
     };
+  }, [scrollContainerToBottom]);
+
+  // Высоту ленты меняет не только composer, и знать обо всех источниках
+  // заранее нельзя: панель ответа над полем ввода, превью прикреплённой
+  // картинки, панель правки, смена ориентации. Каждый из них отъедал высоту
+  // уже ПОСЛЕ того, как лента доскроллилась до низа, и последнее сообщение
+  // уезжало под появившуюся панель. Событие 'miras-composer-resize' покрывает
+  // только мобильную поверхность ввода и о них не знает.
+  //
+  // Наблюдаем за самим контейнером: любое изменение его высоты — повод
+  // вернуть дно на место. Только если человек и был у дна: чтение истории
+  // выше рвать нельзя (тот же принцип, что у composerWasAtBottomRef).
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return undefined;
+
+    // Первое срабатывание приходит сразу при подписке и несёт стартовый
+    // размер, а не изменение — прокручивать по нему нечего.
+    let known = container.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const height = container.clientHeight;
+      if (height === known) return;
+      known = height;
+      if (!shouldScrollRef.current) return;
+      scrollContainerToBottom();
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [chatId, scrollContainerToBottom]);
+
+  // Картинка без сохранённых размеров (собственная, ещё не отправленная —
+  // у неё нет file_width/file_height, значит и aspectRatio) занимает место
+  // только после загрузки, то есть уже после прокрутки к низу. ResizeObserver
+  // выше этого не ловит: высота КОНТЕЙНЕРА не меняется, растёт содержимое.
+  const stickAfterMediaLoad = useCallback(() => {
+    if (!shouldScrollRef.current) return;
+    scrollContainerToBottom();
   }, [scrollContainerToBottom]);
 
   // Подгрузка истории добавляет сообщения СВЕРХУ, из-за чего содержимое
@@ -642,7 +682,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const DRAG_THRESHOLD_PX = 12;
 
-  const handleTouchStart = (e: React.TouchEvent, msg: Message) => {
+  const handleTouchStart = (e: React.TouchEvent, msg: Message, noSelection = false) => {
     const touch = e.touches[0];
     clearLongPress();
 
@@ -664,6 +704,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       menuWasOpen: !!menuFor,
       baseSelection: new Set(),
     };
+
+    // Ещё не отправленное сообщение отметить нельзя (id временный, удалять и
+    // пересылать нечего) — удержание на нём не должно заводить выделение
+    // вовсе. Тап при этом остаётся: он открывает своё короткое меню.
+    if (noSelection) return;
 
     // Таймер заводим и в режиме выделения: удержание там начинает новую
     // протяжку. Обычное же движение пальцем в режиме выделения остаётся
@@ -743,7 +788,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     // В режиме выделения тап отмечает/снимает, вне его — открывает меню
     // (кроме случая, когда этим же тапом меню только что закрыли).
-    if (selectMode) toggleSelected(msg.id);
+    // Неотправленное отметить нечем — там тап всегда открывает своё меню.
+    const pending = msg.status === 'sending' || msg.status === 'failed';
+    if (selectMode && !pending) toggleSelected(msg.id);
     else if (!gesture.menuWasOpen) openMenuAt(msg, touch.clientX, touch.clientY);
   };
 
@@ -772,6 +819,42 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         {paths.map((d, i) => <path key={i} d={d} />)}
       </svg>
     );
+
+    // Сообщение ещё не ушло на сервер: id у него временный, ссылаться на него
+    // нечем — ни ответить, ни переслать, ни удалить обычным путём. Раньше меню
+    // на таком сообщении не открывалось вовсе, и застрявшую отправку (битый
+    // скриншот, пропавшая сеть) нельзя было ни убрать, ни даже скопировать её
+    // текст — приходилось набирать заново. Отсюда свой короткий список.
+    if (msg.status === 'sending' || msg.status === 'failed') {
+      const copyPending: MenuItem | null = msg.text ? {
+        kind: 'action', key: 'copy', label: 'Копировать',
+        icon: icon(
+          'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+          'M9 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z',
+        ),
+        onClick: () => copyMessageText(msg),
+      } : null;
+
+      const retryPending: MenuItem | null = msg.status === 'failed' && msg.client_message_id && onRetryOutgoing ? {
+        kind: 'action', key: 'retry', label: 'Повторить отправку',
+        icon: icon('M3 12a9 9 0 1 0 3-6.7', 'M3 4v5h5'),
+        onClick: () => { setMenuFor(null); onRetryOutgoing(msg.client_message_id!); },
+      } : null;
+
+      const cancelPending: MenuItem | null = msg.client_message_id && onCancelOutgoing ? {
+        kind: 'action', key: 'cancel-send', label: 'Отменить отправку', danger: true,
+        icon: icon('M18 6 6 18', 'M6 6l12 12'),
+        onClick: () => { setMenuFor(null); onCancelOutgoing(msg.client_message_id!); },
+      } : null;
+
+      const pendingInfo: MenuItem = {
+        kind: 'info', key: 'pending-state',
+        label: msg.status === 'failed' ? 'Не отправлено' : 'Отправляется…',
+      };
+
+      return [pendingInfo, copyPending, retryPending, cancelPending]
+        .filter((item): item is MenuItem => item !== null);
+    }
 
     const reply: MenuItem | null = onStartReply ? {
       kind: 'action', key: 'reply', label: 'Ответить',
@@ -989,6 +1072,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           // сквозь картинку своим акцентным цветом — получалась не чистая
           // прозрачность, а цветная заливка вместо нейтральной.
           const bareTransparentImage = !!msg.file_path && !msg.text && /_a\.webp$/.test(msg.file_path);
+          const showThreadLink = (isGroupChat || (msg.thread?.reply_count || 0) > 0)
+            && !!onOpenThread && !pendingDelivery;
+          // Картинка без подписи: время уходит плашкой на сам кадр, а пузырь
+          // остаётся без своей подложки — под снимком иначе висела полоска
+          // ради одной строчки времени (в Telegram её нет).
+          const imageOnly = !!imageUrl && !msg.text && !msg.poll;
+          // «Голый» кадр — над ним в пузыре нет вообще ничего: тогда пузырь
+          // можно убрать целиком и оставить одну картинку. Со строкой автора,
+          // пересылкой или цитатой поля пузыря нужны, там снимается только
+          // полоска снизу.
+          // Размеры обязательны: у пузыря без полей остаётся ОДНА картинка, а
+          // она тянется по ширине пузыря — без известной ширины кадра ширину
+          // не от чего считать, и пузырь схлопывается в ноль (проверено).
+          // Своя, ещё не отправленная картинка размеров не имеет — она рисуется
+          // прежним способом, с полями.
+          const bareImage = imageOnly
+            && !!msg.file_width && !!msg.file_height
+            && !(!mine && showAuthors && startsGroup)
+            && !msg.forwarded_from_name
+            && !msg.reply_to_id;
           const className = [
             'msg',
             mine ? 'mine' : 'theirs',
@@ -1009,18 +1112,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 data-msg-id={msg.id}
                 className={className}
                 onClick={selectMode && selectable ? () => toggleSelected(msg.id) : undefined}
-                onContextMenu={!selectMode && !pendingDelivery ? (e) => handleContextMenu(e, msg) : undefined}
+                // Меню открывается и на ещё не отправленном сообщении — там свой
+                // короткий список (копировать/повторить/отменить отправку), см.
+                // buildMenuItems. Раньше жесты на нём были отключены целиком, и
+                // застрявшую отправку нельзя было ни убрать, ни скопировать.
+                onContextMenu={!selectMode ? (e) => handleContextMenu(e, msg) : undefined}
                 // Жест продолжается и после входа в режим выделения — иначе
                 // палец, доехав до второго сообщения, терял бы обработчик.
-                onTouchStart={!pendingDelivery ? (e) => handleTouchStart(e, msg) : undefined}
-                onTouchEnd={!pendingDelivery ? (e) => handleTouchEnd(e, msg) : undefined}
+                onTouchStart={(e) => handleTouchStart(e, msg, pendingDelivery)}
+                onTouchEnd={(e) => handleTouchEnd(e, msg)}
                 onTouchCancel={handleTouchCancel}
                 onTouchMove={handleTouchMove}
               >
                 {selectMode && selectable && (
                   <input type="checkbox" className="msg-select-check" checked={isSelected} readOnly />
                 )}
-                <div className={'bubble' + (bareTransparentImage ? ' bubble-alpha-only' : '') + (msg.poll ? ' bubble-poll' : '')}>
+                <div
+                  className={'bubble' + (bareTransparentImage ? ' bubble-alpha-only' : '') + (msg.poll ? ' bubble-poll' : '') + (imageOnly ? ' bubble-has-image-meta' : '') + (bareImage ? ' bubble-bare-image' : '')}
+                >
                     {/* Имя автора — только в общем чате и только над первым
                         сообщением блока: в переписке один на один оно
                         повторяло бы имя из шапки на каждой реплике. */}
@@ -1066,12 +1175,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         // кадр на весь пузырь: ширину картинке задаёт пузырь
                         // (см. .bubble-image), и снимок в 200px иначе
                         // размазало бы втрое.
-                        style={msg.file_width && msg.file_height ? {
+                        // В пузыре без полей картинка осталась ЕДИНСТВЕННЫМ его
+                        // содержимым, и процентная ширина ей больше не годится:
+                        // проценты считались бы от пузыря, который сам ждёт
+                        // ширины от неё, — оба схлопывались в ноль (проверено).
+                        // Там опорой служит натуральная ширина, а «не шире
+                        // доступного» выражает max-width; в остальных случаях
+                        // наоборот, ширину даёт пузырь.
+                        style={msg.file_width && msg.file_height ? (bareImage ? {
+                          aspectRatio: `${msg.file_width} / ${msg.file_height}`,
+                          width: `${msg.file_width}px`,
+                          maxWidth: '100%',
+                        } : {
                           aspectRatio: `${msg.file_width} / ${msg.file_height}`,
                           // Строкой с единицами, а не числом: числовое значение
                           // спотыкается о проверку стилей в React.
                           maxWidth: `${msg.file_width}px`,
-                        } : undefined}
+                        }) : undefined}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (selectMode) { toggleSelected(msg.id); return; }
@@ -1089,7 +1209,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                             лента не дёргается. Без этого на слабой связи вся
                             история тянула изображения разом, конкурируя за
                             канал с текстом, который человеку нужен раньше. */}
-                        <img src={imageUrl} alt="" loading="lazy" decoding="async" />
+                        <img src={imageUrl} alt="" loading="lazy" decoding="async" onLoad={stickAfterMediaLoad} />
                         {msg.status === 'failed' && (
                           <span className="image-send-retry" aria-hidden="true">!</span>
                         )}
@@ -1108,7 +1228,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     )}
                     {/* Время и галочки — внутри пузыря, как в Telegram:
                         обтекаются текстом и не занимают отдельную строку. */}
-                    <span className="bubble-meta">
+                    <span className={'bubble-meta' + (imageOnly ? ' is-on-image' : '')}>
                       {msg.edited_at && <span className="edited-label">изм.</span>}
                       {/* «Просмотрено» — только в каналах-объявлениях, где
                           сервер присылает read_count (см. routes/messages.js).
@@ -1132,14 +1252,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     </span>
                 </div>
 
-                {/* Реакции идут сразу за пузырём и налезают на него снизу —
-                    они принадлежат сообщению, а не ветке. Кнопка «Ответить»
-                    поэтому ниже них: пока она стояла между, реакции отрывались
-                    от сообщения на всю её высоту и читались как отдельная
-                    строка. Каждая с аватаром поставившего (в спеке именно так,
-                    не просто счётчик). Клик открывает детальный список,
-                    крестик снимает — он появляется только там, где снимать
-                    вправе (своя реакция или своё сообщение). */}
+                {/* Реакции и «Ответить» — ОДНА строка под пузырём, а не две.
+                    Обе относятся к одному сообщению, и разложенные по разным
+                    строкам они и занимали двойную высоту, и отрывали реакции от
+                    пузыря. Строка налезает на пузырь снизу; z-index обязателен,
+                    иначе фон пузыря съедал бы верхнюю кромку плашек.
+                    Реакция — с аватаром поставившего (в спеке именно так, не
+                    просто счётчик); клик открывает детальный список. */}
+                {(!!msg.reactions?.length || showThreadLink) && (
+                <div className="msg-underrow">
                 {!!msg.reactions?.length && (
                   <div className="msg-reactions">
                     {groupReactions(msg.reactions).map(({ emoji, list }) => {
@@ -1187,7 +1308,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   </div>
                 )}
 
-                {(isGroupChat || (msg.thread?.reply_count || 0) > 0) && onOpenThread && !pendingDelivery && (
+                {showThreadLink && onOpenThread && (
                   <button
                     type="button"
                     className={'thread-link' + ((msg.thread?.unread_count || 0) > 0 ? ' has-unread' : '')}
@@ -1223,6 +1344,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     </svg>
                   </button>
                 )}
+                </div>
+                )}
               </div>
             </React.Fragment>
           );
@@ -1243,6 +1366,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         const menuMsg = messages.find(m => m.id === menuFor.id);
         if (!menuMsg) return null;
         const menuMine = menuMsg.sender_id === currentUserId;
+        // Реакцию на неотправленное сообщение поставить не на что: на сервере
+        // его ещё нет, а id у него временный.
+        const menuPending = menuMsg.status === 'sending' || menuMsg.status === 'failed';
 
         return (
           // Ряд реакций — отдельная плашка НАД карточкой меню, а не первая
@@ -1255,7 +1381,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             className="msg-menu-layer"
             style={{ left: menuFor.x, top: menuFor.y, maxHeight: menuFor.maxHeight }}
           >
-            {!!reactionEmoji?.length && onToggleReaction && (
+            {!!reactionEmoji?.length && onToggleReaction && !menuPending && (
               <div className={'msg-menu-reactions' + (reactionsExpanded ? ' is-expanded' : '')}>
                 {(reactionsExpanded ? reactionEmoji : reactionEmoji.slice(0, REACTIONS_IN_ROW)).map((emoji) => {
                   const isCurrent = menuMsg.reactions?.some(

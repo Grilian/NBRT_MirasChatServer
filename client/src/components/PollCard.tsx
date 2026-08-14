@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Avatar from './Avatar';
 import { Poll } from '../types/poll';
+import { registerBackInterceptor } from '../utils/backInterceptors';
 
 interface PollCardProps {
   poll: Poll;
@@ -27,6 +28,13 @@ const PollCard: React.FC<PollCardProps> = ({ poll, onVote, onAddOption, selectio
   const [, setDeadlineTick] = useState(0);
 
   useEffect(() => setSelected(poll.user_option_ids || []), [poll.user_option_ids]);
+
+  // Аппаратный Back закрывает список голосов, а не уводит с экрана из-под него
+  // (общее правило для всех оверлеев, см. utils/backInterceptors).
+  useEffect(() => {
+    if (!votersOpen) return undefined;
+    return registerBackInterceptor(() => setVotersOpen(false));
+  }, [votersOpen]);
 
   useEffect(() => {
     if (!submittedOption) return;
@@ -158,8 +166,23 @@ const PollCard: React.FC<PollCardProps> = ({ poll, onVote, onAddOption, selectio
         )
       )}
 
+      {/* Список голосов лежит ВНУТРИ сообщения (PollCard рисуется в пузыре), и
+          хотя сам он position: fixed поверх экрана, его события всплывают по
+          дереву прямо в жесты строки .msg — тап по списку открывал контекстное
+          меню сообщения ПОД ним, а удержание входило в режим выделения. Поэтому
+          гасим здесь весь ввод целиком, а не только клик: всплытие идёт по
+          React-дереву, и вынос в портал сам по себе от него не спасает. */}
       {votersOpen && (
-        <div className="poll-voters-layer" onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) setVotersOpen(false); }}>
+        <div
+          className="poll-voters-layer"
+          onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) setVotersOpen(false); }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          onTouchMove={(event) => event.stopPropagation()}
+          onTouchEnd={(event) => event.stopPropagation()}
+          onContextMenu={(event) => { event.stopPropagation(); event.preventDefault(); }}
+        >
           <div className="poll-voters-sheet" role="dialog" aria-modal="true" aria-label="Голоса в опросе">
             <div className="poll-voters-head">
               <div><strong>{poll.question}</strong><span>{poll.total_voters} голосов</span></div>

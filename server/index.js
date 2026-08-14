@@ -295,6 +295,52 @@ function canReceiveInApp(userId) {
   return false;
 }
 
+// ДВА уведомления на одно сообщение — отсюда.
+//
+// Android сообщает о сворачивании сразу (app_state), но JS в свёрнутом WebView
+// замирает НЕ сразу: секунды, а иногда и минуты приложение продолжает получать
+// сокет-события и рисовать локальные уведомления само. Сервер в этот момент уже
+// считал клиента неспособным показать уведомление и слал пуш — в шторке
+// оказывались обе карточки (у них разная природа: локальная адресуется по id
+// сообщения, пуш — по tag чата, и Android не схлопывает их в одну).
+//
+// Наоборот тоже нельзя: дождаться, пока сокет отвалится по pingTimeout, значит
+// потерять уведомление у тех, кого система заморозила молча.
+//
+// Поэтому свёрнутому, но ещё живому клиенту пуш ОТКЛАДЫВАЕТСЯ: успел показать
+// сам — присылает 'message_notified', и отложенный пуш снимается; замер —
+// пуш уходит с небольшим опозданием. Тем, у кого сокета нет вовсе, шлём сразу:
+// подтверждать там некому, и ждать нечего.
+const PUSH_GRACE_MS = 3000;
+const pendingPushes = new Map();
+
+const pushKey = (userId, messageId) => `${userId}:${messageId}`;
+
+function schedulePush(userId, payload, { defer }) {
+  if (!defer) {
+    notifyNewMessage(userId, payload);
+    return;
+  }
+  const key = pushKey(userId, payload.messageId);
+  if (pendingPushes.has(key)) return;
+  const timer = setTimeout(() => {
+    pendingPushes.delete(key);
+    notifyNewMessage(userId, payload);
+  }, PUSH_GRACE_MS);
+  // Отложенный пуш не должен держать процесс живым при остановке сервера.
+  if (typeof timer.unref === 'function') timer.unref();
+  pendingPushes.set(key, timer);
+}
+
+/** Клиент показал уведомление сам — дублировать его пушем больше не нужно. */
+function cancelPendingPush(userId, messageId) {
+  const key = pushKey(userId, messageId);
+  const timer = pendingPushes.get(key);
+  if (!timer) return;
+  clearTimeout(timer);
+  pendingPushes.delete(key);
+}
+
 // Пока человека не было в сети, входящие сообщения оставались в статусе 'sent'
 // (доставлять было некому). Раньше в 'delivered' их переводил только клиент —
 // событием 'message_delivered' из обработчика показа веб-уведомления, то есть
@@ -626,13 +672,15 @@ io.on('connection', (socket) => {
       for (const userId of offlineRecipients.filter(
         (id) => shouldNotifyUser(id, data.chatId, forceNotification)
       )) {
-        notifyNewMessage(userId, {
+        schedulePush(userId, {
           chatId: data.chatId,
           messageId: result.lastInsertRowid,
           senderName,
           chatLabel,
           forceNotification,
-        });
+        // Сокет ещё жив — значит клиент может успеть показать уведомление сам
+        // (см. schedulePush): ждём его подтверждения, прежде чем слать пуш.
+        }, { defer: isUserOnline(userId) });
       }
 
       if (recipientOnline) {
@@ -818,7 +866,7 @@ io.on('connection', (socket) => {
       for (const userId of subscribedIds
         .filter((id) => !canReceiveInApp(id))
         .filter((id) => shouldNotifyUser(id, root.chat_id, forceNotification))) {
-        notifyNewMessage(userId, {
+        schedulePush(userId, {
           chatId: root.chat_id,
           messageId: message.id,
           senderName,
@@ -826,7 +874,7 @@ io.on('connection', (socket) => {
           forceNotification,
           requiredFeature: 'threads',
           threadRootId: Number(root.id),
-        });
+        }, { defer: isUserOnline(userId) });
       }
 
       if (subscribedIds.some((userId) => isUserOnline(userId))) {
@@ -882,6 +930,14 @@ io.on('connection', (socket) => {
     const active = typeof data === 'boolean' ? data : !!(data && data.active);
     if (active) backgroundedSockets.delete(socket.id);
     else backgroundedSockets.add(socket.id);
+  });
+
+  // Свёрнутый клиент успел показать уведомление сам — снимаем отложенный пуш,
+  // иначе в шторке окажутся две карточки об одном сообщении (см. schedulePush).
+  socket.on('message_notified', (data) => {
+    const messageId = Number(data && data.messageId);
+    if (!socket.userId || !Number.isInteger(messageId)) return;
+    cancelPendingPush(socket.userId, messageId);
   });
 
   socket.on('typing', (data) => {
