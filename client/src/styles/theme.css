@@ -1104,6 +1104,30 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    выступает за скруглённый угол пузыря. */
 .msg.ends-group.theirs .bubble-bare-image .bubble-image { border-bottom-left-radius: 3px; }
 .msg.ends-group.mine .bubble-bare-image .bubble-image { border-bottom-right-radius: 3px; }
+
+/* ---- Стикер в ленте ----
+   Стикер — элемент переписки, а не графическое вложение: у него нет ни
+   просмотрщика, ни увеличения, поэтому и cursor: zoom-in, который стоит у
+   .bubble-image, здесь неуместен — курсор обычный, как над текстом.
+   Размер фиксированный: стикер не тянется по ширине пузыря (иначе в широком
+   окне он раздувался бы до размеров фотографии) и не зависит от размеров
+   файла — все стикеры в ленте одного размера, как в Telegram. */
+.bubble-sticker {
+  display: block; width: 144px; height: 144px; object-fit: contain;
+  /* Перетаскивание отключено: стикер не файл, «сохранить как» ему ни к чему. */
+  -webkit-user-drag: none; user-select: none;
+}
+/* Стикер удалили из пака — вместо картинки остаётся его эмодзи. Тот же размер,
+   чтобы лента не дёргалась, если каталог подъехал позже сообщения. */
+.bubble-sticker-fallback {
+  display: flex; align-items: center; justify-content: center;
+  width: 144px; height: 144px; font-size: 72px; line-height: 1;
+}
+@media (max-width: 760px) {
+  .bubble-sticker, .bubble-sticker-fallback { width: 120px; height: 120px; }
+  .bubble-sticker-fallback { font-size: 60px; }
+}
+
 .bubble-time { font-variant-numeric: tabular-nums; }
 .edited-label { font-style: italic; }
 .bubble-seen { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
@@ -1323,6 +1347,67 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-emoji-tile img { width: 32px; height: 32px; object-fit: contain; pointer-events: none; }
 .sa-emoji-tile-char { font-size: 26px; line-height: 32px; }
 .sa-emoji-tile-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Стикерпаки в панели администратора ----
+   Три экрана вместо аккордеона смайликов: у набора есть обложка, а у каждого
+   стикера — обязательный эмодзи, и в раскрывающуюся секцию списка это не
+   помещается, не превращая её в кашу. */
+.sa-sticker-packs { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.sa-sticker-pack-card {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper-sunken);
+}
+.sa-sticker-pack-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  border: none; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left;
+}
+.sa-sticker-pack-cover {
+  flex: none; width: 44px; height: 44px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  background: var(--paper); border: 1px solid var(--line);
+}
+.sa-sticker-pack-cover.is-large { width: 76px; height: 76px; }
+.sa-sticker-pack-cover img { width: 100%; height: 100%; object-fit: contain; }
+.sa-sticker-pack-cover-empty { font-size: 20px; opacity: .5; }
+.sa-sticker-pack-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sa-sticker-pack-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-sticker-pack-actions { flex: none; display: flex; align-items: center; gap: 8px; }
+
+.sa-sticker-head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.sa-sticker-head h2 { flex: 1; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sa-sticker-pack-summary { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.sa-sticker-pack-summary-body { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+
+/* Плитка крупнее эмодзи-плитки: стикер — самостоятельная картинка, и по
+   миниатюре 32px его не узнать. */
+.sa-sticker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px; margin: 12px 0;
+}
+.sa-sticker-tile {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 6px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--paper-sunken);
+  /* Палец не должен таскать плитку при обычной прокрутке: перетаскивание
+     начинается только после удержания (см. useDragReorder). */
+  touch-action: pan-y;
+}
+.sa-sticker-tile.is-dragging { opacity: .5; border-style: dashed; cursor: grabbing; }
+.sa-sticker-tile img { width: 72px; height: 72px; object-fit: contain; pointer-events: none; }
+.sa-sticker-tile-emoji { font-size: 18px; line-height: 1; }
+.sa-sticker-tile-tools { display: flex; align-items: center; gap: 4px; width: 100%; }
+.sa-sticker-emoji {
+  flex: 1; min-width: 0; width: 100%; text-align: center; padding: 3px 4px; font-size: 15px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper); color: var(--ink);
+}
+.sa-sticker-tile-action {
+  flex: none; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--paper); color: var(--ink-muted); font-size: 14px; line-height: 1; padding: 0;
+}
+.sa-sticker-tile-action:hover { border-color: var(--accent); color: var(--accent); }
+.sa-sticker-tile-action.is-danger:hover { border-color: var(--unread); color: var(--unread); }
 
 /* Карточка смайлика */
 .sa-emoji-modal { max-width: 460px; width: 100%; }
@@ -1767,6 +1852,40 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   border-radius: var(--radius-lg); box-shadow: var(--shadow-md, 0 8px 28px rgba(16, 35, 47, .18));
   display: flex; flex-direction: column; overflow: hidden;
 }
+/* ---- Общая панель «Эмодзи / Стикеры / GIF» ----
+   Второй уровень вкладок НАД вкладками паков: тип содержимого выбирается
+   здесь, а конкретный пак — ниже, внутри вкладки. Контейнер тот же
+   (.emoji-picker), поэтому мобильная панель и позиционирование поверх поля
+   ввода достаются даром, без второй копии правил. */
+.content-picker-tabs {
+  display: flex; flex: none; gap: 4px; padding: 6px 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.content-picker-tab {
+  flex: 1; border: none; background: none; cursor: pointer; font: inherit;
+  padding: 6px 4px 7px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--ink-muted); font-size: 12.5px; font-weight: 600;
+}
+.content-picker-tab:hover { background: var(--row-hover); color: var(--ink); }
+.content-picker-tab.is-active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+/* min-height: 0 обязателен — без него содержимое с собственной прокруткой
+   распирает флекс-контейнер вместо того, чтобы прокручиваться внутри себя. */
+.content-picker-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+/* Сетка стикеров крупнее эмодзи: стикер — самостоятельная картинка, а не
+   значок в строке текста, и по миниатюре 38px его не узнать. */
+.sticker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 6px; padding: 8px; max-height: 260px; overflow-y: auto;
+}
+.sticker-cell {
+  border: none; background: none; cursor: pointer; padding: 4px;
+  border-radius: var(--radius-sm); aspect-ratio: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.sticker-cell:hover { background: var(--row-hover); }
+.sticker-cell img { width: 100%; height: 100%; object-fit: contain; }
+
 .emoji-tabs { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
 /* Вкладка пака — только значок: с названиями шапка расплывалась по ширине, а
    на телефоне вкладки в неё не помещались. Название живёт в подсказке. */

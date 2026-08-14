@@ -1029,6 +1029,53 @@ for (const account of legacyAccount) {
   );
 }
 
+// Стикеры — самостоятельный тип сообщения, а не подстановка внутри текста
+// (как кастомные смайлики): их не печатают кодом, значит не нужны ни
+// глобально уникальное имя, ни разбор шорткодов. Структура паков/элементов
+// та же, что у emoji_packs/emoji_items, просто без этой части.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sticker_packs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    cover_path TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sticker_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    animated_path TEXT,
+    emoji TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    retired INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sticker_items_pack ON sticker_items(pack_id);
+`);
+
+// sticker_id — ссылка на элемент пака (резолвится через живой каталог, как
+// :code: у смайликов), простой INTEGER без FK-объявления — так же, как
+// reply_to_id/thread_root_id: внешние ключи в этой базе нигде не проверяются
+// движком (PRAGMA foreign_keys не включена), а удаление стикера в админке НЕ
+// обязано трогать строку сообщения. sticker_fallback — копия emoji элемента
+// НА МОМЕНТ ОТПРАВКИ: в отличие от смайлика, стикер не может деградировать
+// до текста при удалении картинки, поэтому нужен готовый глиф про запас.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN sticker_id INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN sticker_fallback TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {
   const initialUsername = process.env.SUPERADMIN_USERNAME || 'superadmin';

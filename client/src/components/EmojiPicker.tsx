@@ -24,6 +24,13 @@ interface EmojiPickerProps {
   /** На телефоне панель является нижней частью composer, а не popup поверх чата. */
   mobilePanel?: boolean;
   mobileHeight?: number;
+  /**
+   * Внутри общего пикера «Эмодзи / Стикеры / GIF» корневой контейнер, закрытие
+   * по клику мимо и высоту мобильной панели держит родитель (ContentPicker) —
+   * здесь остаётся только само содержимое вкладки. Иначе получилось бы два
+   * вложенных контейнера с двумя независимыми обработчиками закрытия.
+   */
+  embedded?: boolean;
 }
 
 // Кэш только чтобы не мигать пустой панелью на каждое открытие (компонент
@@ -44,7 +51,9 @@ let cachedPacks: EmojiPack[] | null = null;
  */
 export const invalidateEmojiPackCache = () => { cachedPacks = null; };
 
-const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose, mobilePanel = false, mobileHeight }) => {
+const EmojiPicker: React.FC<EmojiPickerProps> = ({
+  onPick, onClose, mobilePanel = false, mobileHeight, embedded = false,
+}) => {
   const [packs, setPacks] = useState<EmojiPack[]>(cachedPacks || []);
   const [activePack, setActivePack] = useState(0);
   const [loading, setLoading] = useState(!cachedPacks);
@@ -65,7 +74,7 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose, mobilePanel 
     // клавиатуры. Закрывать её по любому touchstart снаружи нельзя: сама
     // кнопка-переключатель находится снаружи панели и иначе сначала закрывает,
     // а затем тут же снова открывает её синтетическим mouse-событием Android.
-    if (mobilePanel) return;
+    if (mobilePanel || embedded) return;
 
     const onDocPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
@@ -80,16 +89,12 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose, mobilePanel 
       document.removeEventListener('pointerdown', onDocPointerDown, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [onClose, mobilePanel]);
+  }, [onClose, mobilePanel, embedded]);
 
   const current = packs[activePack];
 
-  return (
-    <div
-      className={'emoji-picker' + (mobilePanel ? ' is-mobile-panel' : '')}
-      ref={rootRef}
-      style={mobilePanel && mobileHeight ? { height: `${mobileHeight}px` } : undefined}
-    >
+  const body = (
+    <>
       {packs.length > 1 && (
         <div className="emoji-tabs">
           {packs.map((pack, index) => (
@@ -155,6 +160,18 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ onPick, onClose, mobilePanel 
           </button>
         ))}
       </div>
+    </>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <div
+      className={'emoji-picker' + (mobilePanel ? ' is-mobile-panel' : '')}
+      ref={rootRef}
+      style={mobilePanel && mobileHeight ? { height: `${mobileHeight}px` } : undefined}
+    >
+      {body}
     </div>
   );
 };

@@ -6,6 +6,7 @@ import { isNativeMobile } from '../utils/mobileNotify';
 import { resolveUploadUrl } from '../utils/uploads';
 import { closeMobileInputSurface } from '../utils/mobileKeyboard';
 import { CustomEmojiMap, renderMessageText, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
+import { StickerCatalog } from '../utils/stickerCatalog';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
@@ -20,6 +21,9 @@ interface Message {
   file_width?: number | null;
   file_height?: number | null;
   local_file_url?: string | null;
+  /** Стикер — самостоятельный тип сообщения, не вложение (см. stickerCatalog). */
+  sticker_id?: number | null;
+  sticker_fallback?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -36,6 +40,7 @@ interface Message {
   reply_to_id?: number | null;
   reply_to_text?: string | null;
   reply_to_file?: string | null;
+  reply_to_sticker_fallback?: string | null;
   reply_to_author?: string | null;
   reply_to_deleted?: number | boolean | null;
   forwarded_from_name?: string | null;
@@ -66,13 +71,18 @@ interface ChatWindowProps {
   /** Завести поручение по тексту сообщения — открывает раздел «Задачи». */
   onCreateTask?: (text: string) => void;
   /** Ответить на сообщение — панель над полем ввода, как при правке. */
-  onStartReply?: (msg: { id: number; text: string; author: string; hasImage: boolean }) => void;
+  onStartReply?: (msg: {
+    id: number; text: string; author: string; hasImage: boolean;
+    stickerFallback?: string | null;
+  }) => void;
   /** Переслать выбранные сообщения — открывает выбор чата. */
   onForward?: (ids: number[]) => void;
   /** Набор базовых реакций из панели управления. */
   reactionEmoji?: string[];
   /** Каталог кастомных смайликов: :name: → путь к картинке. */
   customEmoji?: CustomEmojiMap;
+  /** Каталог стикеров: сообщение хранит id, картинка резолвится через него. */
+  stickerCatalog?: StickerCatalog;
   /** Поставить/снять свою реакцию (повторная та же — снимает). */
   onToggleReaction?: (messageId: number, emoji: string) => void;
   /** Снять реакцию конкретного человека (своя — всегда, чужая — под своим). */
@@ -211,7 +221,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
-  onStartReply, onForward, reactionEmoji, customEmoji = {}, onToggleReaction, onRemoveReaction,
+  onStartReply, onForward, reactionEmoji, customEmoji = {}, stickerCatalog = {}, onToggleReaction, onRemoveReaction,
   onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
   onOpenThread,
 }) => {
@@ -861,7 +871,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       icon: icon('m9 17-5-5 5-5', 'M20 18v-2a4 4 0 0 0-4-4H4'),
       onClick: () => {
         setMenuFor(null);
-        onStartReply({ id: msg.id, text: msg.text, author: nameFor(msg), hasImage: !!(msg.file_path || msg.local_file_url) });
+        onStartReply({
+          id: msg.id,
+          text: msg.text,
+          author: nameFor(msg),
+          hasImage: !!(msg.file_path || msg.local_file_url),
+          stickerFallback: msg.sticker_fallback || null,
+        });
       },
     } : null;
 
@@ -871,7 +887,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       onClick: () => { setMenuFor(null); onOpenThread(msg.id, true); },
     } : null;
 
-    const edit: MenuItem | null = mine && !msg.poll ? {
+    // В стикере править нечего: текста у него нет по определению. «Копировать»
+    // и «Создать задачу» отпадают сами — они и так гейтятся по msg.text.
+    const edit: MenuItem | null = mine && !msg.poll && !msg.sticker_id ? {
       kind: 'action', key: 'edit', label: 'Изменить',
       icon: icon('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'),
       onClick: () => startEdit(msg),
@@ -1071,13 +1089,25 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           // Пузырь при "снятой" подложке (has-alpha) иначе просвечивал бы
           // сквозь картинку своим акцентным цветом — получалась не чистая
           // прозрачность, а цветная заливка вместо нейтральной.
-          const bareTransparentImage = !!msg.file_path && !msg.text && /_a\.webp$/.test(msg.file_path);
+          // Стикер: картинка резолвится по id через каталог, а если элемент
+          // удалили из пака — на его месте остаётся эмодзи-заглушка, снятая с
+          // него в момент отправки. Пустым место не останется никогда.
+          const stickerEntry = msg.sticker_id ? stickerCatalog[msg.sticker_id] : undefined;
+          const isSticker = !!msg.sticker_id;
+          const stickerUrl = stickerEntry ? resolveUploadUrl(stickerEntry.filePath) : null;
+          // У стикера прозрачный фон предполагается всегда — в отличие от
+          // картинки, где прозрачность определяется по метке `_a` в имени
+          // файла, тут проверять нечего: подложка не нужна по определению.
+          const bareTransparentImage = isSticker
+            || (!!msg.file_path && !msg.text && /_a\.webp$/.test(msg.file_path));
           const showThreadLink = (isGroupChat || (msg.thread?.reply_count || 0) > 0)
             && !!onOpenThread && !pendingDelivery;
           // Картинка без подписи: время уходит плашкой на сам кадр, а пузырь
           // остаётся без своей подложки — под снимком иначе висела полоска
           // ради одной строчки времени (в Telegram её нет).
-          const imageOnly = !!imageUrl && !msg.text && !msg.poll;
+          // Стикер идёт сюда же: у него тоже нет подписи, и время должно лежать
+          // плашкой на самой картинке, а не полоской под ней.
+          const imageOnly = (!!imageUrl || isSticker) && !msg.text && !msg.poll;
           // «Голый» кадр — над ним в пузыре нет вообще ничего: тогда пузырь
           // можно убрать целиком и оставить одну картинку. Со строкой автора,
           // пересылкой или цитатой поля пузыря нужны, там снимается только
@@ -1087,8 +1117,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           // не от чего считать, и пузырь схлопывается в ноль (проверено).
           // Своя, ещё не отправленная картинка размеров не имеет — она рисуется
           // прежним способом, с полями.
+          // Стикеру размеры кадра не нужны: он не тянется по ширине пузыря, а
+          // имеет свой фиксированный размер (см. .bubble-sticker), поэтому
+          // схлопнуться в ноль, как картинка, не может.
           const bareImage = imageOnly
-            && !!msg.file_width && !!msg.file_height
+            && (isSticker || (!!msg.file_width && !!msg.file_height))
             && !(!mine && showAuthors && startsGroup)
             && !msg.forwarded_from_name
             && !msg.reply_to_id;
@@ -1160,7 +1193,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           {msg.reply_to_deleted
                             ? 'сообщение удалено'
                             : (renderTextWithEmoji(msg.reply_to_text || '', customEmoji, `r${msg.id}`)
-                              || (msg.reply_to_file ? '📷 Фото' : ''))}
+                              || (msg.reply_to_file
+                                ? '📷 Фото'
+                                : (msg.reply_to_sticker_fallback
+                                  ? `${msg.reply_to_sticker_fallback} Стикер`
+                                  : '')))}
                         </span>
                       </button>
                     )}
@@ -1214,6 +1251,33 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           <span className="image-send-retry" aria-hidden="true">!</span>
                         )}
                       </button>
+                    )}
+                    {/* Стикер — НЕ кнопка и без onClick вовсе: по требованию у
+                        него нет ни просмотрщика, ни увеличения, ни какого-либо
+                        интерфейса медиа. Тап по нему должен вести себя ровно
+                        как тап по тексту (ничего не делает), а удержание и
+                        правый клик — открывать то же меню сообщения. Обернуть
+                        его в <button>, как картинку, значило бы получить
+                        фокусируемый элемент, который ещё и глотает жест. */}
+                    {isSticker && (
+                      stickerUrl ? (
+                        <img
+                          className="bubble-sticker"
+                          src={stickerUrl}
+                          alt={msg.sticker_fallback || ''}
+                          draggable={false}
+                          loading="lazy"
+                          decoding="async"
+                          onLoad={stickAfterMediaLoad}
+                        />
+                      ) : (
+                        // Стикер удалили из пака — картинки больше нет, но
+                        // сообщение не должно превратиться в пустоту: на её
+                        // месте остаётся эмодзи, снятый со стикера при отправке.
+                        <span className="bubble-sticker-fallback" role="img" aria-label="Стикер">
+                          {msg.sticker_fallback || '🖼️'}
+                        </span>
+                      )
                     )}
                     {msg.poll && onVotePoll && onAddPollOption && (
                       <PollCard

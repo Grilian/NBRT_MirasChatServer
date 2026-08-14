@@ -36,6 +36,8 @@ import { ThreadInboxItem, ThreadSummary } from '../types/thread';
 import { CustomEmojiMap, buildEmojiMap, toPlainText, setEmojiAnimationEnabled } from '../utils/customEmoji';
 import { applyChatWallpaper } from '../utils/chatWallpaper';
 import { invalidateEmojiPackCache } from '../components/EmojiPicker';
+import { StickerCatalog, buildStickerCatalog } from '../utils/stickerCatalog';
+import { invalidateStickerPackCache } from '../components/StickerPicker';
 import {
   ensureMobileNotificationPermission,
   showMobileNotification,
@@ -108,6 +110,14 @@ interface Message {
   file_width?: number | null;
   file_height?: number | null;
   local_file_url?: string | null;
+  /** Ссылка на элемент пака — картинка резолвится через каталог стикеров. */
+  sticker_id?: number | null;
+  /**
+   * Копия эмодзи стикера НА МОМЕНТ ОТПРАВКИ. В отличие от смайлика, стикер
+   * не может деградировать до текста при удалении картинки в админке —
+   * этот глиф и есть запасной вариант рендера.
+   */
+  sticker_fallback?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -119,6 +129,7 @@ interface Message {
   reply_to_id?: number | null;
   reply_to_text?: string | null;
   reply_to_file?: string | null;
+  reply_to_sticker_fallback?: string | null;
   reply_to_author?: string | null;
   reply_to_deleted?: number | boolean | null;
   forwarded_from_name?: string | null;
@@ -593,6 +604,17 @@ const Chat: React.FC = () => {
       .catch(() => { /* без каталога коды останутся текстом — не фатально */ });
   }, []);
   useEffect(() => { reloadEmojiCatalog(); }, [reloadEmojiCatalog]);
+
+  // Каталог стикеров — по тому же принципу и ровно по той же причине, что
+  // каталог смайликов выше: сообщение ссылается на элемент пака, и выключение
+  // пака не должно оставлять в старой переписке пустое место.
+  const [stickerCatalog, setStickerCatalog] = useState<StickerCatalog>({});
+  const reloadStickerCatalog = useCallback(() => {
+    api.get('/stickers/catalog')
+      .then(({ data }) => setStickerCatalog(buildStickerCatalog(data)))
+      .catch(() => { /* без каталога останется эмодзи-заглушка — не фатально */ });
+  }, []);
+  useEffect(() => { reloadStickerCatalog(); }, [reloadStickerCatalog]);
   const [statusSheetOpen, setStatusSheetOpen] = useState(false);
   const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
   const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
@@ -1044,6 +1066,8 @@ const Chat: React.FC = () => {
       // кратковременный обрыв сети) — обновляем заодно с остальным.
       reloadEmojiCatalog();
       invalidateEmojiPackCache();
+      reloadStickerCatalog();
+      invalidateStickerPackCache();
     });
 
     // Правка смайликов в панели управления доходит до всех сразу, а не на
@@ -1053,6 +1077,13 @@ const Chat: React.FC = () => {
       // Панель выбора держит свой кэш и перечитывает его при открытии — без
       // сброса она показала бы старый состав, пока её не откроют дважды.
       invalidateEmojiPackCache();
+    });
+
+    // То же и для стикеров — свой каталог и свой кэш пикера, независимые от
+    // смайликов: события разные, и связывать их незачем.
+    newSocket.on('stickers_changed', () => {
+      reloadStickerCatalog();
+      invalidateStickerPackCache();
     });
 
     // Открытие или первая успешная отправка на другом устройстве сразу
@@ -1286,7 +1317,7 @@ const Chat: React.FC = () => {
       window.removeEventListener('online', handleBrowserOnline);
       newSocket.disconnect();
     };
-  }, [currentUserId, refetchUnread, pushToast, reloadEmojiCatalog, applyRecentChats]);
+  }, [currentUserId, refetchUnread, pushToast, reloadEmojiCatalog, reloadStickerCatalog, applyRecentChats]);
 
   // Возврат приложения из фона на Android — пока оно свёрнуто, ОС может
   // оборвать сеть (Doze/App Standby), и сокет повиснет отключённым: его
@@ -2040,6 +2071,7 @@ const Chat: React.FC = () => {
               file_path: sendingItem.payload.filePath || null,
               file_width: sendingItem.payload.fileWidth || null,
               file_height: sendingItem.payload.fileHeight || null,
+              sticker_id: sendingItem.payload.stickerId || null,
               sender_id: currentUserId,
               username: currentUsername,
               display_name: currentDisplayName,
@@ -2093,6 +2125,22 @@ const Chat: React.FC = () => {
       return result;
     }
     return { ok: false, error: 'Чат не выбран' };
+  };
+
+  // Стикер отправляется сразу тапом в пикере, без прикрепления к полю ввода:
+  // это самостоятельное сообщение, а не вложение, и «выбрать, потом нажать
+  // отправить» превратило бы один жест в три. Очередь та же, что у текста и
+  // картинок, — значит pending/failed/повтор работают без отдельного кода.
+  const handleSendSticker = async (stickerId: number) => {
+    if (!activeChat) return;
+    await enqueueOutgoing({
+      chatId: activeChat,
+      text: '',
+      stickerId,
+      replyToId: replyingMessage?.id,
+    });
+    socket?.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
+    setReplyingMessage(null);
   };
 
   const handleCreatePoll = (draft: PollDraft) => {
@@ -2522,6 +2570,7 @@ const Chat: React.FC = () => {
       file_path: item.payload.filePath || null,
       file_width: item.payload.fileWidth || null,
       file_height: item.payload.fileHeight || null,
+      sticker_id: item.payload.stickerId || null,
       local_file_url: outgoingAttachmentUrls[item.clientMessageId] || null,
       sender_id: currentUserId,
       username: currentUsername,
@@ -3014,6 +3063,7 @@ const Chat: React.FC = () => {
             onForward={(ids) => setForwardIds(ids)}
             reactionEmoji={reactionEmoji}
             customEmoji={customEmoji}
+            stickerCatalog={stickerCatalog}
             onToggleReaction={handleToggleReaction}
             onRemoveReaction={handleRemoveReaction}
             onForwardToSelf={selfChatId ? (ids) => forwardTo(ids, selfChatId, false) : undefined}
@@ -3069,6 +3119,7 @@ const Chat: React.FC = () => {
               closeKeyboard();
               setPollCreatorOpen(true);
             }}
+            onSendSticker={handleSendSticker}
           />
         </main>
       ))}
@@ -3112,6 +3163,7 @@ const Chat: React.FC = () => {
           currentUserId={currentUserId}
           socket={socket}
           customEmoji={customEmoji}
+          stickerCatalog={stickerCatalog}
           reactionEmoji={reactionEmoji}
           autoFocus={activeThread.autoFocus}
           disabled={muted || (!threadInboxOpen && activeChatMeta?.canPostHere === false)}
