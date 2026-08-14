@@ -1076,6 +1076,36 @@ try {
   // Колонка уже есть
 }
 
+// Файлы (документы, архивы) — ОТДЕЛЬНЫЕ колонки от картинок, а не общий
+// «attachment». Картинка и файл ведут себя по-разному во всём: картинка
+// пережимается в webp и показывается прямо в ленте, файл сохраняется как есть
+// и показывается карточкой со скачиванием. Свести их в одну пару колонок
+// значило бы на каждом шаге спрашивать «а это картинка или нет» — ровно тот
+// разбор, которого удалось избежать у поллов и стикеров.
+//
+// document_name хранится отдельно от пути: на диске имя обеззараживается и
+// дополняется случайной частью, а человеку надо показать то, что он отправил.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN document_path TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN document_name TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN document_size INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN document_mime TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {
   const initialUsername = process.env.SUPERADMIN_USERNAME || 'superadmin';

@@ -6,6 +6,7 @@ import { formatDate } from '../utils/time';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 import { resolveUploadUrl } from '../utils/uploads';
 import { acquireStandardKeyboardResizeMode } from '../utils/mobileKeyboard';
+import ChatAttachments from './ChatAttachments';
 
 interface UserInfoModalProps {
   user: {
@@ -29,6 +30,13 @@ interface UserInfoModalProps {
       отдельной кнопкой на строке; переехала сюда. */
   comment?: string;
   onUpdateComment?: (comment: string) => void;
+  /**
+   * Переписка с этим человеком — источник вложений для «Медиа», «Файлов»
+   * и «Ссылок». Профиль открывается и там, где переписки ещё нет
+   * (справочник «Люди»), поэтому необязателен: без него разделы вложений
+   * просто не показываются, а не показывают пустоту.
+   */
+  chatId?: string | null;
   onClose: () => void;
 }
 
@@ -54,11 +62,9 @@ const PLANNED_ACTIONS = [
   { key: 'more', label: 'Ещё', icon: icon('M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2', 'M19 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2', 'M5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2') },
 ];
 
-const FILE_TABS = ['Медиа', 'Файлы', 'Ссылки', 'Голосовые'];
-
 const UserInfoModal: React.FC<UserInfoModalProps> = ({
   user, online, notificationsMuted = false, onToggleNotifications,
-  canModerate, groups = [], comment, onUpdateComment, onClose,
+  canModerate, groups = [], comment, onUpdateComment, chatId, onClose,
 }) => {
   const name = nameFor(user);
   const coverUrl = resolveUploadUrl(user.avatarPath);
@@ -340,24 +346,11 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
             </div>
           )}
 
-          {/* Место под вложения переписки. Вкладки нарисованы, но пусты:
-              механики ещё нет, и показывать пустую сетку без объяснения
-              хуже, чем честно сказать, что раздел в работе. */}
-          <div className="user-info-files">
-            <div className="user-info-files-tabs">
-              {FILE_TABS.map((tab, i) => (
-                <button
-                  key={tab}
-                  type="button"
-                  className={'user-info-files-tab' + (i === 0 ? ' is-active' : '')}
-                  onClick={() => setSoonNote({ text: tab, planned: true })}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-            <div className="user-info-files-empty">Здесь появятся вложения из переписки</div>
-          </div>
+          {/* Вложения переписки. Без chatId (профиль открыт из справочника,
+              где переписки ещё нет) раздел не показывается вовсе: пустые
+              вкладки там означали бы «ничего не присылали», хотя присылать
+              было некуда. */}
+          {chatId && <ChatAttachments chatId={chatId} />}
         </div>
 
         {/* Ответ на нажатие того, что ещё не сделано. Само пропадает — просить

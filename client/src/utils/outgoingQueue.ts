@@ -17,6 +17,14 @@ export interface OutgoingPayload {
    * изображений и работает для стикера без единой лишней строки.
    */
   stickerId?: number;
+  /**
+   * Файл (документ, архив). Как и картинка, грузится отдельным
+   * REST-запросом до отправки, а сюда попадает уже готовый путь.
+   */
+  documentPath?: string;
+  documentName?: string;
+  documentSize?: number;
+  documentMime?: string;
   attachment?: {
     name: string;
     type: string;

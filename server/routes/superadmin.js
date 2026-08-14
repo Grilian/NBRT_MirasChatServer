@@ -12,6 +12,7 @@ const {
   getInternetSeenAt, setInternetSeenAt,
   getReactionEmoji, setReactionEmoji,
 } = require('../services/appSettings');
+const { listReleases, activateRelease, ReleaseError } = require('../services/releases');
 const router = express.Router();
 
 // Административные ответы содержат изменяемые и чувствительные данные. Браузер
@@ -315,6 +316,27 @@ router.post('/users/:id/delete', verifySuperAdmin, (req, res) => {
 // ставят сразу. Само по себе это расписание ничего не откладывает: клиент
 // сверяет его с датой сборки из latest.yml, и время, назначенное раньше, чем
 // залит билд, срабатывает как «сразу» (подробности в README).
+// Какие сборки лежат на сервере и какая раздаётся сейчас. Нужно для отката:
+// вернуться можно только к тому, что физически осталось в каталоге раздачи.
+router.get('/releases', verifySuperAdmin, (req, res) => {
+  try {
+    res.json(listReleases());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Откат: переписываем манифесты на выбранную сборку. Сами файлы не трогаем —
+// удалить сборку значило бы отрезать путь назад.
+router.post('/releases/activate', verifySuperAdmin, (req, res) => {
+  try {
+    res.json(activateRelease(req.body.version));
+  } catch (e) {
+    const status = e instanceof ReleaseError ? e.status : 500;
+    res.status(status).json({ error: e.message });
+  }
+});
+
 router.get('/update-schedule', verifySuperAdmin, (req, res) => {
   res.json({ notBefore: getUpdateNotBefore() });
 });

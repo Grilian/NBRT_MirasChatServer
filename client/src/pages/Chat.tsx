@@ -37,6 +37,7 @@ import { CustomEmojiMap, buildEmojiMap, toPlainText, setEmojiAnimationEnabled } 
 import { applyChatWallpaper } from '../utils/chatWallpaper';
 import { invalidateEmojiPackCache } from '../components/EmojiPicker';
 import { StickerCatalog, buildStickerCatalog } from '../utils/stickerCatalog';
+import { FILE_MAX_BYTES, FILE_TOO_LARGE_MESSAGE } from '../utils/fileLimits';
 import { invalidateStickerPackCache } from '../components/StickerPicker';
 import {
   ensureMobileNotificationPermission,
@@ -118,6 +119,11 @@ interface Message {
    * этот глиф и есть запасной вариант рендера.
    */
   sticker_fallback?: string | null;
+  /** Файл: путь, показанное человеку имя, размер и тип. */
+  document_path?: string | null;
+  document_name?: string | null;
+  document_size?: number | null;
+  document_mime?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -130,6 +136,7 @@ interface Message {
   reply_to_text?: string | null;
   reply_to_file?: string | null;
   reply_to_sticker_fallback?: string | null;
+  reply_to_document_name?: string | null;
   reply_to_author?: string | null;
   reply_to_deleted?: number | boolean | null;
   forwarded_from_name?: string | null;
@@ -2072,6 +2079,10 @@ const Chat: React.FC = () => {
               file_width: sendingItem.payload.fileWidth || null,
               file_height: sendingItem.payload.fileHeight || null,
               sticker_id: sendingItem.payload.stickerId || null,
+              document_path: sendingItem.payload.documentPath || null,
+              document_name: sendingItem.payload.documentName || null,
+              document_size: sendingItem.payload.documentSize ?? null,
+              document_mime: sendingItem.payload.documentMime || null,
               sender_id: currentUserId,
               username: currentUsername,
               display_name: currentDisplayName,
@@ -2141,6 +2152,38 @@ const Chat: React.FC = () => {
     });
     socket?.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
     setReplyingMessage(null);
+  };
+
+  // Отправка файла. В отличие от картинки, файл НЕ кладётся в очередь
+  // заранее: он грузится сразу и целиком, и держать его копию ещё и в
+  // IndexedDB (до 50 МБ на сообщение) ради повторной попытки — цена выше
+  // пользы. Зато отказ виден сразу и с внятной причиной, а это главное
+  // требование к слишком большим файлам.
+  const handleSendFile = async (file: File): Promise<SendResult> => {
+    if (!activeChat) return { ok: false, error: 'Чат не выбран' };
+    if (file.size > FILE_MAX_BYTES) return { ok: false, error: FILE_TOO_LARGE_MESSAGE };
+
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await api.post('/messages/upload-file', form);
+      await enqueueOutgoing({
+        chatId: activeChat,
+        text: '',
+        documentPath: data.file_path,
+        documentName: data.name,
+        documentSize: data.size,
+        documentMime: data.mime,
+        replyToId: replyingMessage?.id,
+      });
+      socket?.emit('stop_typing', { chatId: activeChat, userId: currentUserId });
+      setReplyingMessage(null);
+      return { ok: true };
+    } catch (error: any) {
+      // Сервер отвечает на превышение своим текстом — показываем его, а не
+      // подменяем общим «не удалось»: причина отказа тут и есть содержание.
+      return { ok: false, error: error?.response?.data?.error || 'Не удалось отправить файл' };
+    }
   };
 
   const handleCreatePoll = (draft: PollDraft) => {
@@ -2571,6 +2614,10 @@ const Chat: React.FC = () => {
       file_width: item.payload.fileWidth || null,
       file_height: item.payload.fileHeight || null,
       sticker_id: item.payload.stickerId || null,
+      document_path: item.payload.documentPath || null,
+      document_name: item.payload.documentName || null,
+      document_size: item.payload.documentSize ?? null,
+      document_mime: item.payload.documentMime || null,
       local_file_url: outgoingAttachmentUrls[item.clientMessageId] || null,
       sender_id: currentUserId,
       username: currentUsername,
@@ -2710,6 +2757,7 @@ const Chat: React.FC = () => {
       groups={groups}
       comment={comments[infoModalUser.id]?.comment || ''}
       onUpdateComment={(comment) => updateComment(infoModalUser.id, comment)}
+      chatId={chatIdFor(currentUserId, infoModalUser.id)}
       onClose={() => setInfoModalUserId(null)}
     />
   ) : null;
@@ -3120,6 +3168,7 @@ const Chat: React.FC = () => {
               setPollCreatorOpen(true);
             }}
             onSendSticker={handleSendSticker}
+            onSendFile={handleSendFile}
           />
         </main>
       ))}

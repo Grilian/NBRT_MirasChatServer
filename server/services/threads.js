@@ -33,6 +33,7 @@ function sanitizeMessage(message) {
   return {
     ...message, text: '', file_path: null, file_width: null, file_height: null,
     sticker_id: null, sticker_fallback: null,
+    document_path: null, document_name: null, document_size: null, document_mime: null,
   };
 }
 
@@ -136,12 +137,14 @@ function listThreadsForUser(userId, requestedLimit) {
     SELECT root.id AS root_id, root.chat_id,
            root.text AS root_text, root.file_path AS root_file_path,
            root.sticker_id AS root_sticker_id, root.sticker_fallback AS root_sticker_fallback,
+           root.document_name AS root_document_name,
            root.created_at AS root_created_at, root.sender_id AS root_sender_id,
            ru.username AS root_username, ru.display_name AS root_display_name,
            ru.avatar_path AS root_avatar_path,
            latest.id AS last_reply_id, latest.text AS last_reply_text,
            latest.file_path AS last_reply_file_path,
            latest.sticker_id AS last_reply_sticker_id, latest.sticker_fallback AS last_reply_sticker_fallback,
+           latest.document_name AS last_reply_document_name,
            latest.created_at AS last_reply_at,
            latest.sender_id AS last_reply_sender_id,
            lu.username AS last_reply_username, lu.display_name AS last_reply_display_name,
@@ -176,12 +179,14 @@ function listThreadsForUser(userId, requestedLimit) {
     root: {
       id: Number(row.root_id), text: row.root_text || '', file_path: row.root_file_path || null,
       sticker_id: row.root_sticker_id || null, sticker_fallback: row.root_sticker_fallback || null,
+      document_name: row.root_document_name || null,
       created_at: row.root_created_at, sender_id: Number(row.root_sender_id),
       username: row.root_username, display_name: row.root_display_name, avatar_path: row.root_avatar_path,
     },
     last_reply: {
       id: Number(row.last_reply_id), text: row.last_reply_text || '', file_path: row.last_reply_file_path || null,
       sticker_id: row.last_reply_sticker_id || null, sticker_fallback: row.last_reply_sticker_fallback || null,
+      document_name: row.last_reply_document_name || null,
       created_at: row.last_reply_at, sender_id: Number(row.last_reply_sender_id),
       username: row.last_reply_username, display_name: row.last_reply_display_name,
       avatar_path: row.last_reply_avatar_path,
@@ -194,11 +199,14 @@ function getThread(rootId, userId) {
   const root = sanitizeMessage(rootForUser(rootId, userId));
   const replies = db.prepare(`
     SELECT m.id, m.chat_id, m.thread_root_id, m.text, m.file_path, m.file_width,
-           m.file_height, m.sticker_id, m.sticker_fallback, m.sender_id, m.created_at, m.status, m.edited_at,
+           m.file_height, m.sticker_id, m.sticker_fallback,
+           m.document_path, m.document_name, m.document_size, m.document_mime,
+           m.sender_id, m.created_at, m.status, m.edited_at,
            m.deleted, m.client_message_id, m.reply_to_id,
            u.username, u.display_name, u.avatar_path,
            rm.text AS reply_to_text, rm.file_path AS reply_to_file,
            rm.sticker_fallback AS reply_to_sticker_fallback,
+           rm.document_name AS reply_to_document_name,
            rm.deleted AS reply_to_deleted,
            COALESCE(ru.display_name, ru.username) AS reply_to_author
     FROM messages m

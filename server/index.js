@@ -33,7 +33,7 @@ const { isSharedChat, markRead, readCountsFor } = require('./services/readReceip
 const { isValidEmoji, reactionsFor, setReaction, removeReaction } = require('./services/reactions');
 const { notifyNewMessage } = require('./services/push');
 const { canPostToGroup } = require('./services/chatPermissions');
-const { isValidChatImagePath } = require('./routes/messages');
+const { isValidChatImagePath, isValidChatFilePath } = require('./routes/messages');
 const { canPostAnnouncement } = require('./routes/groups');
 const {
   NotificationPolicyError,
@@ -97,7 +97,7 @@ function readCountsPayload(chatId, ids) {
 // обстоятельствах, включая цитаты.
 function replyPreviewOf(replyToId) {
   const row = db.prepare(`
-    SELECT m.text, m.file_path, m.sticker_fallback, m.deleted, u.username, u.display_name
+    SELECT m.text, m.file_path, m.sticker_fallback, m.document_name, m.deleted, u.username, u.display_name
     FROM messages m JOIN users u ON u.id = m.sender_id
     WHERE m.id = ?
   `).get(replyToId);
@@ -106,6 +106,7 @@ function replyPreviewOf(replyToId) {
     reply_to_text: row.deleted ? '' : row.text,
     reply_to_file: row.deleted ? null : row.file_path,
     reply_to_sticker_fallback: row.deleted ? null : row.sticker_fallback,
+    reply_to_document_name: row.deleted ? null : row.document_name,
     reply_to_author: row.display_name || row.username,
     reply_to_deleted: row.deleted ? 1 : 0,
   };
@@ -510,8 +511,29 @@ io.on('connection', (socket) => {
     const stickerId = stickerRow ? stickerRow.id : null;
     const stickerFallback = stickerRow ? stickerRow.emoji : null;
 
-    // Сообщение без текста, картинки и стикера — отправлять нечего.
-    if (!finalText && !filePath && !stickerId) { respond({ ok: false, error: 'empty_message' }); return; }
+    // Файл приходит уже загруженным отдельным REST-запросом (POST
+    // /api/messages/upload-file), сюда попадает только путь — и доверять
+    // ему нельзя ровно по той же причине, что и пути картинки.
+    // К файлу подпись РАЗРЕШЕНА (в отличие от стикера): подписать документ
+    // «вот смета за август» — обычное дело.
+    const hasDocument = !pollDraft && !hasImage && !stickerId
+      && typeof data.documentPath === 'string' && isValidChatFilePath(data.documentPath);
+    const documentPath = hasDocument ? data.documentPath : null;
+    const documentName = hasDocument && typeof data.documentName === 'string'
+      ? data.documentName.slice(0, 200)
+      : null;
+    const documentSize = hasDocument && Number.isFinite(Number(data.documentSize))
+      ? Number(data.documentSize)
+      : null;
+    const documentMime = hasDocument && typeof data.documentMime === 'string'
+      ? data.documentMime.slice(0, 120)
+      : null;
+
+    // Сообщение без текста, картинки, стикера и файла — отправлять нечего.
+    if (!finalText && !filePath && !stickerId && !documentPath) {
+      respond({ ok: false, error: 'empty_message' });
+      return;
+    }
 
     // Ответ: id принимаем только если это сообщение существует и лежит в ЭТОМ
     // же чате — иначе цитатой можно было бы вытащить кусок чужой переписки,
@@ -573,8 +595,8 @@ io.on('connection', (socket) => {
         INSERT INTO messages
           (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip,
            reply_to_id, forwarded_from_name, forwarded_from_chat, client_message_id, force_notification,
-           sticker_id, sticker_fallback)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           sticker_id, sticker_fallback, document_path, document_name, document_size, document_mime)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       // Сообщение и опрос — одна атомарная операция: нельзя оставить в ленте
       // текст вопроса без вариантов, если вставка опроса оборвалась.
@@ -582,7 +604,7 @@ io.on('connection', (socket) => {
         const result = stmt.run(
           data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
           finalReplyTo, forwardedFromName, forwardedFromChat, clientMessageId, forceNotification ? 1 : 0,
-          stickerId, stickerFallback
+          stickerId, stickerFallback, documentPath, documentName, documentSize, documentMime
         );
         const poll = pollDraft
           ? insertPoll(result.lastInsertRowid, data.chatId, senderId, pollDraft)
@@ -607,6 +629,10 @@ io.on('connection', (socket) => {
         file_height: fileHeight,
         sticker_id: stickerId,
         sticker_fallback: stickerFallback,
+        document_path: documentPath,
+        document_name: documentName,
+        document_size: documentSize,
+        document_mime: documentMime,
         status: 'sent',
         created_at: new Date().toISOString(),
         force_notification: forceNotification,
@@ -818,7 +844,22 @@ io.on('connection', (socket) => {
         : null;
       const stickerId = stickerRow ? stickerRow.id : null;
       const stickerFallback = stickerRow ? stickerRow.emoji : null;
-      if (!text && !filePath && !stickerId) { respond({ ok: false, error: 'empty_message' }); return; }
+      const hasDocument = !pollDraft && !hasImage && !stickerId
+        && typeof data.documentPath === 'string' && isValidChatFilePath(data.documentPath);
+      const documentPath = hasDocument ? data.documentPath : null;
+      const documentName = hasDocument && typeof data.documentName === 'string'
+        ? data.documentName.slice(0, 200)
+        : null;
+      const documentSize = hasDocument && Number.isFinite(Number(data.documentSize))
+        ? Number(data.documentSize)
+        : null;
+      const documentMime = hasDocument && typeof data.documentMime === 'string'
+        ? data.documentMime.slice(0, 120)
+        : null;
+      if (!text && !filePath && !stickerId && !documentPath) {
+        respond({ ok: false, error: 'empty_message' });
+        return;
+      }
 
       const requestedReply = Number(data.replyToId);
       const replySource = Number.isInteger(requestedReply) && requestedReply > 0
@@ -833,11 +874,11 @@ io.on('connection', (socket) => {
           INSERT INTO messages
             (chat_id, sender_id, text, file_path, file_width, file_height, status,
              sender_ip, reply_to_id, client_message_id, thread_root_id, force_notification,
-             sticker_id, sticker_fallback)
-          VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, ?, ?)
+             sticker_id, sticker_fallback, document_path, document_name, document_size, document_mime)
+          VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(root.chat_id, senderId, text, filePath, fileWidth, fileHeight,
           clientIpOf(socket), replyToId, clientMessageId, root.id, forceNotification ? 1 : 0,
-          stickerId, stickerFallback);
+          stickerId, stickerFallback, documentPath, documentName, documentSize, documentMime);
         const poll = pollDraft ? insertPoll(result.lastInsertRowid, root.chat_id, senderId, pollDraft) : null;
         return { result, pollId: poll ? poll.id : null };
       });
@@ -856,6 +897,10 @@ io.on('connection', (socket) => {
         file_height: fileHeight,
         sticker_id: stickerId,
         sticker_fallback: stickerFallback,
+        document_path: documentPath,
+        document_name: documentName,
+        document_size: documentSize,
+        document_mime: documentMime,
         status: 'sent',
         created_at: new Date().toISOString(),
         force_notification: forceNotification,

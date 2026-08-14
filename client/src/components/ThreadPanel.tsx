@@ -24,6 +24,10 @@ interface ThreadMessage {
   file_height?: number | null;
   sticker_id?: number | null;
   sticker_fallback?: string | null;
+  document_path?: string | null;
+  document_name?: string | null;
+  document_size?: number | null;
+  document_mime?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -37,6 +41,7 @@ interface ThreadMessage {
   reply_to_text?: string | null;
   reply_to_file?: string | null;
   reply_to_sticker_fallback?: string | null;
+  reply_to_document_name?: string | null;
   reply_to_author?: string | null;
   reply_to_deleted?: number | boolean | null;
   reactions?: MessageReaction[];

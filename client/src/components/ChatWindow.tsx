@@ -7,6 +7,7 @@ import { resolveUploadUrl } from '../utils/uploads';
 import { closeMobileInputSurface } from '../utils/mobileKeyboard';
 import { CustomEmojiMap, renderMessageText, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
 import { StickerCatalog } from '../utils/stickerCatalog';
+import { fileGlyph, formatFileSize } from '../utils/fileLimits';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
@@ -24,6 +25,10 @@ interface Message {
   /** Стикер — самостоятельный тип сообщения, не вложение (см. stickerCatalog). */
   sticker_id?: number | null;
   sticker_fallback?: string | null;
+  document_path?: string | null;
+  document_name?: string | null;
+  document_size?: number | null;
+  document_mime?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -41,6 +46,7 @@ interface Message {
   reply_to_text?: string | null;
   reply_to_file?: string | null;
   reply_to_sticker_fallback?: string | null;
+  reply_to_document_name?: string | null;
   reply_to_author?: string | null;
   reply_to_deleted?: number | boolean | null;
   forwarded_from_name?: string | null;
@@ -73,7 +79,7 @@ interface ChatWindowProps {
   /** Ответить на сообщение — панель над полем ввода, как при правке. */
   onStartReply?: (msg: {
     id: number; text: string; author: string; hasImage: boolean;
-    stickerFallback?: string | null;
+    stickerFallback?: string | null; documentName?: string | null;
   }) => void;
   /** Переслать выбранные сообщения — открывает выбор чата. */
   onForward?: (ids: number[]) => void;
@@ -877,6 +883,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           author: nameFor(msg),
           hasImage: !!(msg.file_path || msg.local_file_url),
           stickerFallback: msg.sticker_fallback || null,
+          documentName: msg.document_name || null,
         });
       },
     } : null;
@@ -889,7 +896,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     // В стикере править нечего: текста у него нет по определению. «Копировать»
     // и «Создать задачу» отпадают сами — они и так гейтятся по msg.text.
-    const edit: MenuItem | null = mine && !msg.poll && !msg.sticker_id ? {
+    //
+    // Файл БЕЗ подписи — тот же случай: правка открыла бы пустой редактор, а
+    // сохранение пустого текста ничего не делает (см. submit в MessageInput),
+    // то есть пункт выглядел бы сломанным. С подписью править есть что, и
+    // тогда пункт остаётся.
+    const editableDocument = !msg.document_path || !!msg.text;
+    const edit: MenuItem | null = mine && !msg.poll && !msg.sticker_id && editableDocument ? {
       kind: 'action', key: 'edit', label: 'Изменить',
       icon: icon('M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'),
       onClick: () => startEdit(msg),
@@ -1197,7 +1210,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                                 ? '📷 Фото'
                                 : (msg.reply_to_sticker_fallback
                                   ? `${msg.reply_to_sticker_fallback} Стикер`
-                                  : '')))}
+                                  : (msg.reply_to_document_name
+                                    ? `📎 ${msg.reply_to_document_name}`
+                                    : ''))))}
                         </span>
                       </button>
                     )}
@@ -1278,6 +1293,36 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           {msg.sticker_fallback || '🖼️'}
                         </span>
                       )
+                    )}
+                    {/* Файл — карточка со скачиванием, а не картинка в
+                        ленте: содержимое документа в переписке не
+                        показать, а имя и размер человеку нужны, чтобы
+                        решить, качать ли его. Ссылка настоящая (<a
+                        download>), а не onClick: так работает и
+                        «сохранить как» из контекстного меню браузера. */}
+                    {msg.document_path && (
+                      <a
+                        className="bubble-file"
+                        href={resolveUploadUrl(msg.document_path) || undefined}
+                        download={msg.document_name || undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => {
+                          // В режиме выбора любая часть сообщения работает
+                          // на выбор — качать отсюда нечего.
+                          if (selectMode) { e.preventDefault(); toggleSelected(msg.id); }
+                          else e.stopPropagation();
+                        }}
+                      >
+                        <span className="bubble-file-glyph" aria-hidden="true">{fileGlyph(msg.document_name)}</span>
+                        <span className="bubble-file-body">
+                          <span className="bubble-file-name">{msg.document_name || 'Файл'}</span>
+                          <span className="bubble-file-size">{formatFileSize(msg.document_size)}</span>
+                        </span>
+                        <svg className="bubble-file-download" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
+                        </svg>
+                      </a>
                     )}
                     {msg.poll && onVotePoll && onAddPollOption && (
                       <PollCard

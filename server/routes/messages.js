@@ -87,6 +87,107 @@ function isValidChatImagePath(filePath) {
   return fs.existsSync(abs);
 }
 
+// ===== Файлы (документы, архивы) =====
+//
+// В отличие от картинки, файл НЕ перекодируется: он должен дойти байт в байт,
+// иначе это уже не тот файл, который отправляли. Поэтому и путь другой, и
+// расширение сохраняется, и MIME берётся тот, что прислал клиент (для показа
+// значка, не для доверия).
+const CHAT_FILES_DIR = path.join(__dirname, '..', 'uploads', 'chat-files');
+fs.mkdirSync(CHAT_FILES_DIR, { recursive: true });
+
+/**
+ * Предел размера файла. Ровно 50 МБ по требованию; при превышении человек
+ * должен увидеть не «ошибка загрузки», а объяснение — система в тестовом
+ * режиме. Клиент проверяет размер до отправки (чтобы не гнать 200 МБ впустую),
+ * но проверка обязана быть и здесь: клиентскую обойти тривиально.
+ */
+const CHAT_FILE_MAX_BYTES = 50 * 1024 * 1024;
+const CHAT_FILE_TOO_LARGE_MESSAGE =
+  'Система работает в тестовом режиме, пока большие файлы отправлять нельзя. '
+  + 'Предельный размер — 50 МБ.';
+
+const chatFileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: CHAT_FILE_MAX_BYTES },
+});
+
+// Имя на диске: только латиница, цифры и точка-дефис-подчёркивание, плюс
+// случайная часть. Оригинальное имя человека хранится в БД отдельно и на
+// файловую систему не влияет — иначе кириллица, пробелы и «../» в имени
+// превращались бы в проблему на каждом шаге.
+const CHAT_FILE_PATH_PATTERN = /^\/uploads\/chat-files\/[a-zA-Z0-9_.-]+$/;
+
+function isValidChatFilePath(filePath) {
+  if (typeof filePath !== 'string' || !CHAT_FILE_PATH_PATTERN.test(filePath)) return false;
+  // Отдельно от регэкспа: `..` в имени под шаблон не подходит, но проверка
+  // дешёвая, а цена промаха — чтение чужого файла с диска.
+  if (filePath.includes('..')) return false;
+  const abs = path.join(__dirname, '..', filePath.replace(/^\//, ''));
+  return fs.existsSync(abs);
+}
+
+/** Расширение из имени файла — только оно и переезжает на диск. */
+function safeExtension(originalName) {
+  const match = /\.([a-zA-Z0-9]{1,12})$/.exec(String(originalName || ''));
+  return match ? `.${match[1].toLowerCase()}` : '';
+}
+
+/**
+ * Имя файла из multipart-формы приходит РАЗОБРАННЫМ КАК LATIN-1.
+ *
+ * Так устроен busboy под multer: заголовок `filename` он читает побайтово и
+ * складывает в строку по одному символу на байт. Для «report.pdf» разницы нет,
+ * а «смета.pdf» превращается в «ÑÐ¼ÐµÑ‚Ð°.pdf» — и именно это имя увидел бы
+ * получатель. Собираем байты обратно и читаем их как UTF-8.
+ *
+ * Если байты не были валидным UTF-8 (файл действительно назван латиницей с
+ * диакритикой в другой кодировке), декодирование даст U+FFFD — тогда лучше
+ * оставить исходную строку, чем показать вопросительные знаки.
+ */
+function decodeMultipartName(raw) {
+  const value = String(raw || '');
+  const restored = Buffer.from(value, 'latin1').toString('utf8');
+  return restored.includes('�') ? value : restored;
+}
+
+router.post('/upload-file', verifyToken, (req, res) => {
+  chatFileUpload.single('file')(req, res, (err) => {
+    if (err) {
+      // multer сообщает о превышении лимита кодом, а не текстом: подменяем
+      // его человеческим объяснением, которое требуется по условию.
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: CHAT_FILE_TOO_LARGE_MESSAGE, code: 'file_too_large' });
+      }
+      return res.status(400).json({ error: err.message || 'Не удалось загрузить файл' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Файл не выбран' });
+
+    try {
+      const filename = `doc_${req.userId}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`
+        + safeExtension(decodeMultipartName(req.file.originalname));
+      fs.writeFileSync(path.join(CHAT_FILES_DIR, filename), req.file.buffer);
+
+      // Имя приходит от клиента и показывается другим людям — режем длину и
+      // управляющие символы, иначе одна строка ломает вёрстку карточки.
+      const originalName = decodeMultipartName(req.file.originalname || 'файл')
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\u0000-\u001f]/g, '')
+        .slice(0, 200) || 'файл';
+
+      res.json({
+        file_path: `/uploads/chat-files/${filename}`,
+        name: originalName,
+        size: req.file.size,
+        mime: req.file.mimetype || 'application/octet-stream',
+      });
+    } catch (e) {
+      console.error('[upload-file] не удалось сохранить файл:', e.message);
+      res.status(500).json({ error: 'Не удалось сохранить файл' });
+    }
+  });
+});
+
 // Грузим и сразу пережимаем в webp — единый формат на выходе проще отдавать
 // и меньше весит, чем исходные jpeg/png с телефонных камер.
 router.post('/upload-image', verifyToken, (req, res) => {
@@ -212,7 +313,7 @@ router.get('/meta/last', verifyToken, (req, res) => {
     // «Последнее» считаем персонально: сообщение, скрытое этим человеком у
     // себя, не должно оставаться превью его чата — там встаёт предыдущее.
     const rows = db.prepare(`
-      SELECT m.chat_id, m.text, m.file_path, m.sticker_id, m.sticker_fallback, m.created_at, m.deleted
+      SELECT m.chat_id, m.text, m.file_path, m.sticker_id, m.sticker_fallback, m.document_name, m.created_at, m.deleted
       FROM messages m
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
@@ -237,11 +338,116 @@ router.get('/meta/last', verifyToken, (req, res) => {
         file_path: row.deleted ? null : row.file_path,
         sticker_id: row.deleted ? null : row.sticker_id,
         sticker_fallback: row.deleted ? null : row.sticker_fallback,
+        document_name: row.deleted ? null : row.document_name,
         created_at: row.created_at,
       };
     });
 
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== Вложения переписки: «Медиа», «Файлы», «Ссылки» в карточке =====
+//
+// Отдельная выдача, а не фильтрация уже загруженной истории на клиенте:
+// история грузится страницами по 50 сообщений, и «все картинки за три года»
+// в ней просто нет. Здесь же идёт выборка сразу по нужному признаку.
+//
+// Ссылки НЕ хранятся отдельной таблицей: они и так лежат в тексте сообщений,
+// а отдельное хранилище пришлось бы наполнять миграцией по всему архиву и
+// держать в согласии при каждой правке текста. Дешевле сузить выборку в SQL
+// (LIKE по http/www) и разобрать найденное здесь — тем же разбором, что и на
+// клиенте при отрисовке.
+const LINK_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+
+/** Хвостовая пунктуация в ссылку не входит: «см. http://a.ru.» — точка внешняя. */
+function trimLinkTail(value) {
+  let end = value.length;
+  while (end > 0 && '.,!?;:)'.includes(value[end - 1])) end -= 1;
+  return value.slice(0, end);
+}
+
+const ATTACHMENT_KINDS = ['media', 'files', 'links'];
+
+router.get('/:chatId/attachments', verifyToken, (req, res) => {
+  try {
+    const chatId = req.params.chatId;
+    if (!isParticipant(chatId, req.userId)) {
+      return res.status(403).json({ error: 'Нет доступа к этому чату' });
+    }
+
+    const kind = ATTACHMENT_KINDS.includes(req.query.kind) ? req.query.kind : 'media';
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isInteger(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 200)
+      : 60;
+
+    // Удалённое и скрытое лично этим человеком не показываем — те же правила,
+    // что и в самой ленте: вложение не должно пережить своё сообщение.
+    const common = `
+      FROM messages m
+      JOIN users u ON u.id = m.sender_id
+      WHERE m.chat_id = ? AND m.deleted = 0
+        AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+    `;
+
+    if (kind === 'media') {
+      const rows = db.prepare(`
+        SELECT m.id, m.file_path, m.file_width, m.file_height, m.created_at,
+               m.sender_id, u.username, u.display_name
+        ${common} AND m.file_path IS NOT NULL
+        ORDER BY m.id DESC LIMIT ?
+      `).all(chatId, req.userId, limit);
+      return res.json({ kind, items: rows });
+    }
+
+    if (kind === 'files') {
+      const rows = db.prepare(`
+        SELECT m.id, m.document_path, m.document_name, m.document_size, m.document_mime,
+               m.created_at, m.sender_id, u.username, u.display_name
+        ${common} AND m.document_path IS NOT NULL
+        ORDER BY m.id DESC LIMIT ?
+      `).all(chatId, req.userId, limit);
+      return res.json({ kind, items: rows });
+    }
+
+    // Ссылки: сужаем в SQL, разбираем в JS. Одно сообщение может нести
+    // несколько ссылок — каждая идёт отдельной строкой списка.
+    const rows = db.prepare(`
+      SELECT m.id, m.text, m.created_at, m.sender_id, u.username, u.display_name
+      ${common} AND m.text IS NOT NULL AND m.text != ''
+        AND (m.text LIKE '%http://%' OR m.text LIKE '%https://%' OR m.text LIKE '%www.%')
+      ORDER BY m.id DESC LIMIT ?
+    `).all(chatId, req.userId, limit);
+
+    const items = [];
+    const seen = new Set();
+    for (const row of rows) {
+      LINK_PATTERN.lastIndex = 0;
+      let match = LINK_PATTERN.exec(row.text);
+      while (match) {
+        const url = trimLinkTail(match[0]);
+        // Один и тот же адрес, отправленный трижды, — одна строка в списке:
+        // это справочник ссылок чата, а не лог отправок.
+        if (url && !seen.has(url)) {
+          seen.add(url);
+          items.push({
+            message_id: row.id,
+            url,
+            href: /^https?:\/\//i.test(url) ? url : `https://${url}`,
+            created_at: row.created_at,
+            sender_id: row.sender_id,
+            username: row.username,
+            display_name: row.display_name,
+          });
+        }
+        match = LINK_PATTERN.exec(row.text);
+      }
+    }
+
+    res.json({ kind, items });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -296,7 +502,8 @@ router.get('/:chatId', verifyToken, (req, res) => {
 
     const messages = useCursor
       ? db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback,
+                 m.document_path, m.document_name, m.document_size, m.document_mime, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
                  m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
                  rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.sticker_fallback AS reply_to_sticker_fallback, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
@@ -312,7 +519,8 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LIMIT ?
         `).all(req.userId, chatId, before, req.userId, limit)
       : db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback,
+                 m.document_path, m.document_name, m.document_size, m.document_mime, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
                  m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
                  rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.sticker_fallback AS reply_to_sticker_fallback, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
@@ -344,6 +552,10 @@ router.get('/:chatId', verifyToken, (req, res) => {
         m.file_height = null;
         m.sticker_id = null;
         m.sticker_fallback = null;
+        m.document_path = null;
+        m.document_name = null;
+        m.document_size = null;
+        m.document_mime = null;
       }
       // То же и для цитаты: ответить успели, а исходное потом удалили —
       // содержимое не должно уехать наружу окольным путём, через ответ.
@@ -386,3 +598,6 @@ router.get('/:chatId', verifyToken, (req, res) => {
 
 module.exports = router;
 module.exports.isValidChatImagePath = isValidChatImagePath;
+module.exports.isValidChatFilePath = isValidChatFilePath;
+module.exports.CHAT_FILE_MAX_BYTES = CHAT_FILE_MAX_BYTES;
+module.exports.CHAT_FILE_TOO_LARGE_MESSAGE = CHAT_FILE_TOO_LARGE_MESSAGE;

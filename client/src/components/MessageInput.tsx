@@ -4,6 +4,7 @@ import ContentPicker from './ContentPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
 import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
 import { isNativeMobile } from '../utils/mobileNotify';
+import { FILE_MAX_BYTES, FILE_TOO_LARGE_MESSAGE } from '../utils/fileLimits';
 import {
   getLastMobileKeyboardHeight,
   hideMobileKeyboard,
@@ -39,6 +40,8 @@ export interface ReplyingMessage {
   hasImage: boolean;
   /** Эмодзи стикера, если отвечают на стикер: текста у него нет. */
   stickerFallback?: string | null;
+  /** Имя файла, если отвечают на файл. */
+  documentName?: string | null;
 }
 
 interface MessageInputProps {
@@ -60,6 +63,8 @@ interface MessageInputProps {
   onCreatePoll?: () => void;
   /** Отправка стикера из общей панели выбора — сразу, без прикрепления. */
   onSendSticker?: (stickerId: number) => void;
+  /** Отправка файла (документа, архива). Возвращает причину отказа. */
+  onSendFile?: (file: File) => Promise<SendResult>;
   /** Каталог кастомных смайликов — для цитат в панелях правки и ответа. */
   customEmoji?: CustomEmojiMap;
   /** Явное действие «Ответить» может сразу передать фокус новому композеру. */
@@ -88,12 +93,14 @@ let stagedSeq = 0;
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend, onTyping, disabled, placeholder,
   editing, onSubmitEdit, onCancelEdit, onRequestEditLast,
-  replying, onCancelReply, onCreatePoll, onSendSticker, customEmoji = {}, autoFocus = false,
+  replying, onCancelReply, onCreatePoll, onSendSticker, onSendFile, customEmoji = {}, autoFocus = false,
 }) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [fileSending, setFileSending] = useState(false);
+  const [fileError, setFileError] = useState('');
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [desktopEmojiOpen, setDesktopEmojiOpen] = useState(false);
   const [emojiPanelHeight, setEmojiPanelHeight] = useState(getLastMobileKeyboardHeight);
@@ -131,6 +138,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const richRef = useRef<EmojiComposerHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Отдельный input под документы: у картинок свой с accept="image/*",
+  // и делить их значило бы предлагать в выборе картинок все файлы подряд.
+  const docInputRef = useRef<HTMLInputElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
 
@@ -515,6 +525,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
     setStaged((prev) => [...prev, ...next]);
   };
 
+  // Файл уходит сразу после выбора, без прикрепления к полю: он и не
+  // редактируется подписью, и показывать превью нечему.
+  const sendPickedFile = async (file: File) => {
+    if (!onSendFile || fileSending) return;
+    setFileError('');
+    // Свою проверку размера делаем ДО загрузки: иначе человек ждёт
+    // отправки сотни мегабайт только чтобы получить отказ в конце.
+    if (file.size > FILE_MAX_BYTES) { setFileError(FILE_TOO_LARGE_MESSAGE); return; }
+    setFileSending(true);
+    try {
+      const result = await onSendFile(file);
+      if (!result.ok) setFileError(result.error || 'Не удалось отправить файл');
+    } finally {
+      setFileSending(false);
+    }
+  };
+
   const removeStaged = (id: number) => {
     setStaged((prev) => {
       const gone = prev.find((s) => s.id === id);
@@ -707,6 +734,25 @@ const MessageInput: React.FC<MessageInputProps> = ({
         className="composer-file-input"
         onChange={(e) => { stageFiles(e.target.files); e.target.value = ''; }}
       />
+      <input
+        ref={docInputRef}
+        type="file"
+        className="composer-file-input"
+        onChange={(e) => {
+          const picked = e.target.files?.[0];
+          e.target.value = '';
+          if (picked) void sendPickedFile(picked);
+        }}
+      />
+
+      {/* Отказ по файлу — над полем ввода, а не всплывашкой: причина
+          длинная (про тестовый режим), и её надо дочитать. */}
+      {fileError && (
+        <div className="composer-file-error" role="status">
+          <span>{fileError}</span>
+          <button type="button" onClick={() => setFileError('')} aria-label="Понятно">×</button>
+        </div>
+      )}
 
       {emojiOpen && !isNativeMobile && (
         <ContentPicker
@@ -728,11 +774,19 @@ const MessageInput: React.FC<MessageInputProps> = ({
             </span>
             <span><strong>Изображение</strong><small>Фото и картинки</small></span>
           </button>
-          <button type="button" role="menuitem" disabled>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!onSendFile || fileSending}
+            onClick={() => { setAttachMenuOpen(false); docInputRef.current?.click(); }}
+          >
             <span className="attach-menu-icon file">
               <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg>
             </span>
-            <span><strong>Файлы <em>В разработке</em></strong><small>Документы и архивы</small></span>
+            <span>
+              <strong>{fileSending ? 'Отправляется…' : 'Файлы'}</strong>
+              <small>Документы и архивы, до 50 МБ</small>
+            </span>
           </button>
           <button
             type="button"
@@ -775,7 +829,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 ? renderTextWithEmoji(replying.text, customEmoji, `cr${replying.id}`)
                 : (replying.hasImage
                   ? '📷 Фото'
-                  : (replying.stickerFallback ? `${replying.stickerFallback} Стикер` : ''))}
+                  : (replying.stickerFallback
+                    ? `${replying.stickerFallback} Стикер`
+                    : (replying.documentName ? `📎 ${replying.documentName}` : '')))}
             </div>
           </div>
           <button type="button" className="composer-editing-cancel" onClick={() => onCancelReply?.()} aria-label="Отменить ответ">

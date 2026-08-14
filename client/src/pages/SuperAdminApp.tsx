@@ -5,6 +5,7 @@ import { formatMoscowDateTime, fromMoscowInputValue, toMoscowInputValue } from '
 import { resolveUploadUrl } from '../utils/uploads';
 import { useDragReorder } from '../utils/useDragReorder';
 import StickerPacksPanel from '../components/StickerPacksPanel';
+import ReleaseRollbackPanel from '../components/ReleaseRollbackPanel';
 
 interface Group {
   id: number;
@@ -1994,7 +1995,12 @@ export default function SuperAdminApp() {
         {tab === 'reactions' && <ReactionsPanel />}
         {tab === 'selfchat' && <SelfChatPanel />}
         {tab === 'google' && <GoogleCalendarPanel users={users} />}
-        {tab === 'updates' && <UpdateSchedulePanel />}
+        {tab === 'updates' && (
+          <>
+            <UpdateSchedulePanel />
+            <ReleaseRollbackPanel />
+          </>
+        )}
       </main>
     </div>
   );
