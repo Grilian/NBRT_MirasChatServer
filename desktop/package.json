@@ -7,6 +7,7 @@
   "description": "MirasChat — десктопный клиент для Windows и Linux",
   "main": "src/main.js",
   "author": "MIRAS",
+  "homepage": "https://cagrizzz.ru/miraschat/",
   "scripts": {
     "gen-icons": "node scripts/gen-icons.js",
     "build:client": "node scripts/build-client.js",
