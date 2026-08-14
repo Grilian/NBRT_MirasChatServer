@@ -4,7 +4,7 @@
   "releaseVersion": "1.8.2",
   "buildVersion": "1.8.2",
   "private": true,
-  "description": "MirasChat — десктопный клиент для Windows",
+  "description": "MirasChat — десктопный клиент для Windows и Linux",
   "main": "src/main.js",
   "author": "MIRAS",
   "scripts": {
@@ -12,7 +12,8 @@
     "build:client": "node scripts/build-client.js",
     "prepare-app": "npm run gen-icons && npm run build:client",
     "start": "electron .",
-    "dist:win": "npm run prepare-app && electron-builder --win --x64"
+    "dist:win": "npm run prepare-app && electron-builder --win --x64",
+    "dist:linux": "npm run prepare-app && electron-builder --linux --x64"
   },
   "devDependencies": {
     "electron": "^33.2.1",
@@ -54,6 +55,51 @@
         }
       ],
       "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Network",
+      "synopsis": "Корпоративный мессенджер MIRAS",
+      "description": "MirasChat — корпоративный мессенджер: переписка, группы, задачи, календарь.",
+      "maintainer": "MIRAS <cagrizzzca@gmail.com>",
+      "desktop": {
+        "entry": {
+          "Name": "MirasChat",
+          "Comment": "Корпоративный мессенджер MIRAS",
+          "Categories": "Network;InstantMessaging;",
+          "Keywords": "chat;messenger;мессенджер;чат;",
+          "StartupWMClass": "MirasChat"
+        }
+      }
+    },
+    "deb": {
+      "artifactName": "MirasChat_${version}_${arch}.${ext}",
+      "priority": "optional",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libsecret-1-0",
+        "libuuid1"
+      ]
     },
     "publish": [
       {
