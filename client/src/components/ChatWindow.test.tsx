@@ -296,3 +296,125 @@ describe('ChatWindow докрутка ленты', () => {
     }
   });
 });
+
+describe('ChatWindow стикеры', () => {
+  const stickerMessage = {
+    id: 42,
+    text: '',
+    file_path: null,
+    sticker_id: 7,
+    sticker_fallback: '🔥',
+    sender_id: 1,
+    username: 'me',
+    created_at: '2026-08-09T10:00:00.000Z',
+  };
+  const catalog = { 7: { filePath: '/uploads/stickers/s.webp', animatedPath: null, emoji: '🔥' } };
+
+  function renderSticker(overrides: Record<string, unknown> = {}) {
+    return render(
+      <ChatWindow
+        chatId="test"
+        messages={[{ ...stickerMessage, ...overrides }]}
+        currentUserId={1}
+        stickerCatalog={catalog}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+      />,
+    );
+  }
+
+  test('стикер рисуется картинкой, но НЕ кнопкой и без просмотрщика', () => {
+    const { container } = renderSticker();
+    const sticker = container.querySelector('.bubble-sticker') as HTMLImageElement;
+
+    expect(sticker).toBeInTheDocument();
+    expect(sticker.tagName).toBe('IMG');
+    // По требованию у стикера нет ни просмотра, ни увеличения: тап по нему
+    // должен вести себя как тап по тексту. Кнопкой он быть не должен вовсе —
+    // иначе получится фокусируемый элемент, глотающий жест.
+    expect(sticker.closest('button')).toBeNull();
+
+    fireEvent.click(sticker);
+    expect(container.querySelector('.lightbox-overlay')).not.toBeInTheDocument();
+  });
+
+  test('пузырь стикера без подложки и без полей', () => {
+    const { container } = renderSticker();
+    const bubble = container.querySelector('.bubble') as HTMLElement;
+    // Прозрачный фон у стикера предполагается всегда, а не только когда сервер
+    // пометил картинку суффиксом _a, как у обычных изображений.
+    expect(bubble).toHaveClass('bubble-alpha-only');
+    expect(bubble).toHaveClass('bubble-bare-image');
+  });
+
+  test('контекстное меню — то же, что у текста, но без «Копировать» и «Изменить»', () => {
+    const { container, getByRole, queryByRole } = render(
+      <ChatWindow
+        chatId="test"
+        messages={[stickerMessage]}
+        currentUserId={1}
+        stickerCatalog={catalog}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+        onStartReply={() => {}}
+        onForward={() => {}}
+      />,
+    );
+
+    const row = container.querySelector('[data-msg-id="42"]') as HTMLElement;
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+
+    // Применимое к стикеру — доступно.
+    expect(getByRole('button', { name: 'Ответить' })).toBeInTheDocument();
+    expect(getByRole('button', { name: 'Переслать' })).toBeInTheDocument();
+    expect(getByRole('button', { name: 'Удалить' })).toBeInTheDocument();
+    // Неприменимое — нет. Текста у стикера не бывает, править и копировать нечего.
+    expect(queryByRole('button', { name: 'Копировать' })).not.toBeInTheDocument();
+    expect(queryByRole('button', { name: 'Изменить' })).not.toBeInTheDocument();
+  });
+
+  test('удалённый из пака стикер показывает эмодзи-заглушку, а не пустоту', () => {
+    // Каталог пуст — картинки для этого id больше нет.
+    const { container } = render(
+      <ChatWindow
+        chatId="test"
+        messages={[stickerMessage]}
+        currentUserId={1}
+        stickerCatalog={{}}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('.bubble-sticker')).not.toBeInTheDocument();
+    const fallback = container.querySelector('.bubble-sticker-fallback');
+    expect(fallback).toBeInTheDocument();
+    expect(fallback).toHaveTextContent('🔥');
+  });
+
+  test('цитата на стикер показывает его эмодзи, а не «Фото»', () => {
+    const { container } = render(
+      <ChatWindow
+        chatId="test"
+        messages={[{
+          ...stickerMessage,
+          id: 43,
+          sticker_id: null,
+          text: 'ответ',
+          reply_to_id: 42,
+          reply_to_author: 'Борис',
+          reply_to_text: '',
+          reply_to_sticker_fallback: '🔥',
+        }]}
+        currentUserId={1}
+        stickerCatalog={catalog}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+      />,
+    );
+
+    const quote = container.querySelector('.bubble-reply-text');
+    expect(quote).toHaveTextContent('🔥 Стикер');
+    expect(quote).not.toHaveTextContent('Фото');
+  });
+});

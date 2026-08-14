@@ -3,6 +3,8 @@ import superAdminApi from '../api/superAdminClient';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 import { formatMoscowDateTime, fromMoscowInputValue, toMoscowInputValue } from '../utils/time';
 import { resolveUploadUrl } from '../utils/uploads';
+import { useDragReorder } from '../utils/useDragReorder';
+import StickerPacksPanel from '../components/StickerPacksPanel';
 
 interface Group {
   id: number;
@@ -1865,83 +1867,9 @@ function EmojiItemGrid({
   onOpen: (item: EmojiItem) => void;
   onReorder: (order: number[]) => void;
 }) {
-  const [order, setOrder] = useState<EmojiItem[]>(items);
-  const [dragId, setDragId] = useState<number | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const gesture = useRef<{ id: number; armed: boolean; moved: boolean; timer?: number } | null>(null);
-
-  // Список принадлежит серверу: после любой его выдачи показываем её, иначе
-  // локальный порядок разъехался бы с настоящим после загрузки или удаления.
-  useEffect(() => { setOrder(items); }, [items]);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    const block = (e: TouchEvent) => { if (gesture.current?.armed) e.preventDefault(); };
-    node.addEventListener('touchmove', block, { passive: false });
-    return () => node.removeEventListener('touchmove', block);
-  }, []);
-
-  const finish = (commit: boolean) => {
-    const g = gesture.current;
-    gesture.current = null;
-    if (g?.timer) window.clearTimeout(g.timer);
-    setDragId(null);
-    if (commit && g?.armed) onReorder(order.map((i) => i.id));
-    return g;
-  };
-
-  const moveTo = (id: number, overId: number) => {
-    if (id === overId) return;
-    setOrder((prev) => {
-      const from = prev.findIndex((i) => i.id === id);
-      const to = prev.findIndex((i) => i.id === overId);
-      if (from < 0 || to < 0) return prev;
-      const next = prev.slice();
-      next.splice(to, 0, next.splice(from, 1)[0]);
-      return next;
-    });
-  };
-
-  const handlePointerDown = (e: React.PointerEvent, item: EmojiItem) => {
-    if (e.button != null && e.button !== 0) return;
-    const armNow = e.pointerType === 'mouse';
-    gesture.current = { id: item.id, armed: armNow, moved: false };
-    if (armNow) {
-      setDragId(item.id);
-    } else {
-      // Пальцем — только после удержания, иначе сетку нельзя прокрутить.
-      gesture.current.timer = window.setTimeout(() => {
-        if (gesture.current && !gesture.current.moved) {
-          gesture.current.armed = true;
-          setDragId(item.id);
-        }
-      }, 260);
-    }
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const g = gesture.current;
-    if (!g) return;
-    if (!g.armed) {
-      // Движение до срабатывания удержания — это прокрутка, а не перетаскивание.
-      g.moved = true;
-      if (g.timer) window.clearTimeout(g.timer);
-      gesture.current = null;
-      return;
-    }
-    g.moved = true;
-    const under = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-emoji-id]');
-    const overId = under ? Number((under as HTMLElement).dataset.emojiId) : NaN;
-    if (Number.isFinite(overId)) moveTo(g.id, overId);
-  };
-
-  const handlePointerUp = (item: EmojiItem) => {
-    const g = finish(true);
-    // Не тянули, а просто нажали — открываем карточку.
-    if (g && !g.moved) onOpen(item);
-  };
+  const { order, dragId, containerRef, tileHandlers } = useDragReorder({
+    items, onReorder, dataAttribute: 'data-emoji-id', onTap: onOpen,
+  });
 
   return (
     <div className="sa-emoji-grid" ref={containerRef}>
@@ -1952,10 +1880,7 @@ function EmojiItemGrid({
           data-emoji-id={item.id}
           className={`sa-emoji-tile${dragId === item.id ? ' is-dragging' : ''}${item.retired ? ' is-retired' : ''}`}
           title={item.file_path ? `:${item.name}:` : item.emoji}
-          onPointerDown={(e) => handlePointerDown(e, item)}
-          onPointerMove={handlePointerMove}
-          onPointerUp={() => handlePointerUp(item)}
-          onPointerCancel={() => finish(false)}
+          {...tileHandlers(item)}
         >
           {item.file_path ? (
             <img src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} draggable={false} />
@@ -1969,7 +1894,7 @@ function EmojiItemGrid({
   );
 }
 
-type Tab = 'users' | 'internet' | 'groups' | 'departments' | 'emoji' | 'reactions' | 'selfchat' | 'google' | 'updates';
+type Tab = 'users' | 'internet' | 'groups' | 'departments' | 'emoji' | 'stickers' | 'reactions' | 'selfchat' | 'google' | 'updates';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'users', label: 'Пользователи' },
@@ -1977,6 +1902,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'groups', label: 'Группы' },
   { id: 'departments', label: 'Отделы' },
   { id: 'emoji', label: 'Смайлики' },
+  { id: 'stickers', label: 'Стикеры' },
   { id: 'reactions', label: 'Реакции' },
   { id: 'selfchat', label: 'Избранное' },
   { id: 'google', label: 'Google Календарь' },
@@ -2064,6 +1990,7 @@ export default function SuperAdminApp() {
         {tab === 'groups' && <GroupsPanel groups={groups} onChanged={load} />}
         {tab === 'departments' && <DepartmentsPanel departments={departments} onChanged={load} />}
         {tab === 'emoji' && <EmojiPacksPanel />}
+        {tab === 'stickers' && <StickerPacksPanel />}
         {tab === 'reactions' && <ReactionsPanel />}
         {tab === 'selfchat' && <SelfChatPanel />}
         {tab === 'google' && <GoogleCalendarPanel users={users} />}

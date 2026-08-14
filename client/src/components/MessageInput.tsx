@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { App as CapApp } from '@capacitor/app';
-import EmojiPicker from './EmojiPicker';
+import ContentPicker from './ContentPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
 import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
 import { isNativeMobile } from '../utils/mobileNotify';
@@ -37,6 +37,8 @@ export interface ReplyingMessage {
   text: string;
   author: string;
   hasImage: boolean;
+  /** Эмодзи стикера, если отвечают на стикер: текста у него нет. */
+  stickerFallback?: string | null;
 }
 
 interface MessageInputProps {
@@ -56,6 +58,8 @@ interface MessageInputProps {
   onCancelReply?: () => void;
   /** Открыть отдельный редактор опроса из меню вложений. */
   onCreatePoll?: () => void;
+  /** Отправка стикера из общей панели выбора — сразу, без прикрепления. */
+  onSendSticker?: (stickerId: number) => void;
   /** Каталог кастомных смайликов — для цитат в панелях правки и ответа. */
   customEmoji?: CustomEmojiMap;
   /** Явное действие «Ответить» может сразу передать фокус новому композеру. */
@@ -84,7 +88,7 @@ let stagedSeq = 0;
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend, onTyping, disabled, placeholder,
   editing, onSubmitEdit, onCancelEdit, onRequestEditLast,
-  replying, onCancelReply, onCreatePoll, customEmoji = {}, autoFocus = false,
+  replying, onCancelReply, onCreatePoll, onSendSticker, customEmoji = {}, autoFocus = false,
 }) => {
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<StagedImage[]>([]);
@@ -704,7 +708,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
         onChange={(e) => { stageFiles(e.target.files); e.target.value = ''; }}
       />
 
-      {emojiOpen && !isNativeMobile && <EmojiPicker onPick={insertEmoji} onClose={() => closeEmoji(false)} />}
+      {emojiOpen && !isNativeMobile && (
+        <ContentPicker
+          onPick={insertEmoji}
+          onSendSticker={onSendSticker ? (id) => { onSendSticker(id); closeEmoji(false); } : undefined}
+          onClose={() => closeEmoji(false)}
+        />
+      )}
 
       {attachMenuOpen && !editing && (
         <div className="composer-attach-menu" ref={attachMenuRef} role="menu" aria-label="Добавить к сообщению">
@@ -763,7 +773,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
             <div className="composer-editing-text">
               {replying.text
                 ? renderTextWithEmoji(replying.text, customEmoji, `cr${replying.id}`)
-                : (replying.hasImage ? '📷 Фото' : '')}
+                : (replying.hasImage
+                  ? '📷 Фото'
+                  : (replying.stickerFallback ? `${replying.stickerFallback} Стикер` : ''))}
             </div>
           </div>
           <button type="button" className="composer-editing-cancel" onClick={() => onCancelReply?.()} aria-label="Отменить ответ">
@@ -910,7 +922,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
         <div
           className={'mobile-emoji-surface' + (surfaceActive ? ' is-surface-active' : '') + (mobileEmojiVisible ? ' is-emoji-visible' : '') + (emojiOpen ? ' is-emoji-mode' : '')}
         >
-          <EmojiPicker onPick={insertEmoji} onClose={() => closeEmoji(false)} mobilePanel />
+          <ContentPicker
+            onPick={insertEmoji}
+            onSendSticker={onSendSticker ? (id) => { onSendSticker(id); closeEmoji(false); } : undefined}
+            onClose={() => closeEmoji(false)}
+            mobilePanel
+          />
         </div>
       )}
     </form>

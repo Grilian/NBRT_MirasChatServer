@@ -8,6 +8,7 @@ import PollCreator from './PollCreator';
 import PollCard from './PollCard';
 import { MessageReaction } from './ReactionDetailsModal';
 import { CustomEmojiMap, renderMessageText } from '../utils/customEmoji';
+import { StickerCatalog } from '../utils/stickerCatalog';
 import { resolveUploadUrl } from '../utils/uploads';
 import { formatMoscowTime } from '../utils/time';
 import { Poll, PollDraft } from '../types/poll';
@@ -21,6 +22,8 @@ interface ThreadMessage {
   file_path?: string | null;
   file_width?: number | null;
   file_height?: number | null;
+  sticker_id?: number | null;
+  sticker_fallback?: string | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -33,6 +36,7 @@ interface ThreadMessage {
   reply_to_id?: number | null;
   reply_to_text?: string | null;
   reply_to_file?: string | null;
+  reply_to_sticker_fallback?: string | null;
   reply_to_author?: string | null;
   reply_to_deleted?: number | boolean | null;
   reactions?: MessageReaction[];
@@ -48,6 +52,8 @@ interface ThreadResponse {
 interface ThreadPanelProps {
   /** Разделитель для ручного изменения ширины — рисует владелец раскладки. */
   resizeHandle?: React.ReactNode;
+  /** Каталог стикеров — прокидывается в ленту ветки, как и каталог смайликов. */
+  stickerCatalog?: StickerCatalog;
   rootId: number;
   currentUserId: number;
   socket: Socket;
@@ -84,7 +90,7 @@ function makeClientMessageId(): string {
 
 const ThreadPanel: React.FC<ThreadPanelProps> = ({
   resizeHandle,
-  rootId, currentUserId, socket, customEmoji, reactionEmoji, autoFocus, disabled, readActive = true,
+  rootId, currentUserId, socket, customEmoji, stickerCatalog, reactionEmoji, autoFocus, disabled, readActive = true,
   onClose, onSummary, onRead,
   onRequestDelete, onRemoveReaction,
 }) => {
@@ -276,6 +282,14 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
       });
   }), [rootId, socket]);
 
+  // Стикер в ветке отправляется тем же событием, что и текст, — своей очереди
+  // у ветки нет (её сообщения не проходят через outgoingQueue), поэтому просто
+  // отдельный вызов вместо прикрепления к полю ввода.
+  const sendSticker = useCallback(async (stickerId: number) => {
+    const result = await emitThreadMessage({ stickerId, replyToId: replying?.id });
+    if (result.ok) setReplying(null);
+  }, [emitThreadMessage, replying]);
+
   const send = useCallback(async (text: string, image?: PendingImage): Promise<SendResult> => {
     const replyToId = replying?.id;
     if (!image) {
@@ -364,6 +378,7 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
               onStartReply={setReplying}
               reactionEmoji={reactionEmoji}
               customEmoji={customEmoji}
+              stickerCatalog={stickerCatalog}
               onToggleReaction={(messageId, emoji) => socket.emit('reaction_set', { messageId, emoji })}
               onRemoveReaction={onRemoveReaction}
               onVotePoll={(pollId, optionIds) => socket.emit('poll_vote', { pollId, optionIds })}
@@ -383,6 +398,7 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
             replying={replying}
             onCancelReply={() => setReplying(null)}
             onCreatePoll={() => setPollOpen(true)}
+            onSendSticker={sendSticker}
           />
         </>
       )}

@@ -212,7 +212,7 @@ router.get('/meta/last', verifyToken, (req, res) => {
     // «Последнее» считаем персонально: сообщение, скрытое этим человеком у
     // себя, не должно оставаться превью его чата — там встаёт предыдущее.
     const rows = db.prepare(`
-      SELECT m.chat_id, m.text, m.file_path, m.created_at, m.deleted
+      SELECT m.chat_id, m.text, m.file_path, m.sticker_id, m.sticker_fallback, m.created_at, m.deleted
       FROM messages m
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
@@ -235,6 +235,8 @@ router.get('/meta/last', verifyToken, (req, res) => {
         chat_id: row.chat_id,
         text: row.deleted ? '' : row.text,
         file_path: row.deleted ? null : row.file_path,
+        sticker_id: row.deleted ? null : row.sticker_id,
+        sticker_fallback: row.deleted ? null : row.sticker_fallback,
         created_at: row.created_at,
       };
     });
@@ -294,9 +296,9 @@ router.get('/:chatId', verifyToken, (req, res) => {
 
     const messages = useCursor
       ? db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
                  m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
-                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
+                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.sticker_fallback AS reply_to_sticker_fallback, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
                  (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
           FROM messages m
@@ -310,9 +312,9 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LIMIT ?
         `).all(req.userId, chatId, before, req.userId, limit)
       : db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
+          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
                  m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
-                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.deleted AS reply_to_deleted,
+                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.sticker_fallback AS reply_to_sticker_fallback, rm.deleted AS reply_to_deleted,
                  COALESCE(ru.display_name, ru.username) AS reply_to_author,
                  (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
           FROM messages m
@@ -340,12 +342,15 @@ router.get('/:chatId', verifyToken, (req, res) => {
         m.file_path = null;
         m.file_width = null;
         m.file_height = null;
+        m.sticker_id = null;
+        m.sticker_fallback = null;
       }
       // То же и для цитаты: ответить успели, а исходное потом удалили —
       // содержимое не должно уехать наружу окольным путём, через ответ.
       if (m.reply_to_deleted) {
         m.reply_to_text = '';
         m.reply_to_file = null;
+        m.reply_to_sticker_fallback = null;
       }
     }
 

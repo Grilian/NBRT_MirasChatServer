@@ -10,6 +10,13 @@ export interface OutgoingPayload {
   forwardedFromName?: string;
   forwardedFromChat?: string;
   poll?: unknown;
+  /**
+   * Стикер — самостоятельный тип сообщения, отправляется сразу тапом в
+   * пикере, а не через прикрепление к полю ввода. Заведён на том же уровне,
+   * что filePath: очередь отправки (pending/failed/retry) уже построена для
+   * изображений и работает для стикера без единой лишней строки.
+   */
+  stickerId?: number;
   attachment?: {
     name: string;
     type: string;

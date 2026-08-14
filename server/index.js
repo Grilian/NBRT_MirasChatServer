@@ -25,6 +25,7 @@ const departmentsRoutes = require('./routes/departments');
 const groupsRoutes = require('./routes/groups');
 const tasksRoutes = require('./routes/tasks');
 const emojiRoutes = require('./routes/emoji');
+const stickerRoutes = require('./routes/stickers');
 const notificationSettingsRoutes = require('./routes/notificationSettings');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
@@ -96,7 +97,7 @@ function readCountsPayload(chatId, ids) {
 // обстоятельствах, включая цитаты.
 function replyPreviewOf(replyToId) {
   const row = db.prepare(`
-    SELECT m.text, m.file_path, m.deleted, u.username, u.display_name
+    SELECT m.text, m.file_path, m.sticker_fallback, m.deleted, u.username, u.display_name
     FROM messages m JOIN users u ON u.id = m.sender_id
     WHERE m.id = ?
   `).get(replyToId);
@@ -104,6 +105,7 @@ function replyPreviewOf(replyToId) {
   return {
     reply_to_text: row.deleted ? '' : row.text,
     reply_to_file: row.deleted ? null : row.file_path,
+    reply_to_sticker_fallback: row.deleted ? null : row.sticker_fallback,
     reply_to_author: row.display_name || row.username,
     reply_to_deleted: row.deleted ? 1 : 0,
   };
@@ -180,6 +182,7 @@ app.use('/api/departments', departmentsRoutes);
 app.use('/api/groups', verifyToken, groupsRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/emoji', emojiRoutes);
+app.use('/api/stickers', stickerRoutes);
 app.use('/api/notification-settings', notificationSettingsRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
@@ -471,14 +474,20 @@ io.on('connection', (socket) => {
     }
 
     const text = typeof data.text === 'string' ? data.text.trim() : '';
+    // Стикер сам себе довольно — без подписи, как и опрос без картинки:
+    // проверяем запрос на стикер ДО финального текста, чтобы случайно
+    // прицепленный текст не осел рядом с ним в БД.
+    const stickerRequested = Number.isInteger(Number(data.stickerId));
     // Обрезка не должна разрубить код кастомного смайлика: огрызок ":cat" уже
     // не станет картинкой и остался бы в БД навсегда техническим текстом.
     // Клиент режет текст сам, но его обрезку можно обойти — это последняя линия.
     const finalText = pollDraft
       ? pollDraft.question
-      : (text.length > MAX_MESSAGE_LENGTH
-        ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '')
-        : text);
+      : stickerRequested
+        ? ''
+        : (text.length > MAX_MESSAGE_LENGTH
+          ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '')
+          : text);
 
     // Картинка приходит уже загруженной отдельным REST-запросом (см.
     // POST /api/messages/upload-image) — сюда попадает только путь к ней.
@@ -490,8 +499,19 @@ io.on('connection', (socket) => {
     const fileWidth = hasImage && Number.isFinite(Number(data.fileWidth)) ? Number(data.fileWidth) : null;
     const fileHeight = hasImage && Number.isFinite(Number(data.fileHeight)) ? Number(data.fileHeight) : null;
 
-    // Сообщение без текста и без картинки — отправлять нечего.
-    if (!finalText && !filePath) { respond({ ok: false, error: 'empty_message' }); return; }
+    // Стикер — самостоятельный тип сообщения, исключает и текст, и картинку.
+    // Клиент присылает только id уже существующего элемента пака — сам
+    // стикер грузится заранее через админку, а не в момент отправки,
+    // поэтому здесь просто проверка по базе, а не файл.
+    const hasSticker = !pollDraft && !hasImage && stickerRequested;
+    const stickerRow = hasSticker
+      ? db.prepare('SELECT id, emoji FROM sticker_items WHERE id = ?').get(Number(data.stickerId))
+      : null;
+    const stickerId = stickerRow ? stickerRow.id : null;
+    const stickerFallback = stickerRow ? stickerRow.emoji : null;
+
+    // Сообщение без текста, картинки и стикера — отправлять нечего.
+    if (!finalText && !filePath && !stickerId) { respond({ ok: false, error: 'empty_message' }); return; }
 
     // Ответ: id принимаем только если это сообщение существует и лежит в ЭТОМ
     // же чате — иначе цитатой можно было бы вытащить кусок чужой переписки,
@@ -552,15 +572,17 @@ io.on('connection', (socket) => {
       const stmt = db.prepare(`
         INSERT INTO messages
           (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip,
-           reply_to_id, forwarded_from_name, forwarded_from_chat, client_message_id, force_notification)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           reply_to_id, forwarded_from_name, forwarded_from_chat, client_message_id, force_notification,
+           sticker_id, sticker_fallback)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       // Сообщение и опрос — одна атомарная операция: нельзя оставить в ленте
       // текст вопроса без вариантов, если вставка опроса оборвалась.
       const persist = db.transaction(() => {
         const result = stmt.run(
           data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
-          finalReplyTo, forwardedFromName, forwardedFromChat, clientMessageId, forceNotification ? 1 : 0
+          finalReplyTo, forwardedFromName, forwardedFromChat, clientMessageId, forceNotification ? 1 : 0,
+          stickerId, stickerFallback
         );
         const poll = pollDraft
           ? insertPoll(result.lastInsertRowid, data.chatId, senderId, pollDraft)
@@ -583,6 +605,8 @@ io.on('connection', (socket) => {
         file_path: filePath,
         file_width: fileWidth,
         file_height: fileHeight,
+        sticker_id: stickerId,
+        sticker_fallback: stickerFallback,
         status: 'sent',
         created_at: new Date().toISOString(),
         force_notification: forceNotification,
@@ -776,14 +800,25 @@ io.on('connection', (socket) => {
       let pollDraft = null;
       if (data.poll != null) pollDraft = normalizePollDraft(data.poll);
       const rawText = typeof data.text === 'string' ? data.text.trim() : '';
+      // См. основной обработчик chat_message: стикер исключает подпись, так
+      // что случайно прицепленный текст не оседает рядом с ним в БД.
+      const stickerRequested = Number.isInteger(Number(data.stickerId));
       const text = pollDraft
         ? pollDraft.question
-        : rawText.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '');
+        : stickerRequested
+          ? ''
+          : rawText.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '');
       const hasImage = !pollDraft && typeof data.filePath === 'string' && isValidChatImagePath(data.filePath);
       const filePath = hasImage ? data.filePath : null;
       const fileWidth = hasImage && Number.isFinite(Number(data.fileWidth)) ? Number(data.fileWidth) : null;
       const fileHeight = hasImage && Number.isFinite(Number(data.fileHeight)) ? Number(data.fileHeight) : null;
-      if (!text && !filePath) { respond({ ok: false, error: 'empty_message' }); return; }
+      const hasSticker = !pollDraft && !hasImage && stickerRequested;
+      const stickerRow = hasSticker
+        ? db.prepare('SELECT id, emoji FROM sticker_items WHERE id = ?').get(Number(data.stickerId))
+        : null;
+      const stickerId = stickerRow ? stickerRow.id : null;
+      const stickerFallback = stickerRow ? stickerRow.emoji : null;
+      if (!text && !filePath && !stickerId) { respond({ ok: false, error: 'empty_message' }); return; }
 
       const requestedReply = Number(data.replyToId);
       const replySource = Number.isInteger(requestedReply) && requestedReply > 0
@@ -797,10 +832,12 @@ io.on('connection', (socket) => {
         const result = db.prepare(`
           INSERT INTO messages
             (chat_id, sender_id, text, file_path, file_width, file_height, status,
-             sender_ip, reply_to_id, client_message_id, thread_root_id, force_notification)
-          VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?)
+             sender_ip, reply_to_id, client_message_id, thread_root_id, force_notification,
+             sticker_id, sticker_fallback)
+          VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, ?, ?)
         `).run(root.chat_id, senderId, text, filePath, fileWidth, fileHeight,
-          clientIpOf(socket), replyToId, clientMessageId, root.id, forceNotification ? 1 : 0);
+          clientIpOf(socket), replyToId, clientMessageId, root.id, forceNotification ? 1 : 0,
+          stickerId, stickerFallback);
         const poll = pollDraft ? insertPoll(result.lastInsertRowid, root.chat_id, senderId, pollDraft) : null;
         return { result, pollId: poll ? poll.id : null };
       });
@@ -817,6 +854,8 @@ io.on('connection', (socket) => {
         file_path: filePath,
         file_width: fileWidth,
         file_height: fileHeight,
+        sticker_id: stickerId,
+        sticker_fallback: stickerFallback,
         status: 'sent',
         created_at: new Date().toISOString(),
         force_notification: forceNotification,
