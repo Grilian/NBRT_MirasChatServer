@@ -306,7 +306,9 @@ test('отключённые уведомления видно по значку
 
 test('фильтры отбирают список, не превращаясь в отдельные экраны', () => {
   renderRoster();
-  const names = () => [...document.querySelectorAll('.row-name span')].map((n) => n.textContent);
+  // Array.from, а не спред: у проекта target ниже es2015, и спред по NodeList
+  // не собирается (ловится только production-сборкой, тесты его переживают).
+  const names = () => Array.from(document.querySelectorAll('.row-name span')).map((n) => n.textContent);
 
   expect(names()).toEqual(expect.arrayContaining(['Анна', 'Отдел', 'Объявления', 'Общий чат', 'Избранное']));
 
