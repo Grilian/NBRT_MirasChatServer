@@ -512,17 +512,53 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }
   }, [setMobileEmojiVisible, setMobileMode]);
 
-  const stageFiles = (files: FileList | File[] | null | undefined) => {
+  const stageFiles = async (files: FileList | File[] | null | undefined) => {
     if (!files || disabled) return;
     const picked = Array.from(files).filter((f) => IMAGE_MIME.includes(f.type));
     if (picked.length === 0) return;
 
-    const next = picked.map((file) => {
-      const id = ++stagedSeq;
-      const previewUrl = URL.createObjectURL(file);
-      return { id, file, previewUrl, error: null } as StagedImage;
-    });
-    setStaged((prev) => [...prev, ...next]);
+    // Байты читаем СРАЗУ при выборе, а не в момент отправки.
+    //
+    // File — это лишь ссылка на файл операционной системы. Между выбором
+    // картинки и нажатием «Отправить» проходят секунды и минуты: за это время
+    // Android успевает убрать временный файл, отданный камерой или чужим
+    // приложением через «Поделиться», а снимок могут просто удалить из
+    // галереи. Тогда чтение при отправке падало, и человек видел «Файл удалён
+    // или недоступен» с уже набранной подписью — а воспроизвести это нарочно
+    // невозможно, потому что зависит от чужого приложения и времени.
+    //
+    // Своя копия в памяти разрывает эту зависимость: после выбора отправка уже
+    // ни от чего снаружи не зависит. Цена — держать снимок в памяти, пока его
+    // не отправят; для картинок предел и так 20 МБ.
+    const prepared: StagedImage[] = [];
+    let failed = 0;
+    for (const file of picked) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const buffer = await file.arrayBuffer();
+        const copy = new File([buffer], file.name || 'image', {
+          type: file.type || 'image/jpeg',
+          lastModified: file.lastModified,
+        });
+        prepared.push({
+          id: ++stagedSeq,
+          file: copy,
+          previewUrl: URL.createObjectURL(copy),
+          error: null,
+        } as StagedImage);
+      } catch {
+        // Не прочиталось прямо сейчас — говорим об этом сразу, а не после
+        // того, как человек напишет подпись и нажмёт отправку.
+        failed += 1;
+      }
+    }
+
+    if (failed) {
+      setFileError(failed === picked.length
+        ? 'Не удалось прочитать изображение. Выберите его заново'
+        : `Не удалось прочитать изображений: ${failed}. Выберите их заново`);
+    }
+    if (prepared.length) setStaged((prev) => [...prev, ...prepared]);
   };
 
   // Файл уходит сразу после выбора, без прикрепления к полю: он и не
@@ -700,7 +736,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       if (IMAGE_MIME.includes(item.type)) {
         e.preventDefault();
         const pasted = item.getAsFile();
-        if (pasted) stageFiles([pasted]);
+        if (pasted) void stageFiles([pasted]);
         return;
       }
     }
@@ -710,7 +746,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     e.preventDefault();
     setDragActive(false);
     // Бросить можно сразу несколько файлов — берём все.
-    stageFiles(e.dataTransfer.files);
+    void stageFiles(e.dataTransfer.files);
   };
 
   const remaining = MAX_LENGTH - text.length;
@@ -732,7 +768,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         accept="image/*"
         multiple
         className="composer-file-input"
-        onChange={(e) => { stageFiles(e.target.files); e.target.value = ''; }}
+        onChange={(e) => { void stageFiles(e.target.files); e.target.value = ''; }}
       />
       <input
         ref={docInputRef}
@@ -915,7 +951,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onSubmit={submit}
               onEscape={editing ? cancelEdit : (replying ? onCancelReply : undefined)}
               onArrowUpEmpty={!editing ? onRequestEditLast : undefined}
-              onPasteImageFile={(file) => stageFiles([file])}
+              onPasteImageFile={(file) => { void stageFiles([file]); }}
               onPointerDown={handleMobileFieldPointerDown}
               onFocus={handleMobileFieldFocus}
             />

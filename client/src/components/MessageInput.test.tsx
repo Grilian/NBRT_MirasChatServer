@@ -89,3 +89,79 @@ describe('MessageInput ответ на сообщение', () => {
     expect(document.activeElement).not.toBe(field);
   });
 });
+
+describe('MessageInput прикрепление картинки', () => {
+  // jsdom не реализует объектные URL вовсе — без заглушки падал бы сам
+  // предпросмотр, а не проверяемое поведение.
+  beforeAll(() => {
+    (URL as any).createObjectURL = jest.fn(() => 'blob:preview');
+    (URL as any).revokeObjectURL = jest.fn();
+  });
+  // Настоящий баг: File — это только ссылка на файл системы. Между выбором
+  // картинки и нажатием «Отправить» Android успевает убрать временный файл
+  // (камера, «Поделиться» из чужого приложения) или снимок удаляют из галереи.
+  // Чтение падало ИМЕННО при отправке — с набранной подписью и без объяснения,
+  // почему это случилось именно сейчас.
+
+  function pickImage(container: HTMLElement, file: File) {
+    const input = container.querySelector('input[type="file"][accept*="image"]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    return act(async () => { fireEvent.change(input); });
+  }
+
+  /** Файл, который читается сейчас, но перестанет читаться позже. */
+  function volatileFile(name = 'shot.jpg') {
+    const file = new File([new Uint8Array([1, 2, 3, 4])], name, { type: 'image/jpeg' });
+    let alive = true;
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: () => (alive
+        ? Promise.resolve(new Uint8Array([1, 2, 3, 4]).buffer)
+        : Promise.reject(new DOMException('The requested file could not be read', 'NotReadableError'))),
+      configurable: true,
+    });
+    return { file, vanish: () => { alive = false; } };
+  }
+
+  test('исчезнувший после выбора файл всё равно отправляется — байты уже свои', async () => {
+    const onSend = jest.fn(noopSend);
+    const { container } = render(<MessageInput onSend={onSend} />);
+
+    const { file, vanish } = volatileFile();
+    await pickImage(container, file);
+    // Пока человек пишет подпись, система убирает исходный файл.
+    vanish();
+
+    const field = container.querySelector('.composer-input') as HTMLElement;
+    field.textContent = 'что за ездовой бегемот?)';
+    fireEvent.input(field);
+
+    const sendButton = container.querySelector('.send-btn') as HTMLElement;
+    await act(async () => { fireEvent.pointerDown(sendButton); });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    const image = (onSend.mock.calls[0] as unknown[])[1] as { file: File } | undefined;
+    expect(image).toBeTruthy();
+    // Отправляется НАША копия, а не ссылка на исчезнувший файл.
+    expect(image!.file).not.toBe(file);
+    // jsdom не реализует File.arrayBuffer, поэтому проверяем сам факт копии:
+    // те же байты и имя, но уже независимый от системы объект.
+    expect(image!.file.size).toBe(4);
+    expect(image!.file.name).toBe('shot.jpg');
+    expect(container.querySelector('.composer-file-error')).toBeNull();
+  });
+
+  test('нечитаемый уже при выборе файл объясняется сразу, а не при отправке', async () => {
+    const onSend = jest.fn(noopSend);
+    const { container } = render(<MessageInput onSend={onSend} />);
+
+    const { file, vanish } = volatileFile('gone.jpg');
+    vanish();
+    await pickImage(container, file);
+
+    const error = container.querySelector('.composer-file-error');
+    expect(error).not.toBeNull();
+    expect(error!.textContent).toContain('Выберите его заново');
+    // Прикреплять нечего — превью не появилось.
+    expect(container.querySelector('.composer-attachment')).toBeNull();
+  });
+});
