@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import { fetchRange } from '../calendar/api';
-import { instantOf, todayKey } from '../calendar/dates';
+import { formatClock, instantOf, todayKey } from '../calendar/dates';
 
 // «Главная» — стартовый экран приложения.
 //
@@ -14,11 +14,17 @@ import { instantOf, todayKey } from '../calendar/dates';
 // закреплённое, последние пространства — и добавление блока не должно означать
 // переписывание экрана.
 
+export interface HomeCalendarTarget {
+  occurrenceId: string;
+  startAt: number;
+}
+
 interface DayEvent {
   id: string;
   title: string;
   time: string;
   startAt: number;
+  target: HomeCalendarTarget;
 }
 
 interface HomeCard {
@@ -39,6 +45,7 @@ interface Props {
   onOpenChats: () => void;
   onOpenTasks: () => void;
   onOpenCalendar: () => void;
+  onOpenCalendarEvent: (target: HomeCalendarTarget) => void;
   /**
    * Личное хранилище. На телефоне «Файлы» убраны из нижней панели — места там
    * на пять подписей, — и «Главная» становится единственным входом туда.
@@ -56,11 +63,6 @@ function plural(count: number, one: string, few: string, many: string): string {
   return many;
 }
 
-function formatTime(ms: number | undefined): string {
-  if (!ms) return '';
-  return new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
-
 function greeting(date: Date): string {
   const hour = date.getHours();
   if (hour < 5) return 'Доброй ночи';
@@ -70,7 +72,7 @@ function greeting(date: Date): string {
 }
 
 const HomeSection: React.FC<Props> = ({
-  displayName, unreadTotal, onOpenChats, onOpenTasks, onOpenCalendar, onOpenFiles,
+  displayName, unreadTotal, onOpenChats, onOpenTasks, onOpenCalendar, onOpenCalendarEvent, onOpenFiles,
 }) => {
   const [tasksCount, setTasksCount] = useState<number | null>(null);
   // Расписание дня показывается СПИСКОМ, а не числом: «3 мероприятия» ничего не
@@ -102,11 +104,15 @@ const HomeSection: React.FC<Props> = ({
       .then((data) => {
         if (!alive) return;
         const all = [...data.events, ...data.birthdays].map((item: any) => ({
-          id: `${item.event_id ?? item.id}-${item.start_at ?? 0}`,
+          id: String(item.id ?? `${item.event_id ?? 'event'}:${item.occurrence_start ?? item.starts_at ?? item.start_at ?? 0}`),
           title: item.title || 'Без названия',
           // Событие на весь день времени не имеет — так и показываем.
-          time: item.all_day ? 'весь день' : formatTime(item.start_at),
-          startAt: item.start_at ?? 0,
+          time: item.all_day ? 'весь день' : formatClock(item.starts_at ?? item.start_at),
+          startAt: item.starts_at ?? item.start_at ?? 0,
+          target: {
+            occurrenceId: String(item.id ?? `${item.event_id ?? 'event'}:${item.occurrence_start ?? item.starts_at ?? item.start_at ?? 0}`),
+            startAt: item.starts_at ?? item.start_at ?? 0,
+          },
         }));
         all.sort((a, b) => a.startAt - b.startAt);
         setEvents(all);
@@ -184,7 +190,7 @@ const HomeSection: React.FC<Props> = ({
           <h2>Расписание на сегодня</h2>
           <div className="home-schedule">
             {events.map((event) => (
-              <button key={event.id} type="button" className="home-event" onClick={onOpenCalendar}>
+              <button key={event.id} type="button" className="home-event" onClick={() => onOpenCalendarEvent(event.target)}>
                 <span className="home-event-time">{event.time}</span>
                 <span className="home-event-title">{event.title}</span>
               </button>

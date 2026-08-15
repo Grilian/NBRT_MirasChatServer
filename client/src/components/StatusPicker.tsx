@@ -83,23 +83,28 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
 
   return (
     <div className="status-picker">
-      <div className="status-presets">
-        {STATUS_PRESET_ORDER.map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            className={'status-preset-btn' + (statusPreset === preset ? ' is-active' : '')}
-            disabled={saving}
-            onClick={() => saveStatus(statusPreset === preset ? null : preset, null)}
-          >
-            <span className="status-preset-emoji">{STATUS_PRESETS[preset].emoji}</span>
-            {STATUS_PRESETS[preset].label}
-          </button>
-        ))}
-      </div>
+      <section className="status-picker-section status-quick-section">
+        <div className="status-section-label">Быстрый статус</div>
+        <div className="status-presets">
+          {STATUS_PRESET_ORDER.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              className={'status-preset-btn' + (statusPreset === preset ? ' is-active' : '')}
+              disabled={saving}
+              onClick={() => saveStatus(statusPreset === preset ? null : preset, null)}
+            >
+              <span className="status-preset-emoji">{STATUS_PRESETS[preset].emoji}</span>
+              {STATUS_PRESETS[preset].label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <form className="status-custom-form" onSubmit={submitCustomStatus}>
-        <div className="status-custom-field">
+        <section className="status-picker-section">
+          <div className="status-section-label">Свой статус</div>
+          <div className="status-custom-field">
           <button
             type="button"
             className="status-emoji-btn"
@@ -109,14 +114,15 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
           >
             {emoji}
           </button>
-          <input
-            type="text"
-            placeholder="Свой статус…"
-            value={customStatus}
-            onChange={(e) => setCustomStatus(e.target.value)}
-            maxLength={58}
-          />
-        </div>
+            <input
+              type="text"
+              placeholder="Свой статус…"
+              value={customStatus}
+              onChange={(e) => setCustomStatus(e.target.value)}
+              maxLength={58}
+            />
+          </div>
+        </section>
 
         {emojiOpen && (
           <div className="status-emoji-popover">
@@ -134,8 +140,10 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
           </div>
         )}
 
-        <div className="status-expiry">
-          <div className="status-expiry-row">
+        <section className="status-picker-section">
+          <div className="status-section-label">Когда снять</div>
+          <div className="status-expiry">
+            <div className="status-expiry-row">
             <label htmlFor="status-duration">Снять</label>
             <select
               id="status-duration"
@@ -172,14 +180,15 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
             )}
           </div>
           {until && <p className="status-expiry-hint">{describeUntil(until)}</p>}
-          {!until && statusExpiresAt && hasStatus && (
-            <p className="status-expiry-hint">
-              Сейчас снимется {new Date(statusExpiresAt).toLocaleString('ru-RU', {
-                hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long',
-              })}
-            </p>
-          )}
-        </div>
+            {!until && statusExpiresAt && hasStatus && (
+              <p className="status-expiry-hint">
+                Сейчас снимется {new Date(statusExpiresAt).toLocaleString('ru-RU', {
+                  hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long',
+                })}
+              </p>
+            )}
+          </div>
+        </section>
 
         <div className="status-actions">
           <button type="submit" className="btn-primary" disabled={saving || !customStatus.trim()}>

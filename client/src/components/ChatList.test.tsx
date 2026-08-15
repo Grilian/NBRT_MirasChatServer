@@ -319,7 +319,7 @@ test('фильтры отбирают список, не превращаясь 
   expect(names()).toEqual(['Отдел']);
 
   // «Новостные» — канал-объявление и общий чат: их читают, а не обсуждают.
-  fireEvent.click(screen.getByRole('tab', { name: 'Новостные' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Новости' }));
   expect(names()).toEqual(['Объявления', 'Общий чат']);
 });
 

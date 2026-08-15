@@ -25,9 +25,9 @@ const at = (hours: number, minutes = 0) => {
 
 const EVENTS = {
   events: [
-    { id: 2, event_id: 2, title: 'Планёрка', start_at: at(10, 30) },
-    { id: 1, event_id: 1, title: 'Совещание', start_at: at(9) },
-    { id: 3, event_id: 3, title: 'День открытых дверей', start_at: at(0), all_day: true },
+    { id: 2, event_id: 2, title: 'Планёрка', starts_at: at(10, 30), occurrence_start: at(10, 30) },
+    { id: 1, event_id: 1, title: 'Совещание', starts_at: at(9), occurrence_start: at(9) },
+    { id: 3, event_id: 3, title: 'День открытых дверей', starts_at: at(0), occurrence_start: at(0), all_day: true },
   ],
   birthdays: [],
 };
@@ -42,7 +42,7 @@ beforeEach(() => {
 
 const setup = (unreadTotal = 18) => {
   const handlers = {
-    onOpenChats: jest.fn(), onOpenTasks: jest.fn(), onOpenCalendar: jest.fn(), onOpenFiles: jest.fn(),
+    onOpenChats: jest.fn(), onOpenTasks: jest.fn(), onOpenCalendar: jest.fn(), onOpenCalendarEvent: jest.fn(), onOpenFiles: jest.fn(),
   };
   render(<HomeSection displayName="Алиса" unreadTotal={unreadTotal} {...handlers} />);
   return handlers;
@@ -60,6 +60,8 @@ test('здоровается по имени и показывает распи�
   expect(titles).toEqual(['День открытых дверей', 'Совещание', 'Планёрка']);
   // Событие на весь день времени не имеет — так и подписано.
   expect(document.querySelectorAll('.home-event-time')[0].textContent).toBe('весь день');
+  expect(document.querySelectorAll('.home-event-time')[1].textContent).toBe('09:00');
+  expect(document.querySelectorAll('.home-event-time')[2].textContent).toBe('10:30');
 });
 
 test('счётчики и расписание ведут в свои разделы', async () => {
@@ -67,7 +69,7 @@ test('счётчики и расписание ведут в свои разде
   await screen.findByText('Совещание');
 
   fireEvent.click(screen.getByText('Совещание').closest('button')!);
-  expect(handlers.onOpenCalendar).toHaveBeenCalled();
+  expect(handlers.onOpenCalendarEvent).toHaveBeenCalledWith(expect.objectContaining({ startAt: expect.any(Number) }));
 
   fireEvent.click(screen.getByText('непрочитанных сообщений').closest('button')!);
   expect(handlers.onOpenChats).toHaveBeenCalled();

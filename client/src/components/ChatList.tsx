@@ -169,10 +169,10 @@ const PULL_TO_SEARCH_PX = 56;
 export type ChatFilter = 'all' | 'direct' | 'groups' | 'news';
 
 const FILTERS: { id: ChatFilter; label: string }[] = [
-  { id: 'all', label: 'Все чаты' },
+  { id: 'all', label: 'Все' },
   { id: 'direct', label: 'Личные' },
   { id: 'groups', label: 'Группы' },
-  { id: 'news', label: 'Новостные' },
+  { id: 'news', label: 'Новости' },
 ];
 
 function matchesFilter(chat: Chat, filter: ChatFilter): boolean {
@@ -576,9 +576,9 @@ const ChatList: React.FC<ChatListProps> = ({
                       )}
                     </div>
                     <div className="row-side">
-                      {/* Закрепление и время — одна плашка, а не два элемента:
-                          закреплённый чат должен узнаваться сразу, но ради
-                          этого нельзя занимать ещё одну колонку в строке. */}
+                      {/* Закрепление и время остаются в верхней строке рядом с
+                          именем. Галочки переехали к превью ниже: иначе правая
+                          колонка делала row-top двухэтажным и сдвигала текст. */}
                       {(last || isFavorite) && (
                         <div className={'row-stamp' + (isFavorite ? ' is-pinned' : '')}>
                           {isFavorite && (
@@ -589,8 +589,23 @@ const ChatList: React.FC<ChatListProps> = ({
                           {last ? formatChatListTime(last.created_at) : 'закреплён'}
                         </div>
                       )}
-                      {/* Галочки — то же состояние, что и в самой переписке:
-                          отдельной механики статусов тут не заводится. */}
+                    </div>
+                  </div>
+                  {chat.comment && <div className="row-comment">{chat.comment}</div>}
+                  <div className="row-bottom">
+                    {/* Миниатюра — часть превью, а не отдельная колонка: она
+                        стоит перед текстом и не растит высоту строки. */}
+                    {previewThumb && (
+                      <img className="row-thumb" src={previewThumb} alt="" loading="lazy" decoding="async" />
+                    )}
+                    <div className="row-preview">
+                      {previewPrefix && <span className="row-preview-author">{previewPrefix}</span>}
+                      {previewBody}
+                    </div>
+                    <div className="row-side-bottom">
+                      {/* Статус исходящего сообщения стоит в ОДНОЙ строке с
+                          превью. Так появление галочек не меняет высоту верхней
+                          строки и не ломает привычный ритм списка. */}
                       {outgoingStatus && (
                         <span
                           className={'row-check' + (outgoingStatus === 'read' ? ' is-read' : '')}
@@ -604,18 +619,6 @@ const ChatList: React.FC<ChatListProps> = ({
                         </span>
                       )}
                       {unreadCount > 0 && <span className="row-unread">{unreadCount > 999 ? '999+' : unreadCount}</span>}
-                    </div>
-                  </div>
-                  {chat.comment && <div className="row-comment">{chat.comment}</div>}
-                  <div className="row-bottom">
-                    {/* Миниатюра — часть превью, а не отдельная колонка: она
-                        стоит перед текстом и не растит высоту строки. */}
-                    {previewThumb && (
-                      <img className="row-thumb" src={previewThumb} alt="" loading="lazy" decoding="async" />
-                    )}
-                    <div className="row-preview">
-                      {previewPrefix && <span className="row-preview-author">{previewPrefix}</span>}
-                      {previewBody}
                     </div>
                   </div>
                 </div>

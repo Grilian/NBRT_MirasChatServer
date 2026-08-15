@@ -373,11 +373,11 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 /* Разделитель правой области — на её ЛЕВОЙ границе, зеркально списку чатов. */
 .right-panel-resizer {
-  position: absolute; top: 0; left: -3px; width: 7px; height: 100%; z-index: 6;
+  position: absolute; top: 0; left: 0; width: 9px; height: 100%; z-index: 20;
   cursor: col-resize; touch-action: none; background: transparent;
 }
 .right-panel-resizer::after {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px;
   background: transparent; transition: background var(--ease);
 }
 .right-panel-resizer:hover::after { background: var(--accent); }
@@ -554,7 +554,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   cursor: col-resize; touch-action: none; background: transparent;
 }
 .roster-resizer::after {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px;
   background: var(--accent); opacity: 0; transition: opacity var(--ease);
 }
 .roster-resizer:hover::after { opacity: .6; }
@@ -3418,3 +3418,268 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .sa-release.is-current { border-color: var(--accent); }
 .sa-release-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+
+/* ===== 2026-08 client polish: список чатов, статусы, прозрачные групповые аватары ===== */
+
+/* Загруженные групповые аватары часто являются PNG/WebP-логотипами с
+   прозрачными полями. Не превращаем их в круглую фотографию и не обрезаем
+   углы: картинка должна сохранить собственный силуэт и альфа-канал. */
+.avatar.avatar-photo {
+  object-fit: contain;
+  border-radius: 0;
+  background: transparent;
+  background-color: transparent;
+}
+.row-avatar-btn:has(.avatar-photo) { border-radius: var(--radius-sm); }
+
+/* Фильтры — вспомогательная навигация, поэтому держим их заметно компактнее
+   поиска и строк чатов. Короткие подписи заданы в ChatList.tsx. */
+.roster-filters {
+  gap: 4px;
+  padding: 0 10px 6px;
+}
+.roster-filter {
+  padding: 4px 9px;
+  min-height: 26px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Верхняя строка теперь содержит только имя + дату/закрепление. Галочки и
+   unread живут рядом с превью снизу — их появление больше не увеличивает
+   высоту row-top и не сдвигает текст сообщения на третью строку. */
+.row-top { align-items: center; }
+.row-side {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+}
+.row-bottom { min-height: 20px; }
+.row-side-bottom {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-left: 4px;
+}
+.row-check { height: 18px; align-items: center; }
+.row-check svg { width: 16px; height: 16px; }
+
+/* ---- Современное окно статуса ----
+   Это тот же StatusPicker и в отдельном окне, и в профиле. Визуальная
+   иерархия строится слоями: карточка -> секции -> поля, вместо набора плоских
+   контролов на одном фоне. */
+.status-sheet {
+  max-width: 460px;
+  width: min(460px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--accent) 22%);
+  border-radius: 22px;
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .34), 0 2px 10px rgba(0, 0, 0, .14);
+}
+.status-sheet-head {
+  min-height: 68px;
+  padding: 12px 14px 11px 18px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 42%),
+    var(--paper-raised);
+}
+.status-sheet-heading { display: flex; flex-direction: column; gap: 2px; }
+.status-sheet .settings-title { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.status-sheet-subtitle { font-size: 12px; line-height: 1.35; color: var(--ink-muted); font-weight: 400; }
+.status-sheet-body {
+  padding: 14px;
+  background: var(--paper-sunken);
+}
+
+.status-picker { display: flex; flex-direction: column; gap: 10px; }
+.status-picker-section {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--paper-raised);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 8px 22px rgba(0, 0, 0, .035);
+}
+.status-section-label {
+  margin: 0 0 9px 2px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+.status-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0;
+}
+.status-preset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+  transition: transform .12s ease, border-color var(--ease), background var(--ease), box-shadow var(--ease);
+}
+.status-preset-btn:hover {
+  background: var(--row-hover);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .07);
+}
+.status-preset-btn:active { transform: translateY(1px) scale(.99); }
+.status-preset-btn.is-active {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.status-preset-emoji { font-size: 17px; line-height: 1; }
+
+.status-custom-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  position: relative;
+}
+.status-custom-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 4px 7px 4px 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .035);
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+}
+.status-custom-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.status-custom-field input,
+.status-custom-form input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 3px;
+  font: 500 13.5px/1.2 var(--font-ui);
+}
+.status-custom-field input::placeholder { color: var(--ink-faint); font-weight: 400; }
+.status-emoji-btn {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--paper-sunken);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform .12s ease, background var(--ease), border-color var(--ease);
+}
+.status-emoji-btn:hover { background: var(--row-hover); border-color: var(--line); }
+.status-emoji-btn:active { transform: scale(.96); }
+.status-emoji-popover {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--paper-raised);
+  max-height: 260px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .18);
+}
+
+.status-expiry { display: flex; flex-direction: column; gap: 7px; }
+.status-expiry-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+.status-expiry-row label {
+  min-width: 0;
+  padding-left: 2px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.status-expiry-row select,
+.status-expiry-row input[type="datetime-local"] {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 12.5px/1 var(--font-ui);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .035);
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.status-expiry-row select:focus,
+.status-expiry-row input[type="datetime-local"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.status-expiry-clear {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+.status-expiry-hint {
+  margin: 1px 0 0 50px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--ink-faint);
+}
+.status-actions {
+  display: flex;
+  gap: 8px;
+  padding: 2px 1px 0;
+}
+.status-actions .btn-primary {
+  flex: 1;
+  min-height: 42px;
+  border-radius: 12px;
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.status-actions .sa-btn-ghost {
+  min-height: 42px;
+  border-radius: 12px;
+}
+
+@media (max-width: 520px) {
+  .status-sheet { width: calc(100vw - 16px); border-radius: 20px; }
+  .status-sheet-body { padding: 10px; }
+  .status-picker-section { padding: 10px; }
+  .status-expiry-row { grid-template-columns: 36px minmax(0, 1fr); }
+  .status-expiry-clear { grid-column: 2; justify-self: start; }
+  .status-expiry-hint { margin-left: 44px; }
+}

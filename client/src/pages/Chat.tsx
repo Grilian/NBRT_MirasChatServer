@@ -20,7 +20,7 @@ import Avatar from '../components/Avatar';
 import NavRail, { SectionId, isSectionAllowedFor, mobileSectionsFor, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
 import FilesSection from '../components/FilesSection';
-import HomeSection from '../components/HomeSection';
+import HomeSection, { HomeCalendarTarget } from '../components/HomeSection';
 import TasksPanel from '../tasks/TasksPanel';
 import CalendarSection from '../components/CalendarSection';
 import PeopleSection from '../components/PeopleSection';
@@ -349,6 +349,7 @@ const Chat: React.FC = () => {
   // То же для календаря: синхронизация с Google приносит чужие события фоном,
   // и без сигнала они появлялись бы только после перелистывания месяца.
   const [calendarChangeToken, setCalendarChangeToken] = useState(0);
+  const [calendarOpenTarget, setCalendarOpenTarget] = useState<HomeCalendarTarget | null>(null);
 
   const applyRecentChats = useCallback((data: unknown) => {
     if (!Array.isArray(data)) return;
@@ -929,11 +930,19 @@ const Chat: React.FC = () => {
 
   const goToSection = useCallback((id: SectionId) => {
     closeKeyboard();
+    if (id !== 'calendar') setCalendarOpenTarget(null);
     // Ветка принадлежит текущей переписке, а не оболочке приложения. Сбрасываем
     // её в том же обновлении React, что и раздел, чтобы новый экран даже на один
     // кадр не унаследовал колонку ветки.
     setActiveThread(null);
     setThreadInboxOpen(false);
+    // Сведения о чате тоже принадлежат чатам. Если оставить запрос открытым,
+    // класс is-right-open переживает переход в «Настройки» и четырёхколоночная
+    // сетка начинает ужимать основной раздел, одновременно раздувая правую
+    // панель. При уходе из чатов закрываем сведения вместе с веткой.
+    setGeneralInfoOpen(false);
+    setGroupInfoId(null);
+    setInfoModalUserId(null);
     // Раздел всегда открывается «сначала»: «Чаты» — списком, а не последней
     // перепиской, «Настройки» — списком настроек, а не подэкраном профиля, на
     // котором человек был в прошлый раз.
@@ -3210,6 +3219,8 @@ const Chat: React.FC = () => {
             section={activeSection}
             onBack={() => goToSection('chats')}
             changeToken={calendarChangeToken}
+            openTarget={calendarOpenTarget}
+            onOpenTargetHandled={() => setCalendarOpenTarget(null)}
           />
         </main>
       )}
@@ -3232,7 +3243,8 @@ const Chat: React.FC = () => {
             unreadTotal={totalUnread}
             onOpenChats={() => goToSection('chats')}
             onOpenTasks={() => goToSection('tasks')}
-            onOpenCalendar={() => goToSection('calendar')}
+            onOpenCalendar={() => { setCalendarOpenTarget(null); goToSection('calendar'); }}
+            onOpenCalendarEvent={(target) => { setCalendarOpenTarget(target); goToSection('calendar'); }}
             onOpenFiles={() => goToSection('documents')}
           />
         </main>
@@ -3258,7 +3270,7 @@ const Chat: React.FC = () => {
           activeRootId={activeThread?.rootId}
           customEmoji={customEmoji}
           onBack={leaveConversation}
-          onOpen={(rootId) => setActiveThread({ rootId, autoFocus: false })}
+          onOpen={(rootId) => { setGeneralInfoOpen(false); setGroupInfoId(null); setInfoModalUserId(null); setActiveThread({ rootId, autoFocus: false }); }}
         />
       ) : (
         <main className="conversation">
@@ -3371,6 +3383,12 @@ const Chat: React.FC = () => {
             onCancelOutgoing={cancelOutgoing}
             onOpenThread={(rootId, autoFocus) => {
               closeKeyboard();
+              // Ветка и сведения используют одну правую колонку. Явный клик
+              // по ветке означает переключить содержимое этой колонки, а не
+              // оставить профиль поверх неё и молча спрятать ветку.
+              setGeneralInfoOpen(false);
+              setGroupInfoId(null);
+              setInfoModalUserId(null);
               setActiveThread({ rootId, autoFocus });
             }}
           />
@@ -3436,7 +3454,23 @@ const Chat: React.FC = () => {
           Вторых версий этих окон не заводим. */}
       {infoRequested && (
         infoInPanel
-          ? <aside className="right-panel-host" aria-label="Сведения">{infoContent}</aside>
+          ? (
+            <aside className="right-panel-host" aria-label="Сведения">
+              <div
+                className="right-panel-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Ширина правой панели"
+                onPointerDown={handleRightResizeStart}
+                onPointerMove={handleRightResizeMove}
+                onPointerUp={handleRightResizeEnd}
+                onPointerCancel={handleRightResizeEnd}
+                onDoubleClick={() => saveUiPrefs({ ...uiPrefsRef.current, rightPanelWidth: DEFAULT_UI_PREFS.rightPanelWidth })}
+                title="Потяните, чтобы изменить ширину. Двойной клик — вернуть по умолчанию"
+              />
+              {infoContent}
+            </aside>
+          )
           : infoContent
       )}
       {threadPaneOpen && activeThread && socket && (

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   DayKey, addDays, addMonths, dayKeyOf, formatClock, formatDayLong, monthKeyOf, monthShortTitle,
   monthTitle, nextHalfHour, instantOf, todayKey, weekTitle, weekDays,
@@ -17,6 +17,11 @@ import TimeGridView from './TimeGridView';
 import { CalendarOccurrence, CalendarScope, CalendarViewMode, EventDraft, SeriesScope } from './types';
 import './calendar.css';
 
+export interface CalendarOpenTarget {
+  occurrenceId: string;
+  startAt: number;
+}
+
 interface CalendarWidgetProps {
   /**
    * Ограничить одной областью. Не задан — календарь показывает объединение
@@ -29,6 +34,9 @@ interface CalendarWidgetProps {
   onBack?: () => void;
   /** Растёт, когда события изменил кто-то извне — сигнал перечитать диапазон. */
   changeToken?: number;
+  /** Переход с «Главной»: открыть Расписание и сразу карточку выбранного события. */
+  openTarget?: CalendarOpenTarget | null;
+  onOpenTargetHandled?: () => void;
 }
 
 const VIEW_LABELS: { value: CalendarViewMode; label: string }[] = [
@@ -45,7 +53,7 @@ interface DraftTarget {
 }
 
 const CalendarWidget: React.FC<CalendarWidgetProps> = ({
-  scope, title = 'Календарь', onBack, changeToken = 0,
+  scope, title = 'Календарь', onBack, changeToken = 0, openTarget, onOpenTargetHandled,
 }) => {
   const {
     mode, setMode, anchor, setAnchor, occurrences,
@@ -138,6 +146,26 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
       setDetails(occurrence);
     }
   };
+
+  // С «Главной» событие открывается не просто в календаре, а в «Расписании»
+  // с уже раскрытой карточкой. Сначала переключаем режим и якорную дату,
+  // затем ждём, пока useCalendarData загрузит соответствующий диапазон.
+  useEffect(() => {
+    if (!openTarget) return;
+    setMode('agenda');
+    setAnchor(dayKeyOf(openTarget.startAt));
+  }, [openTarget, setMode, setAnchor]);
+
+  useEffect(() => {
+    if (!openTarget || loading) return;
+    const occurrence = occurrences.find((item) => item.id === openTarget.occurrenceId);
+    if (!occurrence) return;
+    openOccurrence(occurrence);
+    onOpenTargetHandled?.();
+    // openOccurrence — локальная операция над найденным вхождением; специально
+    // не добавляем её как зависимость, чтобы не переоткрывать диалог на каждом рендере.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTarget, loading, occurrences, onOpenTargetHandled]);
 
   const handleSave = async (value: EventDraft, editingId: number | null, seriesScope: SeriesScope) => {
     if (editingId === null) {
