@@ -18,6 +18,7 @@ import GeneralChatInfoModal from '../components/GeneralChatInfoModal';
 import Avatar from '../components/Avatar';
 import NavRail, { SectionId, isSectionAllowedFor, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
+import FilesSection from '../components/FilesSection';
 import TasksPanel from '../tasks/TasksPanel';
 import CalendarSection from '../components/CalendarSection';
 import PeopleSection from '../components/PeopleSection';
@@ -2353,6 +2354,13 @@ const Chat: React.FC = () => {
     setGeneralInfoOpen(false);
     setGroupInfoId(null);
 
+    // Экран переписки включается ВСЕГДА, а не только при смене чата. Раньше
+    // переход из раздела «Файлы» на сообщение уже открытого чата всего лишь
+    // ставил подсветку — а человек в этот момент смотрел на список файлов, и
+    // нажатие выглядело как несработавшее (поймано живой проверкой на узком
+    // экране, где раздел занимает весь экран).
+    setView(VIEW_CONVERSATION);
+
     if (targetChat === activeChat) {
       if (messages.some((m) => m.id === messageId)) {
         setFocusMessageId(messageId);
@@ -2375,7 +2383,6 @@ const Chat: React.FC = () => {
     pendingFocusRef.current = messageId;
     setActiveChat(targetChat);
     recordRecentOpening(targetChat);
-    setView(VIEW_CONVERSATION);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChat, messages]);
 
@@ -3107,7 +3114,13 @@ const Chat: React.FC = () => {
         </main>
       )}
 
-      {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks' && (
+      {section === 'documents' && (
+        <main className="section-host">
+          <FilesSection onOpenMessage={handleOpenMessage} />
+        </main>
+      )}
+
+      {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks' && section !== 'documents' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>

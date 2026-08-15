@@ -26,6 +26,7 @@ const groupsRoutes = require('./routes/groups');
 const tasksRoutes = require('./routes/tasks');
 const emojiRoutes = require('./routes/emoji');
 const stickerRoutes = require('./routes/stickers');
+const filesRoutes = require('./routes/files');
 const notificationSettingsRoutes = require('./routes/notificationSettings');
 const requireAdminRole = require('./middleware/requireAdminRole');
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
@@ -185,6 +186,8 @@ app.use('/api/groups', verifyToken, groupsRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/emoji', emojiRoutes);
 app.use('/api/stickers', stickerRoutes);
+// Личное хранилище: раздел «Файлы» на рельсе.
+app.use('/api/files', filesRoutes);
 app.use('/api/notification-settings', notificationSettingsRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
