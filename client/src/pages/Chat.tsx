@@ -124,6 +124,8 @@ interface Message {
   document_name?: string | null;
   document_size?: number | null;
   document_mime?: string | null;
+  /** Вложение убрано в архив: файл с диска уехал в zip, сообщение осталось. */
+  attachment_archived_at?: number | null;
   sender_id: number;
   username: string;
   display_name?: string | null;
@@ -378,6 +380,22 @@ const Chat: React.FC = () => {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [comments, setComments] = useState<Record<number, { username: string; display_name: string | null; comment: string }>>({});
   const [hasMore, setHasMore] = useState(true);
+
+  // Переход к сообщению из карточки вложений. Два разных состояния, и путать
+  // их нельзя: focusMessageId — «прокрутить к этому», pendingFocusRef — «когда
+  // откроется вон тот чат, загрузить историю не с конца, а от этого места».
+  const [focusMessageId, setFocusMessageId] = useState<number | null>(null);
+  // Короткое сообщение над лентой: «сохранено», «слишком далеко в истории».
+  // Отдельно от тостов уведомлений — те адресованы чату и переживают переход,
+  // а это ответ на только что нажатую кнопку.
+  const [attachmentNotice, setAttachmentNotice] = useState('');
+  const pendingFocusRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!attachmentNotice) return undefined;
+    const timer = setTimeout(() => setAttachmentNotice(''), 5000);
+    return () => clearTimeout(timer);
+  }, [attachmentNotice]);
   const [loadingMore, setLoadingMore] = useState(false);
   // Навигация — ОДИН стейт, а не три независимых.
   //
@@ -1185,6 +1203,26 @@ const Chat: React.FC = () => {
       api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
     });
 
+    // Вложение убрали в архив. Сообщение остаётся, файл исчезает у всех сразу:
+    // без события у остальных участников на его месте до перезагрузки чата
+    // висела бы битая картинка.
+    newSocket.on('attachment_archived', (data: { id: number; chat_id: string; archived_at: number }) => {
+      setMessages(prev => prev.map(m => (m.id === data.id
+        ? {
+          ...m,
+          file_path: null,
+          file_width: null,
+          file_height: null,
+          document_path: null,
+          document_size: null,
+          document_mime: null,
+          attachment_archived_at: data.archived_at,
+        }
+        : m)));
+      // Превью в списке чатов могло держаться на этом вложении.
+      api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
+    });
+
     // Реакции меняются часто и мелко — сервер шлёт готовый список по одному
     // сообщению, клиент просто подставляет его вместо прежнего.
     newSocket.on('reactions_changed', (data: { chat_id: string; message_id: number; reactions: MessageReaction[] }) => {
@@ -1665,12 +1703,35 @@ const Chat: React.FC = () => {
       setMessages([]);
       setHasMore(true);
       loadingMoreRef.current = false;
-      api.get(`/messages/${activeChat}?limit=50&offset=0`)
+      // Переход к вложению: грузим окно «от сообщения и до низа», а не
+      // последнюю страницу — иначе искомого в ленте просто нет, и прокручивать
+      // будет не к чему.
+      const focusTarget = pendingFocusRef.current;
+      pendingFocusRef.current = null;
+      const url = focusTarget !== null
+        ? `/messages/${activeChat}?from=${focusTarget}`
+        : `/messages/${activeChat}?limit=50&offset=0`;
+      api.get(url)
         .then(({ data }) => {
           if (cancelled) return;
           if (data.messages) {
+            // Сообщение слишком далеко: окно вышло бы больше предела, и лента
+            // получилась бы с дырой. Показываем конец переписки как обычно и
+            // говорим об этом прямо, а не молча открываем не то место.
+            if (data.truncated) {
+              setAttachmentNotice('Сообщение слишком далеко в истории — пролистайте переписку вверх');
+              api.get(`/messages/${activeChat}?limit=50&offset=0`)
+                .then((fallback) => {
+                  if (cancelled) return;
+                  setMessages(fallback.data.messages || fallback.data);
+                  setHasMore(!!fallback.data.hasMore);
+                })
+                .catch(console.error);
+              return;
+            }
             setMessages(data.messages);
             setHasMore(data.hasMore);
+            if (focusTarget !== null) setFocusMessageId(focusTarget);
           } else {
             setMessages(data);
             setHasMore(false);
@@ -2280,6 +2341,44 @@ const Chat: React.FC = () => {
     }
   };
 
+  // Перейти к сообщению, из которого пришло вложение.
+  //
+  // Чат может быть не открыт вовсе, а сообщение — далеко выше загруженной
+  // страницы. Поэтому три случая: уже на экране (просто прокрутить), тот же чат
+  // (догрузить окно), другой чат (открыть и догрузить при загрузке истории).
+  const handleOpenMessage = useCallback((targetChat: string, messageId: number) => {
+    // Карточка человека на узком экране закрывает переписку целиком —
+    // прокручивать под ней было бы некуда.
+    setInfoModalUserId(null);
+    setGeneralInfoOpen(false);
+    setGroupInfoId(null);
+
+    if (targetChat === activeChat) {
+      if (messages.some((m) => m.id === messageId)) {
+        setFocusMessageId(messageId);
+        return;
+      }
+      api.get(`/messages/${targetChat}?from=${messageId}`)
+        .then(({ data }) => {
+          if (data.truncated) {
+            setAttachmentNotice('Сообщение слишком далеко в истории — пролистайте переписку вверх');
+            return;
+          }
+          setMessages(data.messages);
+          setHasMore(data.hasMore);
+          setFocusMessageId(messageId);
+        })
+        .catch(() => setAttachmentNotice('Не удалось открыть сообщение'));
+      return;
+    }
+
+    pendingFocusRef.current = messageId;
+    setActiveChat(targetChat);
+    recordRecentOpening(targetChat);
+    setView(VIEW_CONVERSATION);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChat, messages]);
+
   // Из раздела «Люди» — добавить в контакты без перехода в переписку, в
   // отличие от handleStartChat, который сразу открывает чат.
   const handleAddContact = async (user: { id: number; username: string; display_name: string | null; avatar_path: string | null; group_id: number | null; group_name: string | null }) => {
@@ -2758,6 +2857,8 @@ const Chat: React.FC = () => {
       comment={comments[infoModalUser.id]?.comment || ''}
       onUpdateComment={(comment) => updateComment(infoModalUser.id, comment)}
       chatId={chatIdFor(currentUserId, infoModalUser.id)}
+      currentUserId={currentUserId}
+      onOpenMessage={handleOpenMessage}
       onClose={() => setInfoModalUserId(null)}
     />
   ) : null;
@@ -3076,6 +3177,12 @@ const Chat: React.FC = () => {
             )}
           </div>
 
+          {attachmentNotice && (
+            <div className="connection-banner is-info" role="status" aria-live="polite">
+              {attachmentNotice}
+            </div>
+          )}
+
           {connectionState !== 'connected' && (
             <div className={`connection-banner is-${connectionState}`} role="status" aria-live="polite">
               {connectionState === 'offline'
@@ -3089,6 +3196,8 @@ const Chat: React.FC = () => {
           <ChatWindow
             chatId={activeChat}
             messages={visibleMessages}
+            focusMessageId={focusMessageId}
+            onFocusHandled={() => setFocusMessageId(null)}
             currentUserId={currentUserId}
             showAuthors={activeChat === GENERAL_CHAT_ID || activeChatMeta?.section === 'group'}
             onDeleteMessages={requestDelete}

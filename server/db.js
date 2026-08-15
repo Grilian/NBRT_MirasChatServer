@@ -1106,6 +1106,21 @@ try {
   // Колонка уже есть
 }
 
+// Убранное вложение: файл уезжает в zip в личной папке отправителя, а само
+// сообщение остаётся на месте. Хранить обязаны и то и другое — содержимое
+// переписки по закону не удаляется, но из приложения вложение должно пропасть.
+// Поэтому не «удалено», а «архивировано»: путь к архиву тут же, рядом.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN attachment_archived_at INTEGER`);
+} catch (e) {
+  // Колонка уже есть
+}
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN attachment_archive_path TEXT`);
+} catch (e) {
+  // Колонка уже есть
+}
+
 const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM super_admins').get().c;
 if (superAdminCount === 0) {
   const initialUsername = process.env.SUPERADMIN_USERNAME || 'superadmin';
@@ -1178,5 +1193,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status, sender_id);
   CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
 `);
+
+// Переезд загрузок в личные папки пользователей. Идемпотентно и потому идёт на
+// каждом запуске: уже перенесённое пропускается за один запрос, а «выполнить
+// один раз руками» — это то, о чём забывают при следующей выкладке.
+try {
+  require('./services/userStorage').migrateLegacyUploads(db);
+} catch (e) {
+  // Не повод не подняться: старые пути остаются рабочими, файлы читаются
+  // оттуда же, где лежали.
+  console.error('Не удалось разложить загрузки по личным папкам:', e.message);
+}
 
 module.exports = db;

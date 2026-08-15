@@ -29,12 +29,23 @@ function rootForUser(rootId, userId) {
 }
 
 function sanitizeMessage(message) {
-  if (!message || !message.deleted) return message;
-  return {
-    ...message, text: '', file_path: null, file_width: null, file_height: null,
-    sticker_id: null, sticker_fallback: null,
-    document_path: null, document_name: null, document_size: null, document_mime: null,
-  };
+  if (!message) return message;
+  if (message.deleted) {
+    return {
+      ...message, text: '', file_path: null, file_width: null, file_height: null,
+      sticker_id: null, sticker_fallback: null,
+      document_path: null, document_name: null, document_size: null, document_mime: null,
+    };
+  }
+  // Убранное вложение: само сообщение остаётся целиком, исчезает только файл.
+  // Признак уходит клиенту — на его месте встаёт подпись, а не пустой пузырь.
+  if (message.attachment_archived_at) {
+    return {
+      ...message, file_path: null, file_width: null, file_height: null,
+      document_path: null, document_size: null, document_mime: null,
+    };
+  }
+  return message;
 }
 
 function threadSummary(rootId, userId) {
@@ -138,6 +149,7 @@ function listThreadsForUser(userId, requestedLimit) {
            root.text AS root_text, root.file_path AS root_file_path,
            root.sticker_id AS root_sticker_id, root.sticker_fallback AS root_sticker_fallback,
            root.document_name AS root_document_name,
+           root.attachment_archived_at AS root_archived_at,
            root.created_at AS root_created_at, root.sender_id AS root_sender_id,
            ru.username AS root_username, ru.display_name AS root_display_name,
            ru.avatar_path AS root_avatar_path,
@@ -145,6 +157,7 @@ function listThreadsForUser(userId, requestedLimit) {
            latest.file_path AS last_reply_file_path,
            latest.sticker_id AS last_reply_sticker_id, latest.sticker_fallback AS last_reply_sticker_fallback,
            latest.document_name AS last_reply_document_name,
+           latest.attachment_archived_at AS last_reply_archived_at,
            latest.created_at AS last_reply_at,
            latest.sender_id AS last_reply_sender_id,
            lu.username AS last_reply_username, lu.display_name AS last_reply_display_name,
@@ -177,16 +190,18 @@ function listThreadsForUser(userId, requestedLimit) {
     chat_id: row.chat_id,
     chat: chatMeta(row.chat_id, numericUserId),
     root: {
-      id: Number(row.root_id), text: row.root_text || '', file_path: row.root_file_path || null,
+      id: Number(row.root_id), text: row.root_text || '',
+      file_path: row.root_archived_at ? null : (row.root_file_path || null),
       sticker_id: row.root_sticker_id || null, sticker_fallback: row.root_sticker_fallback || null,
-      document_name: row.root_document_name || null,
+      document_name: row.root_archived_at ? null : (row.root_document_name || null),
       created_at: row.root_created_at, sender_id: Number(row.root_sender_id),
       username: row.root_username, display_name: row.root_display_name, avatar_path: row.root_avatar_path,
     },
     last_reply: {
-      id: Number(row.last_reply_id), text: row.last_reply_text || '', file_path: row.last_reply_file_path || null,
+      id: Number(row.last_reply_id), text: row.last_reply_text || '',
+      file_path: row.last_reply_archived_at ? null : (row.last_reply_file_path || null),
       sticker_id: row.last_reply_sticker_id || null, sticker_fallback: row.last_reply_sticker_fallback || null,
-      document_name: row.last_reply_document_name || null,
+      document_name: row.last_reply_archived_at ? null : (row.last_reply_document_name || null),
       created_at: row.last_reply_at, sender_id: Number(row.last_reply_sender_id),
       username: row.last_reply_username, display_name: row.last_reply_display_name,
       avatar_path: row.last_reply_avatar_path,
@@ -201,6 +216,7 @@ function getThread(rootId, userId) {
     SELECT m.id, m.chat_id, m.thread_root_id, m.text, m.file_path, m.file_width,
            m.file_height, m.sticker_id, m.sticker_fallback,
            m.document_path, m.document_name, m.document_size, m.document_mime,
+           m.attachment_archived_at,
            m.sender_id, m.created_at, m.status, m.edited_at,
            m.deleted, m.client_message_id, m.reply_to_id,
            u.username, u.display_name, u.avatar_path,

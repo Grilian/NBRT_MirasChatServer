@@ -8,6 +8,7 @@ import { closeMobileInputSurface } from '../utils/mobileKeyboard';
 import { CustomEmojiMap, renderMessageText, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
 import { StickerCatalog } from '../utils/stickerCatalog';
 import { fileGlyph, formatFileSize } from '../utils/fileLimits';
+import { downloadFile } from '../utils/downloadFile';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
@@ -27,6 +28,8 @@ interface Message {
   sticker_fallback?: string | null;
   document_path?: string | null;
   document_name?: string | null;
+  /** Вложение убрано в архив: файла больше нет, сообщение осталось. */
+  attachment_archived_at?: number | null;
   document_size?: number | null;
   document_mime?: string | null;
   sender_id: number;
@@ -60,6 +63,9 @@ interface ChatWindowProps {
   chatId: string | null;
   messages: Message[];
   currentUserId: number;
+  /** Прокрутить к этому сообщению и подсветить — переход из карточки вложений. */
+  focusMessageId?: number | null;
+  onFocusHandled?: () => void;
   /** Показывать имя автора над сообщением — нужно только в общем чате */
   showAuthors?: boolean;
   onScrollTop?: () => void;
@@ -226,6 +232,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
+  focusMessageId, onFocusHandled,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, stickerCatalog = {}, onToggleReaction, onRemoveReaction,
   onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
@@ -612,6 +619,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   useEffect(() => () => { if (highlightTimer.current) clearTimeout(highlightTimer.current); }, []);
+
+  // Переход к сообщению из карточки вложений.
+  //
+  // Эффект зависит и от `messages`, а не только от id: историю в этот момент
+  // подменяют окном «от сообщения», и на первом проходе нужной строки в DOM
+  // ещё нет. С фиксированной задержкой прокрутка молча не срабатывала — на
+  // сотне сообщений отрисовка не успевала (поймано при живой проверке).
+  // Теперь попытка повторяется на каждой перерисовке ленты, пока строка не
+  // появится, а `onFocusHandled` гасит запрос сразу после удачи.
+  useEffect(() => {
+    if (!focusMessageId) return undefined;
+    if (!messages.some((m) => m.id === focusMessageId)) return undefined;
+    // Кадр всё же нужен: узел появляется в DOM в этом же коммите, а прокрутка
+    // до его размещения промахнулась бы мимо середины экрана.
+    const timer = setTimeout(() => {
+      jumpToMessage(focusMessageId);
+      onFocusHandled?.();
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusMessageId, messages]);
 
   // Раньше меню открывалось только на своих сообщениях — скопировать текст
   // чужой реплики было нельзя вовсе. Теперь оно доступно на любом
@@ -1295,23 +1323,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       )
                     )}
                     {/* Файл — карточка со скачиванием, а не картинка в
-                        ленте: содержимое документа в переписке не
-                        показать, а имя и размер человеку нужны, чтобы
-                        решить, качать ли его. Ссылка настоящая (<a
-                        download>), а не onClick: так работает и
-                        «сохранить как» из контекстного меню браузера. */}
+                        ленте: содержимое документа в переписке не показать, а
+                        имя и размер человеку нужны, чтобы решить, качать ли
+                        его. Скачивание идёт ВНУТРИ приложения (см.
+                        utils/downloadFile.ts): ссылка с target="_blank"
+                        уводила бы в сторонний браузер в десктопе и вовсе
+                        ничего не делала в Android WebView. href оставлен —
+                        ради «сохранить как» из меню браузера в вебе и ради
+                        внятного адреса при наведении. */}
                     {msg.document_path && (
                       <a
                         className="bubble-file"
                         href={resolveUploadUrl(msg.document_path) || undefined}
                         download={msg.document_name || undefined}
-                        target="_blank"
-                        rel="noreferrer"
                         onClick={(e) => {
+                          e.preventDefault();
                           // В режиме выбора любая часть сообщения работает
                           // на выбор — качать отсюда нечего.
-                          if (selectMode) { e.preventDefault(); toggleSelected(msg.id); }
-                          else e.stopPropagation();
+                          if (selectMode) { toggleSelected(msg.id); return; }
+                          e.stopPropagation();
+                          downloadFile(resolveUploadUrl(msg.document_path), msg.document_name);
                         }}
                       >
                         <span className="bubble-file-glyph" aria-hidden="true">{fileGlyph(msg.document_name)}</span>
@@ -1323,6 +1354,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
                         </svg>
                       </a>
+                    )}
+                    {/* Вложение убрано: сообщение осталось, файла больше нет.
+                        Пустой пузырь на его месте читался бы как ошибка
+                        загрузки, поэтому здесь прямая подпись. */}
+                    {!!msg.attachment_archived_at && (
+                      <span className="bubble-file is-archived">
+                        <span className="bubble-file-glyph" aria-hidden="true">🗄</span>
+                        <span className="bubble-file-body">
+                          <span className="bubble-file-name">
+                            {msg.document_name ? msg.document_name : 'Вложение удалено'}
+                          </span>
+                          <span className="bubble-file-size">Убрано в архив</span>
+                        </span>
+                      </span>
                     )}
                     {msg.poll && onVotePoll && onAddPollOption && (
                       <PollCard

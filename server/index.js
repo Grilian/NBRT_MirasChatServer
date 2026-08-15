@@ -97,16 +97,17 @@ function readCountsPayload(chatId, ids) {
 // обстоятельствах, включая цитаты.
 function replyPreviewOf(replyToId) {
   const row = db.prepare(`
-    SELECT m.text, m.file_path, m.sticker_fallback, m.document_name, m.deleted, u.username, u.display_name
+    SELECT m.text, m.file_path, m.sticker_fallback, m.document_name, m.attachment_archived_at, m.deleted,
+           u.username, u.display_name
     FROM messages m JOIN users u ON u.id = m.sender_id
     WHERE m.id = ?
   `).get(replyToId);
   if (!row) return {};
   return {
     reply_to_text: row.deleted ? '' : row.text,
-    reply_to_file: row.deleted ? null : row.file_path,
+    reply_to_file: (row.deleted || row.attachment_archived_at) ? null : row.file_path,
     reply_to_sticker_fallback: row.deleted ? null : row.sticker_fallback,
-    reply_to_document_name: row.deleted ? null : row.document_name,
+    reply_to_document_name: (row.deleted || row.attachment_archived_at) ? null : row.document_name,
     reply_to_author: row.display_name || row.username,
     reply_to_deleted: row.deleted ? 1 : 0,
   };

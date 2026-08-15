@@ -12,6 +12,7 @@ const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { clearExpiredStatuses } = require('../services/statusExpiry');
 const { selfChatId } = require('../services/chatParticipants');
 const { getSelfChatName, getReactionEmoji } = require('../services/appSettings');
+const userStorage = require('../services/userStorage');
 const router = express.Router();
 
 const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
@@ -346,7 +347,7 @@ router.post('/me/avatar', verifyToken, (req, res) => {
 
     try {
       const filename = `user_${req.userId}_${Date.now()}.jpg`;
-      const outputPath = path.join(AVATARS_DIR, filename);
+      const outputPath = path.join(userStorage.userDir(req.userId, 'avatar'), filename);
 
       await sharp(req.file.buffer)
         .rotate() // на случай EXIF-ориентации с телефонных камер — иначе кроп в квадрат может уйти боком
@@ -355,7 +356,7 @@ router.post('/me/avatar', verifyToken, (req, res) => {
         .toFile(outputPath);
 
       const user = db.prepare('SELECT avatar_path FROM users WHERE id = ?').get(req.userId);
-      const avatarPath = `/uploads/avatars/${filename}`;
+      const avatarPath = userStorage.publicPath(req.userId, 'avatar', filename);
 
       db.prepare('UPDATE users SET avatar_path = ? WHERE id = ?').run(avatarPath, req.userId);
       if (user && user.avatar_path && user.avatar_path !== avatarPath) {
@@ -398,10 +399,10 @@ router.post('/me/chat-background', verifyToken, (req, res) => {
           withoutEnlargement: true,
         })
         .webp({ quality: BACKGROUND_QUALITY })
-        .toFile(path.join(BACKGROUNDS_DIR, filename));
+        .toFile(path.join(userStorage.userDir(req.userId, 'wallpaper'), filename));
 
       const user = db.prepare('SELECT chat_background_path FROM users WHERE id = ?').get(req.userId);
-      const backgroundPath = `/uploads/backgrounds/${filename}`;
+      const backgroundPath = userStorage.publicPath(req.userId, 'wallpaper', filename);
 
       db.prepare('UPDATE users SET chat_background_path = ? WHERE id = ?')
         .run(backgroundPath, req.userId);

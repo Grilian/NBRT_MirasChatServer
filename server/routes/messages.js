@@ -6,10 +6,12 @@ const multer = require('multer');
 const sharp = require('sharp');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const { isParticipant } = require('../services/chatParticipants');
+const { isParticipant, participantsForChatId } = require('../services/chatParticipants');
 const { reactionsForMessages } = require('../services/reactions');
 const { attachPollsToMessages } = require('../services/polls');
 const { touchRecentChat, listRecentChats } = require('../services/recentChats');
+const userStorage = require('../services/userStorage');
+const { archiveAttachment, ArchiveError } = require('../services/attachmentArchive');
 const {
   ThreadError,
   attachThreadSummaries,
@@ -79,12 +81,20 @@ const chatImageUpload = multer({
 // путём (см. server/index.js). Поэтому сокет обязан сам проверить, что путь
 // похож на то, что мог выдать именно этот эндпоинт, а не что попало от
 // клиента, — регэксп ниже и есть эта проверка.
+// Старая раскладка (общая куча `chat-images`) остаётся допустимой: файлы из
+// неё разложены по личным папкам миграцией, но сообщение с таким путём могло
+// прийти от ещё не обновившегося клиента, у которого путь уже на руках.
 const CHAT_IMAGE_PATH_PATTERN = /^\/uploads\/chat-images\/[a-z0-9_-]+\.webp$/;
 
 function isValidChatImagePath(filePath) {
-  if (typeof filePath !== 'string' || !CHAT_IMAGE_PATH_PATTERN.test(filePath)) return false;
-  const abs = path.join(__dirname, '..', filePath.replace(/^\//, ''));
-  return fs.existsSync(abs);
+  if (typeof filePath !== 'string') return false;
+  const parsed = userStorage.parseUserPath(filePath);
+  const ok = parsed
+    ? parsed.kind === 'images' && /\.webp$/.test(parsed.filename)
+    : CHAT_IMAGE_PATH_PATTERN.test(filePath);
+  if (!ok) return false;
+  const abs = userStorage.absoluteFromPublic(filePath);
+  return !!abs && fs.existsSync(abs);
 }
 
 // ===== Файлы (документы, архивы) =====
@@ -107,6 +117,11 @@ const CHAT_FILE_TOO_LARGE_MESSAGE =
   'Система работает в тестовом режиме, пока большие файлы отправлять нельзя. '
   + 'Предельный размер — 50 МБ.';
 
+// Предел окна «от сообщения до низа» (см. параметр ?from). Пятьсот сообщений
+// — это заведомо больше любой разумной дистанции между вложением из карточки
+// и концом переписки, и заведомо меньше того, что заметно затормозит ленту.
+const FROM_WINDOW_LIMIT = 500;
+
 const chatFileUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: CHAT_FILE_MAX_BYTES },
@@ -119,12 +134,14 @@ const chatFileUpload = multer({
 const CHAT_FILE_PATH_PATTERN = /^\/uploads\/chat-files\/[a-zA-Z0-9_.-]+$/;
 
 function isValidChatFilePath(filePath) {
-  if (typeof filePath !== 'string' || !CHAT_FILE_PATH_PATTERN.test(filePath)) return false;
-  // Отдельно от регэкспа: `..` в имени под шаблон не подходит, но проверка
-  // дешёвая, а цена промаха — чтение чужого файла с диска.
-  if (filePath.includes('..')) return false;
-  const abs = path.join(__dirname, '..', filePath.replace(/^\//, ''));
-  return fs.existsSync(abs);
+  // Отдельно от шаблона: `..` под него и так не подходит, но проверка дешёвая,
+  // а цена промаха — чтение чужого файла с диска.
+  if (typeof filePath !== 'string' || filePath.includes('..')) return false;
+  const parsed = userStorage.parseUserPath(filePath);
+  const ok = parsed ? parsed.kind === 'files' : CHAT_FILE_PATH_PATTERN.test(filePath);
+  if (!ok) return false;
+  const abs = userStorage.absoluteFromPublic(filePath);
+  return !!abs && fs.existsSync(abs);
 }
 
 /** Расширение из имени файла — только оно и переезжает на диск. */
@@ -166,7 +183,7 @@ router.post('/upload-file', verifyToken, (req, res) => {
     try {
       const filename = `doc_${req.userId}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`
         + safeExtension(decodeMultipartName(req.file.originalname));
-      fs.writeFileSync(path.join(CHAT_FILES_DIR, filename), req.file.buffer);
+      fs.writeFileSync(path.join(userStorage.userDir(req.userId, 'files'), filename), req.file.buffer);
 
       // Имя приходит от клиента и показывается другим людям — режем длину и
       // управляющие символы, иначе одна строка ломает вёрстку карточки.
@@ -176,7 +193,7 @@ router.post('/upload-file', verifyToken, (req, res) => {
         .slice(0, 200) || 'файл';
 
       res.json({
-        file_path: `/uploads/chat-files/${filename}`,
+        file_path: userStorage.publicPath(req.userId, 'files', filename),
         name: originalName,
         size: req.file.size,
         mime: req.file.mimetype || 'application/octet-stream',
@@ -234,7 +251,7 @@ router.post('/upload-image', verifyToken, (req, res) => {
       }
       const suffix = isOpaque ? '' : '_a';
       const filename = `msg_${req.userId}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${suffix}.webp`;
-      const outputPath = path.join(CHAT_IMAGES_DIR, filename);
+      const outputPath = path.join(userStorage.userDir(req.userId, 'images'), filename);
 
       const image = decode(req.file.buffer).rotate();
       const resized = image.resize(CHAT_IMAGE_MAX_DIMENSION, CHAT_IMAGE_MAX_DIMENSION, {
@@ -244,7 +261,7 @@ router.post('/upload-image', verifyToken, (req, res) => {
       const info = await resized.webp({ quality: CHAT_IMAGE_QUALITY }).toFile(outputPath);
 
       res.json({
-        file_path: `/uploads/chat-images/${filename}`,
+        file_path: userStorage.publicPath(req.userId, 'images', filename),
         file_width: info.width,
         file_height: info.height,
       });
@@ -313,7 +330,8 @@ router.get('/meta/last', verifyToken, (req, res) => {
     // «Последнее» считаем персонально: сообщение, скрытое этим человеком у
     // себя, не должно оставаться превью его чата — там встаёт предыдущее.
     const rows = db.prepare(`
-      SELECT m.chat_id, m.text, m.file_path, m.sticker_id, m.sticker_fallback, m.document_name, m.created_at, m.deleted
+      SELECT m.chat_id, m.text, m.file_path, m.sticker_id, m.sticker_fallback, m.document_name,
+             m.attachment_archived_at, m.created_at, m.deleted
       FROM messages m
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
@@ -335,10 +353,10 @@ router.get('/meta/last', verifyToken, (req, res) => {
       result[row.chat_id] = {
         chat_id: row.chat_id,
         text: row.deleted ? '' : row.text,
-        file_path: row.deleted ? null : row.file_path,
+        file_path: (row.deleted || row.attachment_archived_at) ? null : row.file_path,
         sticker_id: row.deleted ? null : row.sticker_id,
         sticker_fallback: row.deleted ? null : row.sticker_fallback,
-        document_name: row.deleted ? null : row.document_name,
+        document_name: (row.deleted || row.attachment_archived_at) ? null : row.document_name,
         created_at: row.created_at,
       };
     });
@@ -371,6 +389,39 @@ function trimLinkTail(value) {
 
 const ATTACHMENT_KINDS = ['media', 'files', 'links'];
 
+// Деление вкладки «Файлы» на категории. Считает СЕРВЕР, а не клиент: та же
+// раскладка нужна и в вебе, и на телефоне, и в десктопе, а расходиться этим
+// трём копиям нельзя — человек увидел бы файл то в «Документах», то в
+// «Файлах» в зависимости от устройства.
+//
+// Расширение важнее MIME: MIME приходит от клиента (для показа значка, не для
+// доверия), и телефоны регулярно шлют application/octet-stream на всё подряд.
+const CATEGORY_EXTENSIONS = {
+  documents: ['pdf', 'doc', 'docx', 'rtf', 'odt', 'txt', 'xls', 'xlsx', 'ods', 'csv',
+    'ppt', 'pptx', 'odp', 'djvu', 'epub', 'fb2'],
+  images: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'tif', 'tiff', 'psd'],
+  music: ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'flac', 'aac', 'wma', 'opus', 'mid', 'midi'],
+};
+
+function fileCategory(name, mime) {
+  const ext = (/\.([a-zA-Z0-9]{1,12})$/.exec(String(name || '')) || [, ''])[1].toLowerCase();
+  for (const [category, list] of Object.entries(CATEGORY_EXTENSIONS)) {
+    if (list.includes(ext)) return category;
+  }
+  // Расширения не оказалось (или оно незнакомое) — тогда пусть скажет MIME.
+  const type = String(mime || '').toLowerCase();
+  if (type.startsWith('image/')) return 'images';
+  if (type.startsWith('audio/')) return 'music';
+  if (type.startsWith('text/') || type.includes('pdf') || type.includes('word')
+    || type.includes('excel') || type.includes('spreadsheet') || type.includes('presentation')) {
+    return 'documents';
+  }
+  // «Файлы» — не свалка «мы не разобрались», а честная категория: архивы,
+  // установщики, дампы. Отдельная от документов ровно потому, что искать в
+  // ней приходится другое.
+  return 'files';
+}
+
 router.get('/:chatId/attachments', verifyToken, (req, res) => {
   try {
     const chatId = req.params.chatId;
@@ -389,7 +440,7 @@ router.get('/:chatId/attachments', verifyToken, (req, res) => {
     const common = `
       FROM messages m
       JOIN users u ON u.id = m.sender_id
-      WHERE m.chat_id = ? AND m.deleted = 0
+      WHERE m.chat_id = ? AND m.deleted = 0 AND m.attachment_archived_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
     `;
 
@@ -410,7 +461,13 @@ router.get('/:chatId/attachments', verifyToken, (req, res) => {
         ${common} AND m.document_path IS NOT NULL
         ORDER BY m.id DESC LIMIT ?
       `).all(chatId, req.userId, limit);
-      return res.json({ kind, items: rows });
+      return res.json({
+        kind,
+        items: rows.map((row) => ({
+          ...row,
+          category: fileCategory(row.document_name, row.document_mime),
+        })),
+      });
     }
 
     // Ссылки: сужаем в SQL, разбираем в JS. Одно сообщение может нести
@@ -482,6 +539,12 @@ router.get('/:chatId', verifyToken, (req, res) => {
     const offset = Number.isInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
     const useCursor = Number.isInteger(before);
 
+    // Окно «от сообщения до низа». Предел выбран так, чтобы одно нажатие
+    // «перейти к сообщению» оставалось одним запросом, а не выгрузкой всего
+    // архива в память браузера.
+    const from = Number.parseInt(req.query.from, 10);
+    const useFrom = Number.isInteger(from);
+
     // ORDER BY id, а не created_at: у сообщений, записанных в одну секунду,
     // created_at совпадает (точность SQLite CURRENT_TIMESTAMP — секунда), и
     // порядок внутри такой пары был неопределённым — при перезагрузке чата
@@ -500,41 +563,51 @@ router.get('/:chatId', verifyToken, (req, res) => {
       ? ', (SELECT COUNT(*) FROM message_reads mr WHERE mr.message_id = m.id) AS read_count'
       : '';
 
-    const messages = useCursor
-      ? db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback,
-                 m.document_path, m.document_name, m.document_size, m.document_mime, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
-                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
-                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.sticker_fallback AS reply_to_sticker_fallback, rm.deleted AS reply_to_deleted,
-                 COALESCE(ru.display_name, ru.username) AS reply_to_author,
-                 (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
-          FROM messages m
-          JOIN users u ON m.sender_id = u.id
-          LEFT JOIN messages rm ON rm.id = m.reply_to_id
-          LEFT JOIN users ru ON ru.id = rm.sender_id
-          LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
-          WHERE m.chat_id = ? AND m.id < ? AND m.thread_root_id IS NULL
-            AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-          ORDER BY m.id DESC
-          LIMIT ?
-        `).all(req.userId, chatId, before, req.userId, limit)
-      : db.prepare(`
-          SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback,
-                 m.document_path, m.document_name, m.document_size, m.document_mime, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at, u.username, u.display_name,
-                 m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
-                 rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.sticker_fallback AS reply_to_sticker_fallback, rm.deleted AS reply_to_deleted,
-                 COALESCE(ru.display_name, ru.username) AS reply_to_author,
-                 (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
-          FROM messages m
-          JOIN users u ON m.sender_id = u.id
-          LEFT JOIN messages rm ON rm.id = m.reply_to_id
-          LEFT JOIN users ru ON ru.id = rm.sender_id
-          LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
-          WHERE m.chat_id = ? AND m.thread_root_id IS NULL
-            AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-          ORDER BY m.id DESC
-          LIMIT ? OFFSET ?
-        `).all(req.userId, chatId, req.userId, limit, offset);
+    // Одна выборка на три случая (курсор вверх, offset, окно «от сообщения»)
+    // вместо трёх почти одинаковых запросов: раньше их было два, и любое
+    // новое поле приходилось добавлять в каждый — про один регулярно забывали.
+    const historyQuery = (condition, tail) => `
+      SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback,
+             m.document_path, m.document_name, m.document_size, m.document_mime,
+             m.attachment_archived_at, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at,
+             u.username, u.display_name,
+             m.reply_to_id, m.forwarded_from_name, m.forwarded_from_chat, m.client_message_id,
+             rm.text AS reply_to_text, rm.file_path AS reply_to_file, rm.sticker_fallback AS reply_to_sticker_fallback,
+             rm.attachment_archived_at AS reply_to_archived, rm.deleted AS reply_to_deleted,
+             COALESCE(ru.display_name, ru.username) AS reply_to_author,
+             (r.message_id IS NOT NULL) AS read_by_me${readCountColumn}
+      FROM messages m
+      JOIN users u ON m.sender_id = u.id
+      LEFT JOIN messages rm ON rm.id = m.reply_to_id
+      LEFT JOIN users ru ON ru.id = rm.sender_id
+      LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
+      WHERE m.chat_id = ? AND m.thread_root_id IS NULL ${condition}
+        AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+      ORDER BY m.id DESC
+      ${tail}
+    `;
+
+    let truncated = false;
+    let messages;
+    if (useFrom) {
+      // Окно «от сообщения и до конца» — для перехода к вложению из карточки
+      // человека: сообщение может быть далеко выше загруженной страницы, и
+      // листать до него постранично значило бы десяток запросов подряд.
+      // Низ ленты при этом остаётся загруженным, то есть обычная прокрутка и
+      // подгрузка вверх продолжают работать как раньше.
+      messages = db.prepare(historyQuery('AND m.id >= ?', 'LIMIT ?'))
+        .all(req.userId, chatId, from, req.userId, FROM_WINDOW_LIMIT + 1);
+      // Если сообщений «от него и ниже» больше окна, честно говорим об этом:
+      // отдать обрезанное окно молча значило бы показать ленту с дырой.
+      truncated = messages.length > FROM_WINDOW_LIMIT;
+      if (truncated) messages = [];
+    } else if (useCursor) {
+      messages = db.prepare(historyQuery('AND m.id < ?', 'LIMIT ?'))
+        .all(req.userId, chatId, before, req.userId, limit);
+    } else {
+      messages = db.prepare(historyQuery('', 'LIMIT ? OFFSET ?'))
+        .all(req.userId, chatId, req.userId, limit, offset);
+    }
 
     // Переворачиваем чтобы старые были в начале
     messages.reverse();
@@ -557,6 +630,17 @@ router.get('/:chatId', verifyToken, (req, res) => {
         m.document_size = null;
         m.document_mime = null;
       }
+      // Убранное вложение: сообщение остаётся целиком (текст, ответы,
+      // реакции), пропадает только сам файл. Признак уходит клиенту, чтобы на
+      // месте картинки встала подпись, а не пустой пузырь.
+      if (m.attachment_archived_at) {
+        m.file_path = null;
+        m.file_width = null;
+        m.file_height = null;
+        m.document_path = null;
+        m.document_size = null;
+        m.document_mime = null;
+      }
       // То же и для цитаты: ответить успели, а исходное потом удалили —
       // содержимое не должно уехать наружу окольным путём, через ответ.
       if (m.reply_to_deleted) {
@@ -564,6 +648,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
         m.reply_to_file = null;
         m.reply_to_sticker_fallback = null;
       }
+      if (m.reply_to_archived) m.reply_to_file = null;
     }
 
     // Опрос персонализирован: user_option_ids и, при открытых именах,
@@ -590,8 +675,42 @@ router.get('/:chatId', verifyToken, (req, res) => {
           LIMIT 1
         `).get(chatId, oldestId, req.userId) !== undefined;
 
-    res.json({ messages, hasMore });
+    res.json({ messages, hasMore, truncated });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Убрать вложение (картинку или файл) — вместо удаления оно уезжает в zip в
+// личной папке отправителя. Обратной кнопки нет: см. services/attachmentArchive.js.
+router.post('/:messageId/attachment/archive', verifyToken, (req, res) => {
+  try {
+    const messageId = Number.parseInt(req.params.messageId, 10);
+    if (!Number.isInteger(messageId)) return res.status(400).json({ error: 'Некорректное сообщение' });
+
+    const row = db.prepare('SELECT chat_id FROM messages WHERE id = ?').get(messageId);
+    if (!row) return res.status(404).json({ error: 'Сообщение не найдено' });
+    // Участие в чате проверяется отдельно от права убрать вложение: одно
+    // отвечает на «вам вообще видно это сообщение», другое — на «ваше ли оно».
+    if (!isParticipant(row.chat_id, req.userId)) {
+      return res.status(403).json({ error: 'Нет доступа к этому чату' });
+    }
+
+    const result = archiveAttachment(messageId, req.userId);
+
+    // Вложение пропадает у всех сразу: у остальных участников оно осталось бы
+    // висеть битой картинкой до перезагрузки чата.
+    const io = req.app.get('io');
+    if (io) {
+      const participants = participantsForChatId(result.chat_id);
+      const payload = { id: result.id, chat_id: result.chat_id, archived_at: result.archived_at };
+      if (participants === null) io.emit('attachment_archived', payload);
+      else if (participants.length) io.to(participants.map((id) => 'user:' + id)).emit('attachment_archived', payload);
+    }
+
+    res.json(result);
+  } catch (e) {
+    if (e instanceof ArchiveError) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: e.message });
   }
 });

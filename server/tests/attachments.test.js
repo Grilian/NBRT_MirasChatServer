@@ -84,7 +84,8 @@ test('файл загружается и отдаёт имя, размер и п
   // Оригинальное имя сохраняется для показа человеку...
   assert.equal(data.name, 'смета за август.txt');
   // ...а на диск уезжает обеззараженное: кириллица и пробелы туда не идут.
-  assert.match(data.file_path, /^\/uploads\/chat-files\/doc_\d+_\d+_[a-f0-9]+\.txt$/);
+  // ...и ложится в личную папку отправителя, а не в общую кучу.
+  assert.match(data.file_path, new RegExp(`^/uploads/users/${userId}/files/doc_\\d+_\\d+_[a-f0-9]+\\.txt$`));
   assert.equal(data.size, Buffer.from('привет, это документ').length);
 });
 

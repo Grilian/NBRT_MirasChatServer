@@ -37,6 +37,10 @@ interface UserInfoModalProps {
    * просто не показываются, а не показывают пустоту.
    */
   chatId?: string | null;
+  /** Нужен, чтобы отличить свои вложения от чужих: своё можно убрать. */
+  currentUserId: number;
+  /** Открыть переписку на конкретном сообщении — из списка вложений. */
+  onOpenMessage?: (chatId: string, messageId: number) => void;
   onClose: () => void;
 }
 
@@ -64,7 +68,7 @@ const PLANNED_ACTIONS = [
 
 const UserInfoModal: React.FC<UserInfoModalProps> = ({
   user, online, notificationsMuted = false, onToggleNotifications,
-  canModerate, groups = [], comment, onUpdateComment, chatId, onClose,
+  canModerate, groups = [], comment, onUpdateComment, chatId, currentUserId, onOpenMessage, onClose,
 }) => {
   const name = nameFor(user);
   const coverUrl = resolveUploadUrl(user.avatarPath);
@@ -350,7 +354,13 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
               где переписки ещё нет) раздел не показывается вовсе: пустые
               вкладки там означали бы «ничего не присылали», хотя присылать
               было некуда. */}
-          {chatId && <ChatAttachments chatId={chatId} />}
+          {chatId && (
+            <ChatAttachments
+              chatId={chatId}
+              currentUserId={currentUserId}
+              onOpenMessage={onOpenMessage}
+            />
+          )}
         </div>
 
         {/* Ответ на нажатие того, что ещё не сделано. Само пропадает — просить

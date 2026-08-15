@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('notification:clicked', listener);
   },
 
+  // Скачивание файла из переписки: сохраняет в «Загрузки» и возвращает путь.
+  // Делает это главный процесс — в рендерере ссылка увела бы во внешний
+  // браузер (см. main.js).
+  downloadFile: (url, filename) => ipcRenderer.invoke('file:download', url, filename),
+  revealFile: (filePath) => ipcRenderer.invoke('file:reveal', filePath),
+
   // Автообновление идёт само: скачивается фоном, ставится при выходе. Наружу
   // отдаём только состояние для показа и «Перезапустить» для нетерпеливых.
   checkForUpdate: () => ipcRenderer.send('update:check'),

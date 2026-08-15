@@ -11,6 +11,7 @@ test('notification action calls the real handler without a development label', a
       user={user}
       notificationsMuted={false}
       onToggleNotifications={onToggleNotifications}
+      currentUserId={1}
       onClose={jest.fn()}
     />,
   );
@@ -23,7 +24,7 @@ test('notification action calls the real handler without a development label', a
 });
 
 test('unfinished profile actions still keep their development label', () => {
-  render(<UserInfoModal user={user} onClose={jest.fn()} />);
+  render(<UserInfoModal user={user} currentUserId={1} onClose={jest.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'Звонок' }));
   expect(screen.getByRole('status')).toHaveTextContent('Звонок — в разработке');
 });

@@ -628,6 +628,67 @@ ipcMain.handle('window:ensure-width', (event, requested) => {
   return true;
 });
 
+// Скачивание файла из переписки — задача главного процесса.
+//
+// В рендерере ссылка с target="_blank" открывала бы СТОРОННИЙ браузер (у нас
+// на такие ссылки стоит shell.openExternal), то есть человек уходил бы из
+// приложения ради собственного файла. Здесь же файл кладётся прямо в
+// «Загрузки» и открывается папка с ним — как в любом нормальном клиенте.
+ipcMain.handle('file:download', async (event, url, filename) => {
+  if (!mainWindow || typeof url !== 'string') return { ok: false, error: 'Окно закрыто' };
+  // Только http(s): downloadURL принял бы и file://, то есть рендерер мог бы
+  // попросить «скачать» любой файл с диска себе же в «Загрузки».
+  if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'Некорректный адрес' };
+
+  // Имя приходит из БД (его задавал отправитель) — разделители пути и
+  // запрещённые в Windows символы убираем, иначе сохранение упадёт или уедет
+  // в чужой каталог.
+  const safeName = String(filename || 'file').replace(/[\\/:*?"<>|]/g, '_') || 'file';
+  const dir = app.getPath('downloads');
+
+  // Имя не перезаписывает существующий файл: скачали дважды — получите (2).
+  let target = path.join(dir, safeName);
+  if (fs.existsSync(target)) {
+    const ext = path.extname(safeName);
+    const base = path.basename(safeName, ext);
+    let n = 2;
+    while (fs.existsSync(path.join(dir, `${base} (${n})${ext}`))) n += 1;
+    target = path.join(dir, `${base} (${n})${ext}`);
+  }
+
+  return new Promise((resolve) => {
+    const session = mainWindow.webContents.session;
+    const onWillDownload = (_event, item) => {
+      // Слушатель одноразовый и снимается сразу: иначе следующая загрузка
+      // уехала бы в имя от предыдущей.
+      session.removeListener('will-download', onWillDownload);
+      item.setSavePath(target);
+      item.once('done', (__event, state) => {
+        if (state === 'completed') {
+          resolve({ ok: true, path: target });
+        } else {
+          resolve({ ok: false, error: 'Загрузка прервана' });
+        }
+      });
+    };
+    session.on('will-download', onWillDownload);
+    session.downloadURL(url);
+
+    // Страховка от молчания: без неё интерфейс ждал бы обещания вечно.
+    setTimeout(() => {
+      session.removeListener('will-download', onWillDownload);
+      resolve({ ok: false, error: 'Сервер не ответил' });
+    }, 120000).unref?.();
+  });
+});
+
+// Показать скачанный файл в проводнике — по нажатию на сообщение об успехе.
+ipcMain.handle('file:reveal', (event, filePath) => {
+  if (typeof filePath !== 'string' || !fs.existsSync(filePath)) return false;
+  shell.showItemInFolder(filePath);
+  return true;
+});
+
 // Системные уведомления рисует главный процесс, а не рендерер.
 //
 // Рендерер грузится через loadFile(), то есть с origin file://, а Chromium
