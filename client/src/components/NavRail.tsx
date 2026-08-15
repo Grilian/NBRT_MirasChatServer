@@ -130,7 +130,7 @@ function nextTheme(current: ThemePreference): 'light' | 'dark' {
 // незачем видеть пространства, задачи (поручения — это про рабочие
 // обязанности) и документы; календарь остаётся, но общий слой в нём и так
 // не показывает сервер (см. canSeeGlobalCalendar на бэкенде).
-const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['chats', 'people', 'calendar', 'settings'];
+const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['chats', 'people', 'calendar', 'documents', 'settings'];
 
 // Тот же отбор нужен и снаружи рельса: тип аккаунта могут сменить прямо во
 // время сессии, и человек, стоящий в разделе, который ему больше не положен,

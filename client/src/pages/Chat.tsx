@@ -1224,6 +1224,23 @@ const Chat: React.FC = () => {
       api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
     });
 
+    // Переписку очистили — у второй стороны она обязана опустеть сразу, а не
+    // после перезахода: сообщения на сервере уже помечены удалёнными, и любая
+    // следующая выдача их всё равно не отдаст.
+    newSocket.on('chat_cleared', (data: { chat_id: string }) => {
+      setMessages((prev) => (data.chat_id === liveRef.current.activeChat ? [] : prev));
+      setLastMessages((prev) => {
+        const next = { ...prev };
+        delete next[data.chat_id];
+        return next;
+      });
+      setUnreadCounts((prev) => {
+        const next = { ...prev };
+        delete next[data.chat_id];
+        return next;
+      });
+    });
+
     // Реакции меняются часто и мелко — сервер шлёт готовый список по одному
     // сообщению, клиент просто подставляет его вместо прежнего.
     newSocket.on('reactions_changed', (data: { chat_id: string; message_id: number; reactions: MessageReaction[] }) => {
@@ -1877,6 +1894,42 @@ const Chat: React.FC = () => {
     dismissAllMobileNotifications();
     dismissAllPushNotifications();
     dismissAllDesktopNotifications();
+  };
+
+  // Пометить один чат прочитанным — пункт меню строки в списке чатов.
+  // Счётчик гасим сразу, не дожидаясь ответа: сервер подтвердит тем же
+  // событием, что и обычное чтение, а ждать полсекунды ради нуля незачем.
+  const handleMarkChatRead = (chatId: string) => {
+    socket?.emit('mark_chat_read', { chatId });
+    setUnreadCounts((prev) => {
+      if (!prev[chatId]) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    setMessages((prev) => prev.map((m) => (m.sender_id === currentUserId ? m : { ...m, read_by_me: 1 })));
+  };
+
+  // Очистить переписку у обеих сторон. На сервере сообщения остаются (как и при
+  // обычном удалении), но из приложения исчезают у всех участников.
+  const handleClearChat = async (chatId: string, chatName: string) => {
+    if (!window.confirm(`Очистить переписку с «${chatName}»?`)) return;
+    try {
+      await api.post(`/messages/${encodeURIComponent(chatId)}/clear`);
+      if (chatId === activeChat) setMessages([]);
+      setLastMessages((prev) => {
+        const next = { ...prev };
+        delete next[chatId];
+        return next;
+      });
+      setUnreadCounts((prev) => {
+        const next = { ...prev };
+        delete next[chatId];
+        return next;
+      });
+    } catch (e: any) {
+      setAttachmentNotice(e?.response?.data?.error || 'Не удалось очистить переписку');
+    }
   };
 
   // Закрепление чата. Ручки и таблица на сервере называются `favorites` —
@@ -2938,6 +2991,10 @@ const Chat: React.FC = () => {
         onToggleFavorite={toggleFavorite}
         onMarkAllRead={handleMarkAllRead}
         onRemoveContact={handleRemoveContact}
+        mutedChatIds={Array.from(mutedChatIds)}
+        onToggleMute={updateChatNotificationMute}
+        onMarkChatRead={handleMarkChatRead}
+        onClearChat={handleClearChat}
         onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
         onOpenGroupInfo={(chatGroupId) => setGroupInfoId(chatGroupId)}
         onOpenGeneralInfo={() => setGeneralInfoOpen(true)}

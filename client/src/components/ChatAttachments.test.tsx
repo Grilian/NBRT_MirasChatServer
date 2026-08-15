@@ -97,3 +97,36 @@ test('категории отбирают файлы по виду', async () =>
   fireEvent.click(screen.getByRole('button', { name: 'Категория: Изображения' }));
   expect(screen.getByText('В этой категории ничего нет')).toBeInTheDocument();
 });
+
+test('переключение медиа → файлы → медиа не роняет панель', async () => {
+  // Настоящее падение (1.10.3, Windows): между сменой вкладки и приходом новых
+  // данных был кадр, где вкладка уже «Медиа», а список ещё из «Файлов» —
+  // плитка бралась за file_path, которого у файла нет. Ронялось только там, где
+  // во вкладке «Файлы» действительно что-то лежит, поэтому и «падает на одном
+  // конкретном человеке».
+  //
+  // Порядок шагов важен: переключать вкладку нужно ПОСЛЕ того, как содержимое
+  // предыдущей уже показано (loading = false). Если щёлкать быстрее ответа
+  // сервера, тот самый кадр не наступает и тест ничего не проверяет — на этом
+  // первая версия теста и прошла по сломанному коду.
+  setup();
+
+  const tab = (label: string) => screen.getByRole('button', { name: label });
+
+  await screen.findAllByRole('button', { name: /^Изображение от/ });
+
+  fireEvent.click(tab('Файлы'));
+  await screen.findByText('договор.pdf');
+
+  fireEvent.click(tab('Медиа'));
+  await screen.findAllByRole('button', { name: /^Изображение от/ });
+
+  fireEvent.click(tab('Файлы'));
+  await screen.findByText('песня.mp3');
+
+  fireEvent.click(tab('Медиа'));
+  await screen.findAllByRole('button', { name: /^Изображение от/ });
+
+  // Панель на месте: вкладки не размонтировались вместе с упавшим деревом.
+  expect(screen.getByRole('button', { name: 'Ссылки' })).toBeInTheDocument();
+});

@@ -1,8 +1,8 @@
 {
   "name": "miraschat-desktop",
-  "version": "1.10.3",
-  "releaseVersion": "1.10.3",
-  "buildVersion": "1.10.3",
+  "version": "1.10.4",
+  "releaseVersion": "1.10.4",
+  "buildVersion": "1.10.4",
   "private": true,
   "description": "MirasChat — десктопный клиент для Windows и Linux",
   "main": "src/main.js",

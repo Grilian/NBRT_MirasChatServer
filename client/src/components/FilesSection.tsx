@@ -165,11 +165,8 @@ const FilesSection: React.FC<Props> = ({ onOpenMessage }) => {
     const question = one
       ? `Удалить «${targets[0].name}»?`
       : `Удалить выбранные файлы (${targets.length})?`;
-    if (!window.confirm(
-      `${question}\n\n`
-      + 'Файл пропадёт из переписки у всех участников. На сервере он не стирается, '
-      + 'а убирается в архив — вернуть его сможет только администратор.'
-    )) return;
+    // Спрашиваем коротко — по требованию пользователя: только «уверены или нет».
+    if (!window.confirm(question)) return;
 
     const done: number[] = [];
     let failed = 0;

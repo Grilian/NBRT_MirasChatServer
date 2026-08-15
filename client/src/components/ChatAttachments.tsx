@@ -90,7 +90,17 @@ interface Props {
 const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage }) => {
   const [tab, setTab] = useState<AttachmentTab>('media');
   const [category, setCategory] = useState<FileCategory | 'all'>('all');
-  const [items, setItems] = useState<(MediaItem | FileItem | LinkItem)[]>([]);
+  // Список хранится ВМЕСТЕ с видом, к которому относится.
+  //
+  // Раньше это были две независимые величины (`tab` и `items`), и между
+  // переключением вкладки и приходом новых данных случался кадр, где вкладка
+  // уже «Медиа», а список ещё из «Файлов». Плитка мультимедиа бралась за `file_path`,
+  // которого у файла нет, и приложение падало на `undefined.split('/')` —
+  // ровно сценарий «медиа → файлы → медиа». Пока вид и список едут вместе,
+  // такого кадра не существует в принципе.
+  const [loaded, setLoaded] = useState<{ kind: AttachmentTab; items: (MediaItem | FileItem | LinkItem)[] }>(
+    { kind: 'media', items: [] }
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -104,7 +114,7 @@ const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage
     setLoading(true);
     setError('');
     api.get(`/messages/${encodeURIComponent(chatId)}/attachments`, { params: { kind: tab } })
-      .then(({ data }) => { if (alive) setItems(data.items || []); })
+      .then(({ data }) => { if (alive) setLoaded({ kind: tab, items: data.items || [] }); })
       .catch(() => { if (alive) setError('Не удалось загрузить вложения'); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -171,21 +181,25 @@ const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage
   const handleArchive = async (target: MenuTarget) => {
     setMenu(null);
     const what = target.isImage ? 'изображение' : 'файл';
-    if (!window.confirm(
-      `Удалить ${what} из переписки?\n\n`
-      + 'Оно пропадёт у всех участников. На сервере файл не стирается, а '
-      + 'убирается в архив — вернуть его сможет только администратор.'
-    )) return;
+    // Коротко, по требованию пользователя: только «уверены или нет».
+    if (!window.confirm(`Удалить ${what}?`)) return;
 
     try {
       await api.post(`/messages/${target.messageId}/attachment/archive`);
-      setItems((prev) => prev.filter((item) => ('id' in item ? item.id : item.message_id) !== target.messageId));
+      setLoaded((prev) => ({
+        kind: prev.kind,
+        items: prev.items.filter((item) => ('id' in item ? item.id : item.message_id) !== target.messageId),
+      }));
       setNotice(target.isImage ? 'Изображение убрано' : 'Файл убран в архив');
     } catch (e: any) {
       setNotice(e?.response?.data?.error || 'Не удалось убрать вложение');
     }
   };
 
+  // Данные показываем, только если они от ТОЙ ЖЕ вкладки; иначе это ещё
+  // не пришедший ответ, и правильное состояние здесь — «Загрузка…».
+  const items = loaded.kind === tab ? loaded.items : [];
+  const ready = !loading && !error && loaded.kind === tab;
   const visibleFiles = (items as FileItem[]).filter(
     (item) => category === 'all' || item.category === category
   );
@@ -230,16 +244,16 @@ const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage
         </div>
       )}
 
-      {loading && <div className="user-info-files-empty">Загрузка…</div>}
+      {(loading || loaded.kind !== tab) && <div className="user-info-files-empty">Загрузка…</div>}
       {!loading && error && <div className="user-info-files-empty">{error}</div>}
-      {!loading && !error && items.length === 0 && (
+      {ready && items.length === 0 && (
         <div className="user-info-files-empty">{EMPTY_TEXT[tab]}</div>
       )}
-      {!loading && !error && tab === 'files' && items.length > 0 && visibleFiles.length === 0 && (
+      {ready && tab === 'files' && items.length > 0 && visibleFiles.length === 0 && (
         <div className="user-info-files-empty">В этой категории ничего нет</div>
       )}
 
-      {!loading && !error && tab === 'media' && items.length > 0 && (
+      {ready && tab === 'media' && items.length > 0 && (
         <div className="attachments-media">
           {(items as MediaItem[]).map((item) => {
             const url = resolveUploadUrl(item.file_path);
@@ -256,7 +270,7 @@ const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage
                   messageId: item.id,
                   mine: item.sender_id === currentUserId,
                   url,
-                  name: item.file_path.split('/').pop() || 'image.webp',
+                  name: (item.file_path || '').split('/').pop() || 'image.webp',
                   isImage: true,
                 })}
               >
@@ -267,7 +281,7 @@ const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage
         </div>
       )}
 
-      {!loading && !error && tab === 'files' && visibleFiles.length > 0 && (
+      {ready && tab === 'files' && visibleFiles.length > 0 && (
         <div className="attachments-list">
           {visibleFiles.map((item) => (
             <button
@@ -294,7 +308,7 @@ const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage
         </div>
       )}
 
-      {!loading && !error && tab === 'links' && items.length > 0 && (
+      {ready && tab === 'links' && items.length > 0 && (
         <div className="attachments-list">
           {(items as LinkItem[]).map((item) => (
             <a

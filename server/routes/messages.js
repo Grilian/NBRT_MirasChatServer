@@ -6,7 +6,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const { isParticipant, participantsForChatId } = require('../services/chatParticipants');
+const { isParticipant, participantsForChatId, selfChatId } = require('../services/chatParticipants');
 const { reactionsForMessages } = require('../services/reactions');
 const { attachPollsToMessages } = require('../services/polls');
 const { touchRecentChat, listRecentChats } = require('../services/recentChats');
@@ -644,6 +644,49 @@ router.get('/:chatId', verifyToken, (req, res) => {
         `).get(chatId, oldestId, req.userId) !== undefined;
 
     res.json({ messages, hasMore, truncated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Очистить переписку — у обеих сторон сразу.
+//
+// «Очистить» здесь значит то же, что удаление сообщения у всех: строки
+// остаются в базе целиком (обязательство хранить переписку — см. общее правило
+// про messages.deleted), но наружу больше не отдаются и в ленте не
+// показываются. Ни text, ни file_path, ни файлы на диске не трогаются.
+//
+// Только личная переписка и «Избранное». В группе и общем чате чистить «у
+// всех» нельзя: там десятки участников, для которых это чужая переписка, а у
+// владельца группы для уборки есть свой массовый инструмент.
+router.post('/:chatId/clear', verifyToken, (req, res) => {
+  try {
+    const chatId = String(req.params.chatId);
+    const personal = /^chat_\d+_\d+$/.test(chatId) || chatId === selfChatId(req.userId);
+    if (!personal) {
+      return res.status(400).json({ error: 'Очистить можно только личную переписку' });
+    }
+    if (!isParticipant(chatId, req.userId)) {
+      return res.status(403).json({ error: 'Нет доступа к этому чату' });
+    }
+
+    const now = new Date().toISOString();
+    const result = db.prepare(`
+      UPDATE messages
+      SET deleted = 1, deleted_at = ?, deleted_by = ?
+      WHERE chat_id = ? AND deleted = 0
+    `).run(now, req.userId, chatId);
+
+    // Событие одно на всю переписку, а не по сообщению на каждое: их могут быть
+    // тысячи, и слать тысячу событий ради одного действия незачем.
+    const io = req.app.get('io');
+    if (io) {
+      const participants = participantsForChatId(chatId) || [];
+      const rooms = participants.map((id) => 'user:' + id);
+      if (rooms.length) io.to(rooms).emit('chat_cleared', { chat_id: chatId, cleared_at: now });
+    }
+
+    res.json({ chat_id: chatId, cleared: result.changes });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

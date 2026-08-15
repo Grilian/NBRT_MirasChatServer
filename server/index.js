@@ -1097,6 +1097,42 @@ io.on('connection', (socket) => {
   // сообщений (см. приватность-фикс) или клиент просто не успел отметить
   // прочитанным вовремя. Помечаем читанными только те чаты, где сокет
   // реально участник — та же проверка, что и в emitToChat.
+  // Пометить прочитанным ОДИН чат — пункт контекстного меню в списке чатов.
+  //
+  // Отдельно от mark_all_read: тот проходит по всей переписке человека, а здесь
+  // нужен ровно один чат, и гонять полный проход ради него незачем. Правила
+  // отметки те же самые (личные — по status, общие и группы — по message_reads),
+  // поэтому и отметка идёт через общий markRead.
+  socket.on('mark_chat_read', (data) => {
+    const userId = socket.userId;
+    const chatId = data && typeof data === 'object' ? String(data.chatId || '') : '';
+    if (!userId || !chatId) return;
+
+    try {
+      if (!isParticipant(chatId, userId)) return;
+
+      const ids = isSharedChat(chatId)
+        ? db.prepare(`
+            SELECT m.id FROM messages m
+            LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
+            WHERE m.chat_id = ? AND m.sender_id != ? AND r.message_id IS NULL
+          `).all(userId, chatId, userId).map((row) => row.id)
+        : db.prepare(
+          "SELECT id FROM messages WHERE chat_id = ? AND sender_id != ? AND status != 'read'"
+        ).all(chatId, userId).map((row) => row.id);
+
+      if (!ids.length) return;
+      const affected = markRead(userId, chatId, ids);
+      if (affected.length) {
+        emitToChat(chatId, 'message_status_bulk', {
+          chatId, messageIds: affected, status: 'read', ...readCountsPayload(chatId, affected),
+        });
+      }
+    } catch (e) {
+      console.error('Ошибка отметки чата прочитанным:', e);
+    }
+  });
+
   socket.on('mark_all_read', () => {
     const userId = socket.userId;
     if (!userId) return;

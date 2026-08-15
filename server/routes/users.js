@@ -48,31 +48,26 @@ const backgroundUpload = multer({
   fileFilter: (req, file, cb) => cb(null, AVATAR_ALLOWED_MIME.includes(file.mimetype)),
 });
 
-// Администрация — единственное исключение из разделения типов аккаунтов, и
-// определение у неё ровно одно на оба направления (см. ADMINISTRATION_SQL):
-// орг-роль либо эта группа. Раньше "Интернет" искал админов только по группе,
-// и админ с ролью admin, но без группы «Админы», был для них невидим — то
-// есть просить сменить тип аккаунта оказывалось не у кого.
-const INTERNET_VISIBLE_GROUPS = ['Админы'];
-const ADMINISTRATION_ROLES = ['admin', 'moderator'];
-const ADMINISTRATION_SQL = `(
-  u.role IN (${ADMINISTRATION_ROLES.map(() => '?').join(',')})
-  OR g.name IN (${INTERNET_VISIBLE_GROUPS.map(() => '?').join(',')})
-)`;
-const ADMINISTRATION_PARAMS = [...ADMINISTRATION_ROLES, ...INTERNET_VISIBLE_GROUPS];
+// Исключений из разделения типов аккаунтов в справочнике БОЛЬШЕ НЕТ.
+//
+// Раньше администрация (орг-роль admin/moderator либо группа «Админы») видела
+// обе стороны и была видна обеим — чтобы «Интернету» было у кого попросить
+// смену типа аккаунта. По требованию пользователя (15.08.2026) это снято
+// целиком: одновременно оба типа видит только супер-админ в панели
+// управления, у которой свой отдельный вход и своя выдача пользователей.
+// Следствие, о котором нужно помнить: из самого приложения «Интернет»
+// написать администрации уже не может — просьбу о смене типа придётся
+// передавать мимо мессенджера.
 
 // Получить всех пользователей (кроме текущего) — справочник для поиска.
 // miras_* — служебные зеркала админов МИРАС для маршрутизации сообщений,
 // в списке реальных сотрудников их быть не должно.
 //
-// Два типа аккаунтов в справочнике друг друга не видят вовсе. "Интернет"
-// (незнакомые с улицы, самостоятельная регистрация) видит только других
-// "Интернет" плюс администрацию — иначе им неоткуда узнать, кому написать с
-// просьбой сменить тип на "Сотрудник". Симметрично и "Сотрудник" не видит
-// "Интернет": это посторонние люди, и в списке коллег им не место. Исключение
-// ровно одно и с обеих сторон — та же администрация: ей на такие просьбы
-// отвечать. После того как админ подтвердит человека как "Сотрудник", тот
-// попадает в общий справочник и видит его целиком.
+// Два типа аккаунтов в справочнике не видят друг друга ВОВСЕ, без исключений.
+// "Интернет" (незнакомые с улицы, самостоятельная регистрация) видит только
+// других "Интернет", а "Сотрудник" — только сотрудников: это посторонние люди,
+// и в списке коллег им не место. После того как супер-админ переведёт человека
+// в "Сотрудник", тот попадает в общий справочник и видит его целиком.
 router.get('/', verifyToken, (req, res) => {
   try {
     clearExpiredStatuses();
@@ -81,10 +76,9 @@ router.get('/', verifyToken, (req, res) => {
       FROM users u LEFT JOIN groups g ON g.id = u.group_id
       WHERE u.id = ?
     `).get(req.userId);
-    const isAdministration = !!requester
-      && (ADMINISTRATION_ROLES.includes(requester.role) || INTERNET_VISIBLE_GROUPS.includes(requester.group_name));
-    const restrictToInternet = requester && requester.account_type === 'internet';
-    const hideInternet = !restrictToInternet && !isAdministration;
+    const restrictToInternet = !!requester && requester.account_type === 'internet';
+    // Никаких «кроме администрации»: не «Интернет» — значит «Интернет» не видит.
+    const hideInternet = !restrictToInternet;
 
     // bio/phone/position/birth_date добавлены ради профиля (UserInfoModal):
     // раньше справочник отдавал только то, что нужно для строки в списке, и
@@ -100,11 +94,11 @@ router.get('/', verifyToken, (req, res) => {
       LEFT JOIN departments d ON d.id = u.department_id
       WHERE u.id != ?
         AND u.username NOT LIKE 'miras\_%' ESCAPE '\\'
-        AND (? = 0 OR u.account_type = 'internet' OR ${ADMINISTRATION_SQL})
+        AND (? = 0 OR u.account_type = 'internet')
         AND (? = 0 OR COALESCE(u.account_type, 'staff') != 'internet')
     `).all(
       req.userId,
-      restrictToInternet ? 1 : 0, ...ADMINISTRATION_PARAMS,
+      restrictToInternet ? 1 : 0,
       hideInternet ? 1 : 0,
     );
     res.json(users);
