@@ -14,6 +14,13 @@ import { instantOf, todayKey } from '../calendar/dates';
 // закреплённое, последние пространства — и добавление блока не должно означать
 // переписывание экрана.
 
+interface DayEvent {
+  id: string;
+  title: string;
+  time: string;
+  startAt: number;
+}
+
 interface HomeCard {
   id: string;
   group: 'today' | 'attention';
@@ -32,6 +39,11 @@ interface Props {
   onOpenChats: () => void;
   onOpenTasks: () => void;
   onOpenCalendar: () => void;
+  /**
+   * Личное хранилище. На телефоне «Файлы» убраны из нижней панели — места там
+   * на пять подписей, — и «Главная» становится единственным входом туда.
+   */
+  onOpenFiles: () => void;
 }
 
 /** «1 задача / 2 задачи / 5 задач». */
@@ -44,6 +56,11 @@ function plural(count: number, one: string, few: string, many: string): string {
   return many;
 }
 
+function formatTime(ms: number | undefined): string {
+  if (!ms) return '';
+  return new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
 function greeting(date: Date): string {
   const hour = date.getHours();
   if (hour < 5) return 'Доброй ночи';
@@ -53,10 +70,13 @@ function greeting(date: Date): string {
 }
 
 const HomeSection: React.FC<Props> = ({
-  displayName, unreadTotal, onOpenChats, onOpenTasks, onOpenCalendar,
+  displayName, unreadTotal, onOpenChats, onOpenTasks, onOpenCalendar, onOpenFiles,
 }) => {
   const [tasksCount, setTasksCount] = useState<number | null>(null);
-  const [eventsCount, setEventsCount] = useState<number | null>(null);
+  // Расписание дня показывается СПИСКОМ, а не числом: «3 мероприятия» ничего не
+  // говорит о том, к чему готовиться, — а именно за этим на «Главную» и
+  // заходят утром.
+  const [events, setEvents] = useState<DayEvent[] | null>(null);
 
   // Считаем по тем же ручкам, которыми живут сами разделы, а не по отдельной
   // сводке на сервере: у календаря правила видимости нетривиальные (общий
@@ -81,25 +101,23 @@ const HomeSection: React.FC<Props> = ({
     fetchRange(instantOf(today, 0), instantOf(today, 24 * 60))
       .then((data) => {
         if (!alive) return;
-        setEventsCount(data.events.length + data.birthdays.length);
+        const all = [...data.events, ...data.birthdays].map((item: any) => ({
+          id: `${item.event_id ?? item.id}-${item.start_at ?? 0}`,
+          title: item.title || 'Без названия',
+          // Событие на весь день времени не имеет — так и показываем.
+          time: item.all_day ? 'весь день' : formatTime(item.start_at),
+          startAt: item.start_at ?? 0,
+        }));
+        all.sort((a, b) => a.startAt - b.startAt);
+        setEvents(all);
       })
-      .catch(() => { if (alive) setEventsCount(0); });
+      .catch(() => { if (alive) setEvents([]); });
 
     return () => { alive = false; };
   }, []);
 
   const cards: HomeCard[] = useMemo(() => {
     const list: HomeCard[] = [];
-    if (eventsCount !== null && eventsCount > 0) {
-      list.push({
-        id: 'events',
-        group: 'today',
-        icon: '📅',
-        count: eventsCount,
-        label: plural(eventsCount, 'мероприятие', 'мероприятия', 'мероприятий'),
-        onOpen: onOpenCalendar,
-      });
-    }
     if (tasksCount !== null && tasksCount > 0) {
       list.push({
         id: 'tasks',
@@ -121,11 +139,12 @@ const HomeSection: React.FC<Props> = ({
       });
     }
     return list;
-  }, [eventsCount, tasksCount, unreadTotal, onOpenCalendar, onOpenTasks, onOpenChats]);
+  }, [tasksCount, unreadTotal, onOpenTasks, onOpenChats]);
 
   const today = cards.filter((card) => card.group === 'today');
   const attention = cards.filter((card) => card.group === 'attention');
-  const loading = tasksCount === null || eventsCount === null;
+  const loading = tasksCount === null || events === null;
+  const hasAnything = cards.length > 0 || (events !== null && events.length > 0);
 
   const renderGroup = (title: string, group: HomeCard[]) => (
     group.length > 0 && (
@@ -158,12 +177,46 @@ const HomeSection: React.FC<Props> = ({
         </p>
       </header>
 
+      {/* Расписание дня — первым: это то, что определяет день, а счётчики
+          говорят лишь о накопившемся. */}
+      {events !== null && events.length > 0 && (
+        <section className="home-group">
+          <h2>Расписание на сегодня</h2>
+          <div className="home-schedule">
+            {events.map((event) => (
+              <button key={event.id} type="button" className="home-event" onClick={onOpenCalendar}>
+                <span className="home-event-time">{event.time}</span>
+                <span className="home-event-title">{event.title}</span>
+              </button>
+            ))}
+            <button type="button" className="home-schedule-all" onClick={onOpenCalendar}>
+              Открыть календарь
+            </button>
+          </div>
+        </section>
+      )}
+
       {renderGroup('Сегодня', today)}
       {renderGroup('Требует внимания', attention)}
 
+      {/* Разделы, которых нет в нижней панели телефона. На широком экране они
+          есть на рельсе, но дублировать вход отсюда не мешает: это те же две
+          кнопки, и на десктопе они выглядят продолжением сводки. */}
+      <section className="home-group">
+        <h2>Разделы</h2>
+        <div className="home-links">
+          <button type="button" className="home-link" onClick={onOpenCalendar}>
+            <span aria-hidden="true">📅</span> Календарь
+          </button>
+          <button type="button" className="home-link" onClick={onOpenFiles}>
+            <span aria-hidden="true">🗂</span> Файлы
+          </button>
+        </div>
+      </section>
+
       {/* Пустое состояние — это не ошибка и не «нет данных»: это нормальный
           рабочий день, в котором ничего не горит. */}
-      {!loading && cards.length === 0 && (
+      {!loading && !hasAnything && (
         <div className="home-empty">
           <span aria-hidden="true">✨</span>
           <p>Ничего не требует внимания: непрочитанного нет, задач на вас нет, мероприятий сегодня тоже.</p>

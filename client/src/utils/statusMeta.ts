@@ -30,6 +30,23 @@ export function statusExpiryFrom(durationMs: number | null): number | null {
 }
 
 /**
+ * Момент снятия из даты со временем («до 18 августа, 19:00»).
+ *
+ * Дата задаётся вручную: «через неделю» и «до 19:00» покрывают не всё —
+ * отпуск заканчивается конкретным днём, и высчитывать для него длительность
+ * человек не должен.
+ */
+export function statusExpiryOn(dateTime: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/.exec(dateTime.trim());
+  if (!match) return null;
+  const [, year, month, day, hours, minutes] = match;
+  const target = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), 0, 0);
+  const time = target.getTime();
+  // Прошедший момент снял бы статус мгновенно — это точно не то, чего хотели.
+  return Number.isFinite(time) && time > Date.now() ? time : null;
+}
+
+/**
  * Момент снятия из КОНКРЕТНОГО времени («до 19:00»).
  *
  * Прошедшее время значит завтрашний день: «до 9:00», выставленное вечером, —

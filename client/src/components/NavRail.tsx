@@ -36,9 +36,9 @@ const stroke = {
 };
 
 // Набор пунктов один на обе раскладки, но показывается по-разному: на широком
-// экране это вертикальный рельс целиком, на узком — нижняя панель из шести
-// основных разделов (см. MOBILE_SECTIONS). «Пространства» и «Файлы» в нижнюю
-// панель не помещаются и остаются доступны с рельса и из «Главной».
+// экране это вертикальный рельс целиком, на узком — нижняя панель из пяти
+// основных разделов (см. MOBILE_SECTION_SET). «Пространства», «Календарь» и
+// «Файлы» на телефоне открываются с «Главной».
 export const SECTIONS: SectionMeta[] = [
   {
     id: 'home',
@@ -151,11 +151,23 @@ export function isSectionAllowedFor(accountType: string | undefined, id: Section
 /**
  * Что показывает нижняя панель на узком экране.
  *
- * Шесть пунктов — предел, за которым подписи начинают налезать друг на друга
- * на 360px. Порядок повторяет рельс, чтобы переход между устройствами не
- * требовал переучиваться.
+ * Это НАБОР, а не порядок: порядок всегда берётся из SECTIONS — один и тот же
+ * и для рисования панели, и для перелистывания смахиванием. Пока это были два
+ * независимых списка, свайп уводил не на соседнюю вкладку, а «куда-то»: панель
+ * шла в порядке SECTIONS, а жест — в порядке своего массива.
+ *
+ * «Календарь» и «Файлы» на телефоне из панели убраны: вход в них — с «Главной»
+ * (расписание дня и своё хранилище), а места в нижнем ряду на 360px хватает
+ * ровно на пять подписей без налезания. На десктопном рельсе оба остаются.
  */
-export const MOBILE_SECTIONS: SectionId[] = ['home', 'tasks', 'calendar', 'people', 'chats', 'settings'];
+const MOBILE_SECTION_SET = new Set<SectionId>(['home', 'chats', 'people', 'tasks', 'settings']);
+
+/** Разделы нижней панели по порядку и с учётом типа аккаунта. */
+export function mobileSectionsFor(accountType: string | undefined): SectionId[] {
+  return SECTIONS
+    .filter((s) => MOBILE_SECTION_SET.has(s.id) && isSectionAllowedFor(accountType, s.id))
+    .map((s) => s.id);
+}
 
 interface NavRailProps {
   active: SectionId;
@@ -198,10 +210,11 @@ const NavRail: React.FC<NavRailProps> = ({
             <button
               key={section.id}
               type="button"
-              // Пункты вне MOBILE_SECTIONS живут только на десктопном рельсе:
-              // в нижнюю панель их не помещается, и они скрываются медиазапросом.
+              // Пункты вне набора для телефона живут только на десктопном
+              // рельсе: в нижнюю панель они не помещаются и скрываются
+              // медиазапросом.
               className={'rail-item' + (isActive ? ' is-active' : '')
-                + (MOBILE_SECTIONS.includes(section.id) ? '' : ' rail-item-desktop-only')}
+                + (MOBILE_SECTION_SET.has(section.id) ? '' : ' rail-item-desktop-only')}
               aria-current={isActive ? 'page' : undefined}
               title={section.label}
               onClick={() => onSelect(section.id)}

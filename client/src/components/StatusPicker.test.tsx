@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import StatusPicker from './StatusPicker';
-import { describeStatus, statusExpiryAt } from '../utils/statusMeta';
+import { describeStatus, statusExpiryOn } from '../utils/statusMeta';
 
 jest.mock('../api/client', () => ({
   __esModule: true,
@@ -53,23 +53,24 @@ test('removes an active status through the server', async () => {
 });
 
 describe('срок статуса', () => {
-  test('конкретное время в будущем — сегодня, в прошлом — завтра', () => {
+  test('дата со временем принимается, прошедший момент — нет', () => {
     const now = new Date();
     now.setHours(12, 0, 0, 0);
     jest.useFakeTimers().setSystemTime(now);
 
-    const later = statusExpiryAt('18:30')!;
-    expect(new Date(later).getDate()).toBe(now.getDate());
+    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const later = statusExpiryOn(`${iso(now)}T18:30`)!;
     expect(new Date(later).getHours()).toBe(18);
+    expect(new Date(later).getDate()).toBe(now.getDate());
 
-    // «до 9:00», выставленное в полдень, — это завтрашнее утро, а не мгновенное
-    // снятие статуса.
-    const earlier = statusExpiryAt('09:00')!;
-    expect(earlier).toBeGreaterThan(now.getTime());
-    expect(new Date(earlier).getDate()).toBe(now.getDate() + 1);
+    // Дата задаётся вручную — можно уехать хоть на неделю вперёд.
+    const nextWeek = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+    const far = statusExpiryOn(`${iso(nextWeek)}T09:00`)!;
+    expect(new Date(far).getDate()).toBe(nextWeek.getDate());
 
-    expect(statusExpiryAt('99:99')).toBeNull();
-    expect(statusExpiryAt('')).toBeNull();
+    // Прошедший момент снял бы статус мгновенно — такой не принимаем.
+    expect(statusExpiryOn(`${iso(now)}T09:00`)).toBeNull();
+    expect(statusExpiryOn('мусор')).toBeNull();
     jest.useRealTimers();
   });
 
@@ -81,3 +82,4 @@ describe('срок статуса', () => {
     expect(describeStatus(null, '🚗')).toEqual({ emoji: '💬', label: '🚗' });
   });
 });
+

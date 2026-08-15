@@ -3,7 +3,7 @@ import api from '../api/client';
 import EmojiPicker from './EmojiPicker';
 import {
   STATUS_DURATION_OPTIONS, STATUS_PRESETS, STATUS_PRESET_ORDER, StatusPreset,
-  statusExpiryAt, statusExpiryFrom,
+  statusExpiryFrom, statusExpiryOn,
 } from '../utils/statusMeta';
 
 interface StatusPickerProps {
@@ -38,13 +38,15 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
   const [customStatus, setCustomStatus] = useState(parsed.text);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
-  const [untilTime, setUntilTime] = useState('');
+  // Дата и время вместе одним полем: разносить их по двум значило бы заставлять
+  // выбирать дважды там, где почти всегда нужен сегодняшний или завтрашний день.
+  const [until, setUntil] = useState('');
   const [saving, setSaving] = useState(false);
 
   const expiryPayload = () => {
-    // Конкретное время побеждает длительность: человек указал его последним и
-    // явно — это точнее, чем «через сколько-то».
-    if (untilTime) return statusExpiryAt(untilTime);
+    // Указанный вручную момент побеждает длительность: он точнее, чем
+    // «через сколько-то», и выбран последним.
+    if (until) return statusExpiryOn(until);
     return statusExpiryFrom(duration);
   };
 
@@ -140,9 +142,9 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
               value={duration === null ? '' : String(duration)}
               onChange={(e) => {
                 setDuration(e.target.value ? Number(e.target.value) : null);
-                // Выбрали длительность — конкретное время сбрасываем, иначе
+                // Выбрали длительность — конкретный момент сбрасываем, иначе
                 // непонятно, что из двух сработает.
-                setUntilTime('');
+                setUntil('');
               }}
               disabled={saving}
             >
@@ -157,21 +159,20 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
             <label htmlFor="status-until">до</label>
             <input
               id="status-until"
-              type="time"
-              value={untilTime}
-              onChange={(e) => { setUntilTime(e.target.value); setDuration(null); }}
+              type="datetime-local"
+              value={until}
+              min={minDateTime()}
+              onChange={(e) => { setUntil(e.target.value); setDuration(null); }}
               disabled={saving}
             />
-            {untilTime && (
-              <button type="button" className="status-expiry-clear" onClick={() => setUntilTime('')}>
+            {until && (
+              <button type="button" className="status-expiry-clear" onClick={() => setUntil('')}>
                 сбросить
               </button>
             )}
           </div>
-          {/* Прошедшее время значит «завтра»: «до 9:00», поставленное вечером,
-              иначе сняло бы статус мгновенно. */}
-          {untilTime && <p className="status-expiry-hint">{describeUntil(untilTime)}</p>}
-          {!untilTime && statusExpiresAt && hasStatus && (
+          {until && <p className="status-expiry-hint">{describeUntil(until)}</p>}
+          {!until && statusExpiresAt && hasStatus && (
             <p className="status-expiry-hint">
               Сейчас снимется {new Date(statusExpiresAt).toLocaleString('ru-RU', {
                 hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long',
@@ -208,11 +209,21 @@ function splitEmoji(value: string): { emoji: string; text: string } {
   return { emoji: trimmed.slice(0, trimmed.length - rest.length).trim(), text: rest.trim() };
 }
 
-function describeUntil(time: string): string {
-  const target = statusExpiryAt(time);
-  if (!target) return '';
-  const sameDay = new Date(target).toDateString() === new Date().toDateString();
-  return `Снимется ${sameDay ? 'сегодня' : 'завтра'} в ${time}`;
+function describeUntil(value: string): string {
+  const target = statusExpiryOn(value);
+  // Прошедший момент статус бы не пережил — говорим об этом прямо, а не
+  // молча снимаем его в ту же секунду.
+  if (!target) return 'Этот момент уже прошёл — выберите другой';
+  return `Снимется ${new Date(target).toLocaleString('ru-RU', {
+    day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+  })}`;
+}
+
+/** Прошлое в календаре недоступно: снимать статус задним числом нечем. */
+function minDateTime(): string {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16);
 }
 
 export default StatusPicker;

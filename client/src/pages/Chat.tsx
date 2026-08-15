@@ -17,7 +17,7 @@ import CreateGroupModal, { CreatedGroup } from '../components/CreateGroupModal';
 import GroupInfoModal from '../components/GroupInfoModal';
 import GeneralChatInfoModal from '../components/GeneralChatInfoModal';
 import Avatar from '../components/Avatar';
-import NavRail, { MOBILE_SECTIONS, SectionId, isSectionAllowedFor, sectionById } from '../components/NavRail';
+import NavRail, { SectionId, isSectionAllowedFor, mobileSectionsFor, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
 import FilesSection from '../components/FilesSection';
 import HomeSection from '../components/HomeSection';
@@ -2890,7 +2890,14 @@ const Chat: React.FC = () => {
   const swipeSections = useSwipeSections(
     narrowLayout && !showConversation,
     (direction) => {
-      const available = MOBILE_SECTIONS.filter((id) => isSectionAllowedFor(currentAccountType, id));
+      // Порядок ровно тот же, в котором нарисована сама панель, — иначе жест
+      // уводит не к соседу, а «куда-то».
+      //
+      // «Контакты» из перелистывания исключены: тап по ним открывает окно
+      // поверх текущего экрана, а не меняет раздел. Смахнув на них, человек
+      // упирался в тупик — активная вкладка не менялась, и следующий свайп
+      // снова открывал то же окно.
+      const available = mobileSectionsFor(currentAccountType).filter((id) => id !== 'people');
       const index = available.indexOf(section);
       if (index === -1) return;
       const next = available[index + direction];
@@ -3226,6 +3233,7 @@ const Chat: React.FC = () => {
             onOpenChats={() => goToSection('chats')}
             onOpenTasks={() => goToSection('tasks')}
             onOpenCalendar={() => goToSection('calendar')}
+            onOpenFiles={() => goToSection('documents')}
           />
         </main>
       )}

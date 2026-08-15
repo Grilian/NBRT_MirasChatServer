@@ -17,43 +17,74 @@ const TASKS = [
   { id: 3, title: 'Сделано', status: 'done' },
 ];
 
+const at = (hours: number, minutes = 0) => {
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return date.getTime();
+};
+
+const EVENTS = {
+  events: [
+    { id: 2, event_id: 2, title: 'Планёрка', start_at: at(10, 30) },
+    { id: 1, event_id: 1, title: 'Совещание', start_at: at(9) },
+    { id: 3, event_id: 3, title: 'День открытых дверей', start_at: at(0), all_day: true },
+  ],
+  birthdays: [],
+};
+
 beforeEach(() => {
   mockedApi.get.mockReset();
   mockedApi.get.mockImplementation((url: string) => {
     if (url === '/tasks') return Promise.resolve({ data: TASKS });
-    // fetchRange ходит в /calendar/events и ждёт events/birthdays.
-    return Promise.resolve({ data: { events: [{ id: 1 }, { id: 2 }], birthdays: [{ id: 3 }] } });
+    return Promise.resolve({ data: EVENTS });
   });
 });
 
 const setup = (unreadTotal = 18) => {
-  const handlers = { onOpenChats: jest.fn(), onOpenTasks: jest.fn(), onOpenCalendar: jest.fn() };
+  const handlers = {
+    onOpenChats: jest.fn(), onOpenTasks: jest.fn(), onOpenCalendar: jest.fn(), onOpenFiles: jest.fn(),
+  };
   render(<HomeSection displayName="Алиса" unreadTotal={unreadTotal} {...handlers} />);
   return handlers;
 };
 
-test('здоровается по имени и показывает сводку дня', async () => {
+test('здоровается по имени и показывает расписание дня по времени', async () => {
   setup();
 
   expect(screen.getByText(/Алиса/)).toBeInTheDocument();
-  // Завершённые задачи в сводку не идут: это список дел, а не отчёт.
-  expect(await screen.findByText('назначенные задачи')).toBeInTheDocument();
-  expect(screen.getByText('3')).toBeInTheDocument(); // 2 события + 1 день рождения
-  expect(screen.getByText('18')).toBeInTheDocument();
-  expect(screen.getByText('непрочитанных сообщений')).toBeInTheDocument();
+  expect(await screen.findByText('Совещание')).toBeInTheDocument();
+
+  // Расписание — список, а не число: «3 мероприятия» не говорит, к чему
+  // готовиться, а именно за этим сюда и заходят утром.
+  const titles = Array.from(document.querySelectorAll('.home-event-title')).map((n) => n.textContent);
+  expect(titles).toEqual(['День открытых дверей', 'Совещание', 'Планёрка']);
+  // Событие на весь день времени не имеет — так и подписано.
+  expect(document.querySelectorAll('.home-event-time')[0].textContent).toBe('весь день');
 });
 
-test('каждый блок — переход в свой раздел, а не просто цифра', async () => {
+test('счётчики и расписание ведут в свои разделы', async () => {
   const handlers = setup();
-  await screen.findByText('назначенные задачи');
+  await screen.findByText('Совещание');
+
+  fireEvent.click(screen.getByText('Совещание').closest('button')!);
+  expect(handlers.onOpenCalendar).toHaveBeenCalled();
 
   fireEvent.click(screen.getByText('непрочитанных сообщений').closest('button')!);
   expect(handlers.onOpenChats).toHaveBeenCalled();
 
   fireEvent.click(screen.getByText('назначенные задачи').closest('button')!);
   expect(handlers.onOpenTasks).toHaveBeenCalled();
+});
 
-  fireEvent.click(screen.getByText(/мероприяти/).closest('button')!);
+test('на «Главной» есть вход в файлы — на телефоне другого входа туда нет', async () => {
+  const handlers = setup();
+  await screen.findByText('Совещание');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Файлы' }));
+  expect(handlers.onOpenFiles).toHaveBeenCalled();
+
+  // Эмодзи в кнопке помечен aria-hidden — в доступном имени остаётся слово.
+  fireEvent.click(screen.getByRole('button', { name: 'Календарь' }));
   expect(handlers.onOpenCalendar).toHaveBeenCalled();
 });
 
@@ -66,6 +97,7 @@ test('пустой день — это не ошибка, а сообщение 
 
   await waitFor(() => expect(screen.getByText(/Ничего не требует внимания/)).toBeInTheDocument());
   expect(document.querySelectorAll('.home-card').length).toBe(0);
+  expect(document.querySelectorAll('.home-event').length).toBe(0);
 });
 
 test('счётчики склоняются по-русски', async () => {

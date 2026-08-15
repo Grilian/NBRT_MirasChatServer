@@ -686,8 +686,15 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
 }
 .row.is-active .row-comment { color: color-mix(in srgb, var(--row-active-ink) 75%, transparent); }
-.row-bottom { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 1px; }
-.row-preview { font-size: 13px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* space-between остался с тех пор, когда в этой строке рядом с превью жили
+   кнопки и счётчик. Они переехали в правую колонку, и текст остался один —
+   а распорка продолжала отталкивать его к правому краю: короткое
+   «Фотография» повисало у самой границы строки, оторванным от миниатюры. */
+.row-bottom { display: flex; align-items: center; gap: 6px; margin-top: 1px; min-width: 0; }
+.row-preview {
+  flex: 1; min-width: 0; font-size: 13px; color: var(--ink-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .row-actions { flex: none; display: flex; align-items: center; gap: 3px; }
 .row-unread {
   flex: none; min-width: 21px; height: 21px; border-radius: var(--radius-pill);
@@ -2823,7 +2830,8 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Миниатюра последнего сообщения — перед текстом, без роста высоты строки. */
 .row-thumb {
   flex: none; width: 18px; height: 18px; border-radius: 4px; object-fit: cover;
-  margin-right: 6px; background: var(--paper-sunken);
+  /* Отступ даёт gap самой строки — свой margin складывался с ним в двойной. */
+  background: var(--paper-sunken);
 }
 .row-preview-author { color: var(--ink-muted); }
 
@@ -2857,6 +2865,28 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .home-empty span { font-size: 30px; }
 .home-empty p { margin: 0; max-width: 420px; }
+
+/* Расписание дня и входы в разделы на «Главной». */
+.home-schedule { display: flex; flex-direction: column; gap: 6px; }
+.home-event {
+  display: flex; align-items: baseline; gap: 12px; padding: 11px 14px; cursor: pointer;
+  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
+  color: inherit; text-align: left; transition: background var(--ease);
+}
+.home-event:hover { background: var(--row-hover); }
+.home-event-time { flex: none; min-width: 62px; font-size: 13px; font-weight: 600; color: var(--accent); }
+.home-event-title { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-schedule-all {
+  align-self: flex-start; border: none; background: none; cursor: pointer;
+  color: var(--accent); font-size: 13px; padding: 4px 2px;
+}
+.home-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.home-link {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; cursor: pointer;
+  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
+  color: inherit; font-size: 14px; transition: background var(--ease);
+}
+.home-link:hover { background: var(--row-hover); }
 
 /* ===== Окно статуса ===== */
 .status-picker { display: flex; flex-direction: column; gap: 14px; }
