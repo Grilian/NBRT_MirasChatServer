@@ -5,6 +5,21 @@ const {
   canPostToGroup, writeSettingsOf, saveWriteSettings, isWritePolicy,
 } = require('../services/chatPermissions');
 
+const path = require('path');
+const multer = require('multer');
+const sharp = require('sharp');
+const userStorage = require('../services/userStorage');
+const { deleteUploadedFile } = require('../utils/files');
+
+// Аватар группы: тот же размер и формат, что у аватара человека — они
+// стоят рядом в одном списке чатов.
+const GROUP_AVATAR_SIZE = 256;
+const GROUP_AVATAR_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const groupAvatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 16 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, GROUP_AVATAR_MIME.includes(file.mimetype)),
+});
 const router = express.Router();
 
 const chatIdOf = (groupId) => `group_${groupId}`;
@@ -53,7 +68,7 @@ function groupMembers(groupId) {
 // сама политика и списки, по которым клиент считает «могу ли я» для себя; в
 // REST-выдачах ниже, где запрос персональный, can_post проставляется сервером.
 function groupSummary(groupId) {
-  const group = db.prepare('SELECT id, name, created_by, created_at, announcements_only FROM chat_groups WHERE id = ?').get(groupId);
+  const group = db.prepare('SELECT id, name, created_by, created_at, announcements_only, avatar_path FROM chat_groups WHERE id = ?').get(groupId);
   if (!group) return null;
   const members = groupMembers(groupId);
   return {
@@ -65,16 +80,60 @@ function groupSummary(groupId) {
     member_count: members.length,
     members,
     announcements_only: !!group.announcements_only,
+    avatar_path: group.avatar_path || null,
     ...writeSettingsOf(groupId),
   };
 }
+
+// Фото профиля группы — меняет владелец.
+//
+// Файл кладётся в личную папку того, кто его загрузил (у группы своей папки
+// нет, а владелец у неё всегда есть), и пережимается ровно как аватар
+// человека: в списке чатов и в шапке это тот же круглый кадр.
+router.post('/:id/avatar', verifyToken, requireMember, requireOwner, (req, res) => {
+  groupAvatarUpload.single('avatar')(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Не удалось загрузить файл' });
+    if (!req.file) return res.status(400).json({ error: 'Файл не распознан как изображение' });
+
+    try {
+      const filename = `group_${req.groupId}_${Date.now()}.jpg`;
+      const dir = userStorage.userDir(req.userId, 'avatar');
+      // failOn: 'none' — та же причина, что у картинок в переписке: телефон
+      // отдаёт «поделиться» файл раньше, чем система дописала его на диск, и
+      // отказ на этом месте выглядит как «фото не ставится» без объяснений.
+      await sharp(req.file.buffer, { failOn: 'none' })
+        .rotate()
+        .resize(GROUP_AVATAR_SIZE, GROUP_AVATAR_SIZE, { fit: 'cover' })
+        .jpeg({ quality: 82 })
+        .toFile(path.join(dir, filename));
+
+      const previous = db.prepare('SELECT avatar_path FROM chat_groups WHERE id = ?').get(req.groupId);
+      const avatarPath = userStorage.publicPath(req.userId, 'avatar', filename);
+      db.prepare('UPDATE chat_groups SET avatar_path = ? WHERE id = ?').run(avatarPath, req.groupId);
+      // Имя всегда новое (в нём время), поэтому прежний файл больше никому не
+      // нужен: на аватар группы, в отличие от картинок в переписке, не
+      // ссылается ни одно сообщение.
+      if (previous?.avatar_path && previous.avatar_path !== avatarPath) {
+        deleteUploadedFile(previous.avatar_path);
+      }
+
+      const summary = groupSummary(req.groupId);
+      const io = req.app.get('io');
+      if (io) for (const m of summary.members) io.to('user:' + m.id).emit('group_updated', summary);
+
+      res.json({ avatar_path: avatarPath });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
 
 // Группы, где текущий человек состоит — попадают в список чатов наравне с
 // личной перепиской.
 router.get('/', verifyToken, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT g.id, g.name, g.created_by, g.created_at, g.announcements_only, m.role,
+      SELECT g.id, g.name, g.created_by, g.created_at, g.announcements_only, g.avatar_path, m.role,
         (SELECT COUNT(*) FROM chat_group_members WHERE chat_group_id = g.id) AS member_count
       FROM chat_group_members m
       JOIN chat_groups g ON g.id = m.chat_group_id
@@ -91,6 +150,7 @@ router.get('/', verifyToken, (req, res) => {
       member_count: row.member_count,
       role: row.role,
       announcements_only: !!row.announcements_only,
+      avatar_path: row.avatar_path || null,
       ...writeSettingsOf(row.id),
       // Запрос персональный — считаем право сразу здесь, чтобы клиенту не
       // приходилось повторять ту же логику и разойтись с сервером.

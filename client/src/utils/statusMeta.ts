@@ -29,12 +29,42 @@ export function statusExpiryFrom(durationMs: number | null): number | null {
   return durationMs === null ? null : Date.now() + durationMs;
 }
 
+/**
+ * Момент снятия из КОНКРЕТНОГО времени («до 19:00»).
+ *
+ * Прошедшее время значит завтрашний день: «до 9:00», выставленное вечером, —
+ * это утро следующего дня, а не мгновенное снятие статуса.
+ */
+export function statusExpiryAt(time: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+
+  const target = new Date();
+  target.setHours(hours, minutes, 0, 0);
+  if (target.getTime() <= Date.now()) target.setDate(target.getDate() + 1);
+  return target.getTime();
+}
+
 /** Что показать рядом с именем — пресет, свой текст или ничего. */
 export function describeStatus(
   preset: string | null | undefined,
   custom: string | null | undefined
 ): { emoji: string; label: string } | null {
-  if (custom && custom.trim()) return { emoji: '💬', label: custom.trim() };
+  if (custom && custom.trim()) {
+    // Свой статус может начинаться с выбранного эмодзи — он и становится
+    // значком, а остаток текста подписью. Без этого выбранный эмодзи
+    // дублировался бы: и как значок 💬, и как первый символ подписи.
+    const trimmed = custom.trim();
+    const first = Array.from(trimmed)[0];
+    if (first && /\p{Extended_Pictographic}/u.test(first)) {
+      const label = trimmed.slice(first.length).replace(/^[️‍]+/, '').trim();
+      if (label) return { emoji: first, label };
+    }
+    return { emoji: '💬', label: trimmed };
+  }
   if (preset && preset in STATUS_PRESETS) return STATUS_PRESETS[preset as StatusPreset];
   return null;
 }

@@ -1,7 +1,8 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import ChatWindow from './ChatWindow';
+import { runTopBackInterceptor } from '../utils/backInterceptors';
 
 const message = {
   id: 1,
@@ -417,4 +418,53 @@ describe('ChatWindow стикеры', () => {
     expect(quote).toHaveTextContent('🔥 Стикер');
     expect(quote).not.toHaveTextContent('Фото');
   });
+});
+
+test('аппаратный «Назад» снимает выделение, а не выходит из чата', () => {
+  // На Android Back приходит в приложение и разбирается цепочкой перехватчиков
+  // (utils/backInterceptors). Пока выделение в неё не входило, Back уводил с
+  // экрана целиком — вместе с выбором и местом в переписке.
+  const messages = [
+    { id: 1, chat_id: 'chat_1_2', text: 'первое', sender_id: 2, created_at: '2026-08-15 10:00:00', status: 'read' },
+    { id: 2, chat_id: 'chat_1_2', text: 'второе', sender_id: 1, created_at: '2026-08-15 10:01:00', status: 'read' },
+  ];
+  render(
+    <ChatWindow
+      chatId="chat_1_2"
+      messages={messages as any}
+      currentUserId={1}
+      showAuthors={false}
+      onScrollTop={() => {}}
+      hasMore={false}
+      loadingMore={false}
+      unreadCount={0}
+      onStartEdit={() => {}}
+      editingId={null}
+      onDeleteMessage={() => {}}
+      onDeleteMessages={() => {}}
+      onCreateTask={() => {}}
+      onStartReply={() => {}}
+      onForward={() => {}}
+      reactionEmoji={[]}
+      onToggleReaction={() => {}}
+      onRemoveReaction={() => {}}
+      onForwardToSelf={() => {}}
+      selfChatName="Избранное"
+    />,
+  );
+
+  // Пока выделения нет, Back в ленте перехватывать нечего.
+  expect(runTopBackInterceptor()).toBe(false);
+
+  fireEvent.contextMenu(screen.getByText('первое'));
+  fireEvent.click(screen.getByText('Выделить'));
+  expect(document.querySelectorAll('.msg-select-check').length).toBeGreaterThan(0);
+
+  // Back поглощён выделением: экран остаётся, галочки снимаются. Вызов идёт
+  // через act — перехватчик меняет состояние React.
+  let handled = false;
+  act(() => { handled = runTopBackInterceptor(); });
+  expect(handled).toBe(true);
+  expect(document.querySelectorAll('.msg-select-check').length).toBe(0);
+  expect(screen.getByText('первое')).toBeInTheDocument();
 });

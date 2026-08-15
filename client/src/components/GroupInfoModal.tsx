@@ -17,6 +17,8 @@ export interface GroupDetail {
   member_count: number;
   members: { id: number; display_name: string | null; username: string; avatar_path: string | null; role: string }[];
   announcements_only: boolean;
+  /** Фото профиля группы — ставит владелец. */
+  avatar_path?: string | null;
   write_policy: WritePolicy;
   write_user_ids: number[];
   write_department_ids: number[];
@@ -65,6 +67,27 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
   useEffect(load, [groupId]);
 
   const isOwner = group?.members.find((m) => m.id === currentUserId)?.role === 'owner';
+  const avatarInputRef = React.useRef<HTMLInputElement>(null);
+  const [avatarBusy, setAvatarBusy] = React.useState(false);
+
+  const uploadAvatar = async (file: File) => {
+    if (!group) return;
+    setAvatarBusy(true);
+    try {
+      const form = new FormData();
+      form.append('avatar', file);
+      const { data } = await api.post(`/groups/${group.id}/avatar`, form);
+      // Ответ содержит только путь: остальную карточку не трогаем, чтобы не
+      // затереть то, что мог поменять кто-то другой, пока грузилось фото.
+      setGroup((prev) => (prev ? { ...prev, avatar_path: data.avatar_path } : prev));
+    } catch (e: any) {
+      // Своего места под ошибку в шапке нет — показываем системным окном:
+      // это редкий случай (неподходящий файл или потеря сети).
+      window.alert(e?.response?.data?.error || 'Не удалось загрузить фото');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
 
   const saveName = async () => {
     const trimmed = nameDraft.trim();
@@ -219,8 +242,39 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
         {!loading && group && !adding && (
           <>
             <div className="group-info-header">
-              <div className="avatar avatar-group">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+              {/* Фото профиля меняет только создатель: остальным это чужая
+                  группа, и подменять её лицо они не должны. У постороннего
+                  аватар остаётся картинкой, а не кнопкой. */}
+              <div className={'group-info-avatar' + (isOwner ? ' is-editable' : '')}>
+                <Avatar name={group.name} avatarPath={group.avatar_path || null} isGroup />
+                {isOwner && (
+                  <>
+                    <button
+                      type="button"
+                      className="group-info-avatar-edit"
+                      title="Сменить фото группы"
+                      aria-label="Сменить фото группы"
+                      onClick={() => avatarInputRef.current?.click()}
+                      disabled={avatarBusy}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                        <circle cx="12" cy="13" r="4" />
+                      </svg>
+                    </button>
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (file) void uploadAvatar(file);
+                      }}
+                    />
+                  </>
+                )}
               </div>
               {isOwner && editingName ? (
                 <input

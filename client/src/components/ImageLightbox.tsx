@@ -1,9 +1,31 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { registerBackInterceptor } from '../utils/backInterceptors';
+import { downloadFile } from '../utils/downloadFile';
+
+/** Перерисовка в PNG: буфер обмена браузера другие форматы не принимает. */
+async function toPng(blob: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((result) => (result ? resolve(result) : reject(new Error('png_failed'))), 'image/png');
+  });
+}
 
 interface ImageLightboxProps {
   url: string;
   onClose: () => void;
+  /** Имя для сохранения; без него берётся из адреса. */
+  name?: string | null;
+  /**
+   * Действия над самим сообщением с картинкой. Каждое НЕОБЯЗАТЕЛЬНО: тот же
+   * просмотрщик открывается из карточки человека и из профиля, где отвечать
+   * нечему и удалять нечего, — пункт просто не показывается.
+   */
+  onReply?: () => void;
+  onDelete?: () => void;
 }
 
 const MIN_SCALE = 1;
@@ -28,7 +50,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * preventDefault не работает вовсе — без него колесо прокручивало бы страницу
  * под просмотром, а щипок масштабировал бы саму страницу вместе с интерфейсом.
  */
-const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose }) => {
+const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose, name, onReply, onDelete }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -41,6 +63,83 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose }) => {
   const pinch = useRef<{ distance: number; midX: number; midY: number } | null>(null);
   const drag = useRef<{ startX: number; startY: number; baseX: number; baseY: number; moved: boolean } | null>(null);
   const lastTap = useRef(0);
+
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [notice, setNotice] = useState('');
+
+  // Короткое сообщение о результате: без него «Копировать» и «Удалить из
+  // кэша» ничем не отличаются от несработавшего нажатия.
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(() => setNotice(''), 2600);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const fileName = (name || url.split('/').pop() || 'image').split('?')[0];
+
+  const handleSave = async () => {
+    setMenu(null);
+    const result = await downloadFile(url, fileName);
+    setNotice(result.ok ? `Сохранено в «${result.location}»` : (result.error || 'Не удалось сохранить'));
+  };
+
+  const handleShare = async () => {
+    setMenu(null);
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+      const nav = navigator as any;
+      // Системное «Поделиться» есть на телефоне и в части браузеров; если файлы
+      // оно не принимает — отдаём хотя бы ссылку, это всё равно передача.
+      if (nav.canShare?.({ files: [file] })) {
+        await nav.share({ files: [file] });
+      } else if (nav.share) {
+        await nav.share({ url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        setNotice('Ссылка скопирована — на этом устройстве нет системного «Поделиться»');
+      }
+    } catch (e: any) {
+      // Отмена самим человеком — не ошибка, молчим.
+      if (e?.name !== 'AbortError') setNotice('Не удалось поделиться');
+    }
+  };
+
+  const handleCopy = async () => {
+    setMenu(null);
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      // В буфер обмена браузеры принимают только PNG: остальное перерисовываем
+      // через canvas, иначе «Копировать» молча падает на webp из переписки.
+      const png = blob.type === 'image/png' ? blob : await toPng(blob);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      setNotice('Изображение скопировано');
+    } catch {
+      try {
+        await navigator.clipboard.writeText(url);
+        setNotice('Скопирована ссылка на изображение');
+      } catch {
+        setNotice('Буфер обмена недоступен');
+      }
+    }
+  };
+
+  const handleDropCache = async () => {
+    setMenu(null);
+    try {
+      // Чистим ровно эту картинку, а не весь кэш: «удалить из кэша» значит
+      // «перекачать заново», а не «замедлить всё приложение».
+      const keys = await caches.keys();
+      await Promise.all(keys.map(async (key) => (await caches.open(key)).delete(url)));
+      // Перезапрос мимо кэша браузера — иначе на экране останется та же копия.
+      await fetch(url, { cache: 'reload' });
+      setNotice('Изображение перечитано с сервера');
+    } catch {
+      setNotice('Кэш недоступен на этом устройстве');
+    }
+  };
 
   const apply = useCallback((next: { scale: number; x: number; y: number }) => {
     const img = imgRef.current;
@@ -253,7 +352,59 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose }) => {
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => { e.stopPropagation(); toggleZoom(e.clientX, e.clientY); }}
         onMouseDown={onMouseDown}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setMenu({ x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 300) });
+        }}
       />
+
+      {/* Кнопка меню, а не только правый клик: на телефоне правого клика нет, а
+          удержание здесь уже занято перетаскиванием увеличенной картинки. */}
+      <button
+        type="button"
+        className="lightbox-menu-btn"
+        aria-label="Действия с изображением"
+        onClick={(e) => {
+          e.stopPropagation();
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          setMenu({ x: Math.min(rect.left, window.innerWidth - 220), y: rect.bottom + 6 });
+        }}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M12 6h.01" /><path d="M12 12h.01" /><path d="M12 18h.01" />
+        </svg>
+      </button>
+
+      {notice && <div className="lightbox-notice" role="status">{notice}</div>}
+
+      {menu && (
+        <>
+          <div
+            className="attachments-menu-backdrop"
+            onClick={(e) => { e.stopPropagation(); setMenu(null); }}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu(null); }}
+          />
+          <div className="attachments-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={handleSave}>Сохранить</button>
+            {onReply && (
+              <button type="button" onClick={() => { setMenu(null); onClose(); onReply(); }}>Ответить</button>
+            )}
+            <button type="button" onClick={handleShare}>Поделиться</button>
+            <button type="button" onClick={handleCopy}>Копировать</button>
+            <button type="button" onClick={handleDropCache}>Удалить из кэша</button>
+            {onDelete && (
+              <button
+                type="button"
+                className="is-danger"
+                onClick={() => { setMenu(null); onClose(); onDelete(); }}
+              >
+                Удалить
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };

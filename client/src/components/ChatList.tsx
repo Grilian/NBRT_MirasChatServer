@@ -5,6 +5,7 @@ import { describeStatus } from '../utils/statusMeta';
 import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 import WebDownloadLinks from './WebDownloadLinks';
 import { resolveUploadUrl } from '../utils/uploads';
+import { useEdgeFeedback } from '../utils/useEdgeFeedback';
 import IosInstallHint from './IosInstallHint';
 
 export type ChatSection = 'general' | 'staff' | 'group' | 'self';
@@ -145,6 +146,17 @@ function renderAvatar(
 const ROW_LONG_PRESS_MS = 450;
 
 /**
+ * Допуск дрожания пальца при удержании.
+ *
+ * Без него любое движение отменяло удержание, а Android шлёт touchmove даже
+ * когда палец лежит неподвижно, — меню открывалось «через раз».
+ */
+const TOUCH_SLOP = 10;
+
+/** Насколько нужно оттянуть список у верхнего края, чтобы вернуть поиск. */
+const PULL_TO_SEARCH_PX = 56;
+
+/**
  * Фильтры списка чатов.
  *
  * Это именно фильтрация ОДНОГО списка, а не отдельные экраны: порядок,
@@ -195,6 +207,8 @@ const ChatList: React.FC<ChatListProps> = ({
   const [rowMenu, setRowMenu] = React.useState<{ chatId: string; x: number; y: number } | null>(null);
   const longPressTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFired = React.useRef(false);
+  const touchStart = React.useRef<{ x: number; y: number } | null>(null);
+  const edge = useEdgeFeedback();
   React.useEffect(() => () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }, []);
 
   const openRowMenu = (chatId: string, x: number, y: number) => {
@@ -229,14 +243,52 @@ const ChatList: React.FC<ChatListProps> = ({
 
   const isNarrowScreen = () => window.matchMedia('(max-width: 760px)').matches;
 
+  // Поиск ПРЯЧЕТСЯ сам при прокрутке вниз, но обратно возвращается только по
+  // оттяжке.
+  //
+  // Раньше он появлялся, стоило списку доехать до верха, — и на каждом
+  // возврате наверх экран дёргался: содержимое подпрыгивало под пальцем ровно в
+  // тот момент, когда человек тормозил прокрутку. Теперь у верхнего края нужно
+  // ЕЩЁ потянуть вниз: это отдельное намерение «хочу поиск», а не побочный
+  // эффект прокрутки.
   const handleRosterScroll = (event: React.UIEvent<HTMLDivElement>) => {
     if (!isNarrowScreen() || searchQuery) return;
-    const shouldCollapse = event.currentTarget.scrollTop > 18;
-    if (shouldCollapse) {
+    if (event.currentTarget.scrollTop > 18 && !mobileSearchCollapsed) {
       searchInputRef.current?.blur();
       setSearchFocused(false);
+      setMobileSearchCollapsed(true);
     }
-    setMobileSearchCollapsed(shouldCollapse);
+  };
+
+  /** Оттяжка вниз у верхнего края: возвращает поиск и отвечает на «упор». */
+  const pullState = React.useRef<{ y: number; atTop: boolean } | null>(null);
+
+  const handleListTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    const list = event.currentTarget;
+    pullState.current = { y: event.touches[0].clientY, atTop: list.scrollTop <= 0 };
+  };
+
+  const handleListTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const from = pullState.current;
+    if (!from) return;
+    const list = event.currentTarget;
+    const delta = event.touches[0].clientY - from.y;
+
+    if (from.atTop && list.scrollTop <= 0 && delta > 0) {
+      // Тянут вниз, а список и так наверху: показываем мягкий упор, а после
+      // заметной оттяжки — возвращаем поиск.
+      edge.hit('top', delta / PULL_TO_SEARCH_PX);
+      if (delta > PULL_TO_SEARCH_PX && mobileSearchCollapsed) setMobileSearchCollapsed(false);
+      return;
+    }
+
+    const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= 1;
+    if (atBottom && delta < 0) edge.hit('bottom', -delta / PULL_TO_SEARCH_PX);
+  };
+
+  const handleListTouchEnd = () => {
+    pullState.current = null;
+    edge.release();
   };
 
   const openMobileSearch = () => {
@@ -388,7 +440,15 @@ const ChatList: React.FC<ChatListProps> = ({
         </button>
       )}
 
-      <div className="roster-list" onScroll={handleRosterScroll}>
+      <div
+        className={'roster-list ' + edge.className}
+        style={edge.pull ? ({ ['--edge-pull' as string]: `${Math.round(edge.pull * 14)}px` }) : undefined}
+        onScroll={handleRosterScroll}
+        onTouchStart={handleListTouchStart}
+        onTouchMove={handleListTouchMove}
+        onTouchEnd={handleListTouchEnd}
+        onTouchCancel={handleListTouchEnd}
+      >
         {/* «Ветки» — не чат, а вход в отдельный список обсуждений. В
             отфильтрованных видах его быть не должно: он не «личный», не
             «группа» и не «новостной». */}
@@ -461,13 +521,37 @@ const ChatList: React.FC<ChatListProps> = ({
                 onTouchStart={(e) => {
                   longPressFired.current = false;
                   const touch = e.touches[0];
+                  // Запоминаем точку: отменять удержание нужно на РЕАЛЬНОМ
+                  // движении пальца, а не на любом touchmove. Android шлёт
+                  // touchmove от микродрожания пальца, и удержание срывалось
+                  // ещё до срабатывания — отсюда «меню открывается не всегда».
+                  touchStart.current = { x: touch.clientX, y: touch.clientY };
                   longPressTimer.current = setTimeout(() => {
                     longPressFired.current = true;
                     openRowMenu(chat.id, touch.clientX, touch.clientY);
                   }, ROW_LONG_PRESS_MS);
                 }}
-                onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-                onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                onTouchMove={(e) => {
+                  const start = touchStart.current;
+                  const touch = e.touches[0];
+                  if (!start || !touch) return;
+                  const moved = Math.abs(touch.clientX - start.x) > TOUCH_SLOP
+                    || Math.abs(touch.clientY - start.y) > TOUCH_SLOP;
+                  if (moved && longPressTimer.current) {
+                    clearTimeout(longPressTimer.current);
+                    longPressTimer.current = null;
+                  }
+                }}
+                onTouchEnd={() => {
+                  if (longPressTimer.current) clearTimeout(longPressTimer.current);
+                  longPressTimer.current = null;
+                  touchStart.current = null;
+                }}
+                onTouchCancel={() => {
+                  if (longPressTimer.current) clearTimeout(longPressTimer.current);
+                  longPressTimer.current = null;
+                  touchStart.current = null;
+                }}
               >
                 {renderAvatar(chat, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo)}
                 <div className="row-body">

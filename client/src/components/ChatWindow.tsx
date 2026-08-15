@@ -8,6 +8,7 @@ import { closeMobileInputSurface } from '../utils/mobileKeyboard';
 import { CustomEmojiMap, renderMessageText, renderTextWithEmoji, toPlainText } from '../utils/customEmoji';
 import { StickerCatalog } from '../utils/stickerCatalog';
 import { fileGlyph, formatFileSize } from '../utils/fileLimits';
+import { registerBackInterceptor } from '../utils/backInterceptors';
 import { downloadFile } from '../utils/downloadFile';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
@@ -281,7 +282,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const [reactionsExpanded, setReactionsExpanded] = useState(false);
   // Сообщение, чьи реакции сейчас разбирают в детальном списке.
   const [reactionsFor, setReactionsFor] = useState<number | null>(null);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; message: Message } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const suppressOutsideActivationUntilRef = useRef(0);
@@ -511,6 +512,18 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   useEffect(() => {
     if (selectMode && selectedIds.size === 0) setSelectMode(false);
   }, [selectMode, selectedIds]);
+
+  // Аппаратная кнопка «Назад» снимает выделение, а не выходит из чата.
+  // Пока выделение не подключили к цепочке Back, единственный способ выйти из
+  // режима был снять галочки по одной — а Back уводил с экрана целиком, теряя
+  // и выбор, и место в переписке.
+  useEffect(() => {
+    if (!selectMode) return undefined;
+    return registerBackInterceptor(() => {
+      setSelectMode(false);
+      setSelectedIds(new Set());
+    });
+  }, [selectMode]);
 
   // Первый тап снаружи только закрывает контекстное меню. Pointer-событие и
   // следующий за ним click поглощаются, чтобы картинка/ссылка под меню не
@@ -1281,7 +1294,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                             onRetryOutgoing(msg.client_message_id);
                             return;
                           }
-                          setLightboxUrl(imageUrl);
+                          setLightbox({ url: imageUrl, message: msg });
                         }}
                         title={msg.status === 'failed' ? 'Не отправлено. Нажмите, чтобы повторить' : undefined}
                       >
@@ -1608,7 +1621,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         );
       })()}
 
-      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+      {lightbox && (
+        <ImageLightbox
+          url={lightbox.url}
+          name={lightbox.message.document_name || null}
+          onClose={() => setLightbox(null)}
+          // Действия берутся те же самые, что в контекстном меню сообщения:
+          // отдельной логики ответа и удаления просмотрщик не заводит.
+          onReply={onStartReply ? () => onStartReply({
+            id: lightbox.message.id,
+            text: lightbox.message.text,
+            author: nameFor(lightbox.message),
+            hasImage: true,
+            stickerFallback: null,
+            documentName: null,
+          }) : undefined}
+          // Тот же путь, что у пункта «Удалить» в меню сообщения: диалог сам
+          // спрашивает область удаления и знает права.
+          onDelete={() => confirmDelete(lightbox.message.id)}
+        />
+      )}
 
       {reactionsFor !== null && (() => {
         const msg = messages.find((m) => m.id === reactionsFor);

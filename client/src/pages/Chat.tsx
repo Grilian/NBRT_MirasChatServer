@@ -6,6 +6,7 @@ import ChatWindow from '../components/ChatWindow';
 import MessageInput, { EditingMessage, PendingImage, ReplyingMessage, SendResult } from '../components/MessageInput';
 import ForwardModal, { ForwardPreviewItem, ForwardTarget } from '../components/ForwardModal';
 import { runTopBackInterceptor } from '../utils/backInterceptors';
+import { useSwipeSections } from '../utils/useSwipeSections';
 import DeleteMessagesModal, { DeleteRequest } from '../components/DeleteMessagesModal';
 import { MessageReaction } from '../components/ReactionDetailsModal';
 import SettingsPanel from '../components/SettingsPanel';
@@ -16,7 +17,7 @@ import CreateGroupModal, { CreatedGroup } from '../components/CreateGroupModal';
 import GroupInfoModal from '../components/GroupInfoModal';
 import GeneralChatInfoModal from '../components/GeneralChatInfoModal';
 import Avatar from '../components/Avatar';
-import NavRail, { SectionId, isSectionAllowedFor, sectionById } from '../components/NavRail';
+import NavRail, { MOBILE_SECTIONS, SectionId, isSectionAllowedFor, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
 import FilesSection from '../components/FilesSection';
 import HomeSection from '../components/HomeSection';
@@ -182,6 +183,8 @@ interface ChatGroupSummary {
   member_count: number;
   role: 'owner' | 'member';
   announcements_only: boolean;
+  /** Фото профиля группы — ставит владелец. */
+  avatar_path?: string | null;
   write_policy: WritePolicy;
   write_user_ids: number[];
   write_department_ids: number[];
@@ -411,7 +414,23 @@ const Chat: React.FC = () => {
   //
   // Теперь состояние экрана меняется только целиком, поэтому «переписка
   // открыта» физически не может пережить смену раздела.
-  const [view, setView] = useState<ChatView>({ section: 'home', conversation: false, settings: 'settings' });
+  // Стартовый раздел: «Главная» — только при ПЕРВОМ запуске за день.
+  //
+  // Сводка нужна, чтобы утром увидеть, что накопилось; на десятый запуск за
+  // день она уже мешает — человек открывает приложение ради переписки. Дату
+  // храним в localStorage: это устройство и этот день, никакой синхронизации
+  // между устройствами тут не нужно.
+  const [view, setView] = useState<ChatView>(() => {
+    const today = new Date().toLocaleDateString('sv-SE'); // ГГГГ-ММ-ДД без часовых поясов
+    let firstToday = true;
+    try {
+      firstToday = localStorage.getItem('lastHomeDay') !== today;
+      if (firstToday) localStorage.setItem('lastHomeDay', today);
+    } catch {
+      // Приватный режим — покажем «Главную», это безобиднее пустого экрана.
+    }
+    return { section: firstToday ? 'home' : 'chats', conversation: false, settings: 'settings' };
+  });
   const { section } = view;
   // Ещё один пояс: даже если переписка каким-то образом окажется помеченной
   // открытой вне раздела «Чаты», показывать её мы не станем.
@@ -2672,7 +2691,7 @@ const Chat: React.FC = () => {
       section: 'group' as ChatSection,
       groupLabel: 'Группы' as string | null,
       chatGroupId: g.id,
-      avatarPath: null as string | null,
+      avatarPath: (g.avatar_path || null) as string | null,
       // Канал-объявление — «новостной» чат в фильтре списка: его читают, а не
       // обсуждают в нём.
       announcementsOnly: !!g.announcements_only,
@@ -2745,6 +2764,7 @@ const Chat: React.FC = () => {
         ? {
             name: group.name, section: 'group', chatGroupId: group.id, memberCount: group.member_count,
             isGroupOwner: group.role === 'owner', announcementsOnly: group.announcements_only,
+            avatarPath: group.avatar_path || null,
             writePolicy: group.write_policy,
             // Право писать считает сервер (services/chatPermissions.js) и
             // присылает в can_post. Повторять правила на клиенте нельзя: две
@@ -2847,6 +2867,7 @@ const Chat: React.FC = () => {
   })();
 
   const isChats = section === 'chats';
+
   const activeSection = sectionById(section);
 
   // Через setView целиком, а не setSection + setSettingsView по отдельности:
@@ -2862,6 +2883,24 @@ const Chat: React.FC = () => {
   // композитора оставалась поверх списка и запирала экран — см. layoutMode.ts.
   const showRoster = isChats && (!narrowLayout || !conversationOpen);
   const showConversation = isChats && (!narrowLayout || conversationOpen);
+
+  // Смахивание влево-вправо переключает раздел — но только на узком экране и
+  // только когда открыт сам раздел, а не переписка поверх него: там жест уже
+  // занят выделением сообщений.
+  const swipeSections = useSwipeSections(
+    narrowLayout && !showConversation,
+    (direction) => {
+      const available = MOBILE_SECTIONS.filter((id) => isSectionAllowedFor(currentAccountType, id));
+      const index = available.indexOf(section);
+      if (index === -1) return;
+      const next = available[index + direction];
+      // На краях панели ничего не делаем: заворачивать список по кругу значит
+      // уводить человека с «Главной» сразу в «Настройки» одним движением.
+      if (!next) return;
+      if (next === 'people') setPeopleOpen(true);
+      else goToSection(next);
+    },
+  );
   // Защита раскладки: устаревшее состояние чата не должно влиять на другие
   // разделы. На узком экране ветка занимает весь экран (это отдельный экран
   // мобильной навигации), на десктопе — только если для неё есть место.
@@ -2943,6 +2982,7 @@ const Chat: React.FC = () => {
         ['--roster-w' as string]: `${uiPrefs.rosterWidth}px`,
         ['--right-w' as string]: `${uiPrefs.rightPanelWidth}px`,
       }}
+      {...swipeSections}
     >
       <NotificationStack
         toasts={toasts}

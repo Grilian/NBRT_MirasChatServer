@@ -35,6 +35,17 @@ const Avatar: React.FC<AvatarProps> = ({ name, avatarPath, size, online, isGener
   }
 
   if (isGroup) {
+    // Загруженное фото группы показывается как обычный аватар; значок с
+    // человечками остаётся только у групп без фото.
+    if (avatarPath) {
+      return (
+        <img
+          className={'avatar avatar-photo' + (size === 'sm' ? ' avatar-sm' : '')}
+          src={resolveUploadUrl(avatarPath) || ''}
+          alt=""
+        />
+      );
+    }
     return (
       <div className={'avatar avatar-group' + (size === 'sm' ? ' avatar-sm' : '')}>
         <svg width={size === 'sm' ? '15' : '18'} height={size === 'sm' ? '15' : '18'} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
