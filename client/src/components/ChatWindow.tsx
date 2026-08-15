@@ -63,6 +63,8 @@ interface ChatWindowProps {
   chatId: string | null;
   messages: Message[];
   currentUserId: number;
+  /** Показать короткое сообщение над лентой: «сохранено», «не удалось». */
+  onNotice?: (text: string) => void;
   /** Прокрутить к этому сообщению и подсветить — переход из карточки вложений. */
   focusMessageId?: number | null;
   onFocusHandled?: () => void;
@@ -232,7 +234,7 @@ function buildRows(messages: Message[]): RenderedRow[] {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
-  focusMessageId, onFocusHandled,
+  focusMessageId, onFocusHandled, onNotice,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, stickerCatalog = {}, onToggleReaction, onRemoveReaction,
   onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
@@ -1342,7 +1344,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           // на выбор — качать отсюда нечего.
                           if (selectMode) { toggleSelected(msg.id); return; }
                           e.stopPropagation();
-                          downloadFile(resolveUploadUrl(msg.document_path), msg.document_name);
+                          // Результат обязателен: молчащая кнопка неотличима
+                          // от сломанной — ровно так и выглядел отказ записи
+                          // на Android, пока ошибку никто не показывал.
+                          onNotice?.('Скачивание…');
+                          downloadFile(resolveUploadUrl(msg.document_path), msg.document_name)
+                            .then((result) => onNotice?.(result.ok
+                              ? `Сохранено в «${result.location}»`
+                              : (result.error || 'Не удалось скачать файл')));
                         }}
                       >
                         <span className="bubble-file-glyph" aria-hidden="true">{fileGlyph(msg.document_name)}</span>

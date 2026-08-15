@@ -3197,6 +3197,7 @@ const Chat: React.FC = () => {
             chatId={activeChat}
             messages={visibleMessages}
             focusMessageId={focusMessageId}
+            onNotice={setAttachmentNotice}
             onFocusHandled={() => setFocusMessageId(null)}
             currentUserId={currentUserId}
             showAuthors={activeChat === GENERAL_CHAT_ID || activeChatMeta?.section === 'group'}

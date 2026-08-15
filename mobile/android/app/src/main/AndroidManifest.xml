@@ -3,6 +3,13 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Нужно только Android 9 и старше: там DownloadManager кладёт файл в
+         «Загрузки» через общее хранилище. С Android 10 (scoped storage) это
+         разрешение не запрашивается и не требуется. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
