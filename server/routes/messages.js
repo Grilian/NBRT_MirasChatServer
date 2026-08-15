@@ -328,16 +328,23 @@ router.post('/threads/:rootId/read', verifyToken, (req, res) => {
 // подобрав их id. Фильтруем по участию текущего пользователя.
 router.get('/meta/last', verifyToken, (req, res) => {
   try {
-    // «Последнее» считаем персонально: сообщение, скрытое этим человеком у
-    // себя, не должно оставаться превью его чата — там встаёт предыдущее.
+    // «Последнее» считаем персонально и по СУЩЕСТВУЮЩИМ сообщениям.
+    //
+    // Скрытое лично и удалённое у всех перестают быть последним событием чата:
+    // раньше удалённое всё равно бралось как последнее и отдавалось пустым, и
+    // в списке чат выглядел так, будто в нём ничего нет, хотя выше лежит
+    // нормальная переписка. Теперь берётся ближайшее живое сообщение.
     const rows = db.prepare(`
-      SELECT m.chat_id, m.text, m.file_path, m.sticker_id, m.sticker_fallback, m.document_name,
-             m.attachment_archived_at, m.created_at, m.deleted
+      SELECT m.chat_id, m.id, m.text, m.file_path, m.file_width, m.file_height,
+             m.sticker_id, m.sticker_fallback, m.document_name,
+             m.attachment_archived_at, m.created_at, m.sender_id, m.status,
+             COALESCE(u.display_name, u.username) AS sender_name
       FROM messages m
+      JOIN users u ON u.id = m.sender_id
       INNER JOIN (
         SELECT chat_id, MAX(id) AS max_id
         FROM messages
-        WHERE thread_root_id IS NULL
+        WHERE thread_root_id IS NULL AND deleted = 0
           AND NOT EXISTS (
           SELECT 1 FROM message_hidden h WHERE h.message_id = messages.id AND h.user_id = ?
         )
@@ -348,17 +355,25 @@ router.get('/meta/last', verifyToken, (req, res) => {
     const result = {};
     rows.forEach(row => {
       if (!isParticipant(row.chat_id, req.userId)) return;
-      // Удалённое сообщение по-прежнему хранится целиком (обязательство по
-      // закону), но наружу — даже в превью последнего сообщения — из него
-      // ничего не должно попасть.
+      const archived = !!row.attachment_archived_at;
       result[row.chat_id] = {
         chat_id: row.chat_id,
-        text: row.deleted ? '' : row.text,
-        file_path: (row.deleted || row.attachment_archived_at) ? null : row.file_path,
-        sticker_id: row.deleted ? null : row.sticker_id,
-        sticker_fallback: row.deleted ? null : row.sticker_fallback,
-        document_name: (row.deleted || row.attachment_archived_at) ? null : row.document_name,
+        message_id: row.id,
+        text: row.text,
+        // Миниатюра в превью: список чатов показывает её перед текстом, чтобы
+        // «отправил фотографию» не приходилось расшифровывать словами.
+        file_path: archived ? null : row.file_path,
+        file_width: archived ? null : row.file_width,
+        file_height: archived ? null : row.file_height,
+        sticker_id: row.sticker_id,
+        sticker_fallback: row.sticker_fallback,
+        document_name: archived ? null : row.document_name,
         created_at: row.created_at,
+        // Автор и статус нужны списку чатов: у своего последнего сообщения
+        // рядом с временем показываются те же галочки, что и в переписке.
+        sender_id: row.sender_id,
+        sender_name: row.sender_name,
+        status: row.status,
       };
     });
 

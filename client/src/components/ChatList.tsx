@@ -4,6 +4,7 @@ import { formatChatListTime } from '../utils/time';
 import { describeStatus } from '../utils/statusMeta';
 import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 import WebDownloadLinks from './WebDownloadLinks';
+import { resolveUploadUrl } from '../utils/uploads';
 import IosInstallHint from './IosInstallHint';
 
 export type ChatSection = 'general' | 'staff' | 'group' | 'self';
@@ -23,12 +24,23 @@ export interface Chat {
   status?: { emoji: string; label: string } | null;
   /** Комментарий к имени — отдельной строкой между именем и превью. */
   comment?: string | null;
+  /** Канал-объявление: такие группы попадают в фильтр «Новостные». */
+  announcementsOnly?: boolean;
 }
 
 interface LastMessage {
+  chat_id: string;
+  message_id?: number;
   text: string;
   file_path?: string | null;
+  sticker_id?: number | null;
+  sticker_fallback?: string | null;
+  document_name?: string | null;
   created_at: string;
+  /** Кто отправил — от этого зависят и подпись автора, и галочки. */
+  sender_id?: number;
+  sender_name?: string | null;
+  status?: 'sent' | 'delivered' | 'read' | string;
 }
 
 interface ChatListProps {
@@ -37,6 +49,10 @@ interface ChatListProps {
   selfAvatarPath: string | null;
   statusPreset: string | null;
   statusCustom: string | null;
+  /** Срок действия своего статуса — показывается в блоке «Мой статус». */
+  statusExpiresAt?: number | null;
+  /** Нужен, чтобы отличить своё последнее сообщение: у него в превью галочки. */
+  currentUserId: number;
   onOpenStatus: () => void;
   /** Каталог кастомных смайликов — превью тоже показывает текст сообщения. */
   customEmoji?: CustomEmojiMap;
@@ -67,9 +83,7 @@ interface ChatListProps {
   onOpenGroupInfo: (chatGroupId: number) => void;
   onOpenGeneralInfo?: () => void;
   onCreateGroup: () => void;
-  /** Только для узкого экрана — на нём в нижней панели «Настройкам» не хватило
-      места (см. .rail-item-settings в theme.css), поэтому вход туда здесь. */
-  onOpenSettings: () => void;
+
   /** Ручка растягивания панели — только на широком экране, рисует Chat.tsx. */
   resizeHandle?: React.ReactNode;
   /**
@@ -130,16 +144,46 @@ function renderAvatar(
 // ПК: на телефоне правого клика нет вовсе, а меню должно открываться и там.
 const ROW_LONG_PRESS_MS = 450;
 
+/**
+ * Фильтры списка чатов.
+ *
+ * Это именно фильтрация ОДНОГО списка, а не отдельные экраны: порядок,
+ * закрепления и счётчики остаются теми же, меняется только состав.
+ *
+ * «Новостные» — то, что читают, а не обсуждают: каналы-объявления
+ * (`announcements_only`) и общий чат, который и подписан как рассылка на всю
+ * организацию. Обычные группы к ним не относятся, даже если в них тихо.
+ */
+export type ChatFilter = 'all' | 'direct' | 'groups' | 'news';
+
+const FILTERS: { id: ChatFilter; label: string }[] = [
+  { id: 'all', label: 'Все чаты' },
+  { id: 'direct', label: 'Личные' },
+  { id: 'groups', label: 'Группы' },
+  { id: 'news', label: 'Новостные' },
+];
+
+function matchesFilter(chat: Chat, filter: ChatFilter): boolean {
+  if (filter === 'all') return true;
+  const isNews = chat.section === 'general' || !!chat.announcementsOnly;
+  if (filter === 'news') return isNews;
+  if (filter === 'groups') return chat.section === 'group' && !isNews;
+  // «Личные» — переписка с человеком и своё «Избранное»: это тоже личное
+  // пространство, и прятать его в «Все чаты» значило бы терять к нему путь.
+  return chat.section === 'staff' || chat.section === 'self';
+}
+
 const ChatList: React.FC<ChatListProps> = ({
   chats, recentChats, activeChat, threadsActive = false, threadUnreadCount = 0, onOpenThreads = () => {},
   onSelectChat, onOpenDirectory, searchQuery, onSearchChange,
   lastMessages, unreadCounts, favorites, onToggleFavorite,
-  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo, onCreateGroup, onOpenSettings,
+  onMarkAllRead, onRemoveContact, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo, onCreateGroup,
   mutedChatIds = [], onToggleMute, onMarkChatRead, onClearChat,
   resizeHandle,
   compact = false,
   onExpand,
-  selfName, selfAvatarPath, statusPreset, statusCustom, onOpenStatus, customEmoji = {},
+  selfName, selfAvatarPath, statusPreset, statusCustom, statusExpiresAt = null, currentUserId,
+  onOpenStatus, customEmoji = {},
 }) => {
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const recentStripRef = React.useRef<HTMLDivElement>(null);
@@ -147,6 +191,7 @@ const ChatList: React.FC<ChatListProps> = ({
   // Контекстное меню строки чата. Держим id чата, а не сам объект: список
   // перестраивается на каждое входящее сообщение, и меню, привязанное к старому
   // объекту, работало бы с устаревшими данными.
+  const [filter, setFilter] = React.useState<ChatFilter>('all');
   const [rowMenu, setRowMenu] = React.useState<{ chatId: string; x: number; y: number } | null>(null);
   const longPressTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFired = React.useRef(false);
@@ -164,12 +209,20 @@ const ChatList: React.FC<ChatListProps> = ({
   const [mobileSearchCollapsed, setMobileSearchCollapsed] = React.useState(false);
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0) + threadUnreadCount;
   const ownStatus = describeStatus(statusPreset, statusCustom);
+  // Срок показывается вместо подсказки: «до 19:00» полезнее, чем «изменить
+  // статус», — человек и так понимает, что по блоку можно нажать.
+  const statusUntil = ownStatus && statusExpiresAt
+    ? `до ${new Date(statusExpiresAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`
+    : '';
   // Ищем и по комментарию к имени — он больше не часть name (см. row-comment).
   const needle = searchQuery.toLowerCase();
   const filtered = chats.filter(c => (
-    !needle
-    || c.name.toLowerCase().includes(needle)
-    || (c.comment || '').toLowerCase().includes(needle)
+    matchesFilter(c, filter)
+    && (
+      !needle
+      || c.name.toLowerCase().includes(needle)
+      || (c.comment || '').toLowerCase().includes(needle)
+    )
   ));
 
   let lastGroupLabel: string | null = null;
@@ -213,21 +266,11 @@ const ChatList: React.FC<ChatListProps> = ({
         </button>
       )}
       <div className="roster-head">
-        {/* Свой аватар со статусом. На телефоне блок «себя» с рельса скрыт
-            (там шесть вкладок), и до статуса приходилось идти через настройки
-            и правку профиля — три уровня, до которых догадывался не каждый.
-            Тап открывает только выбор статуса, не весь профиль. */}
+        {/* Аватар со статусом отсюда убран: со сменой навигации настройки и
+            профиль переехали в нижнюю панель, а свой статус получил
+            собственный блок под фильтрами (.roster-mystatus). Шапка снова
+            занята только тем, что относится к самому списку. */}
         <div className="roster-account">
-          <button
-            type="button"
-            className="roster-self"
-            onClick={onOpenStatus}
-            title={ownStatus ? ownStatus.label : 'Поставить статус'}
-            aria-label={ownStatus ? `Статус: ${ownStatus.label}` : 'Поставить статус'}
-          >
-            <Avatar name={selfName} avatarPath={selfAvatarPath} size="sm" online />
-            {ownStatus && <span className="roster-self-status">{ownStatus.emoji}</span>}
-          </button>
           <div className="roster-heading">Чаты</div>
           <WebDownloadLinks />
           {totalUnread > 0 && (
@@ -251,18 +294,6 @@ const ChatList: React.FC<ChatListProps> = ({
             onClick={openMobileSearch}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-          </button>
-          {/* Видна только на узком экране — там же скрыт пункт «Настройки» в
-              нижней панели (не помещался без прокрутки). На десктопе вход в
-              настройки остаётся на рельсе, поэтому здесь дублировать не нужно. */}
-          <button
-            type="button"
-            className="roster-settings-btn"
-            title="Настройки"
-            aria-label="Настройки"
-            onClick={onOpenSettings}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z" /></svg>
           </button>
         </div>
         {/* Подсказка про ярлык на iPhone — здесь же, где кнопки скачивания
@@ -318,7 +349,50 @@ const ChatList: React.FC<ChatListProps> = ({
         </div>
       </div>
 
+      {/* Фильтры и свой статус — над списком, но ВНЕ прокручиваемой области
+          заголовка: на узком экране они уезжают вместе с поиском при прокрутке
+          вниз, освобождая экран под переписки. */}
+      {!compact && (
+        <div className="roster-filters" role="tablist" aria-label="Фильтр чатов">
+          {FILTERS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={filter === item.id}
+              className={'roster-filter' + (filter === item.id ? ' is-active' : '')}
+              onClick={() => setFilter(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!compact && (
+        <button
+          type="button"
+          className="roster-mystatus"
+          onClick={onOpenStatus}
+          title={ownStatus ? 'Изменить статус' : 'Установить статус'}
+        >
+          <Avatar name={selfName} avatarPath={selfAvatarPath} size="sm" online />
+          <span className="roster-mystatus-body">
+            <span className="roster-mystatus-title">
+              {ownStatus ? `${ownStatus.emoji} ${ownStatus.label}` : 'Мой статус'}
+            </span>
+            <span className="roster-mystatus-hint">
+              {statusUntil || (ownStatus ? 'Изменить статус' : 'Установить статус')}
+            </span>
+          </span>
+        </button>
+      )}
+
       <div className="roster-list" onScroll={handleRosterScroll}>
+        {/* «Ветки» — не чат, а вход в отдельный список обсуждений. В
+            отфильтрованных видах его быть не должно: он не «личный», не
+            «группа» и не «новостной». */}
+        {filter === 'all' && (
         <div
           tabIndex={0}
           role="button"
@@ -338,6 +412,7 @@ const ChatList: React.FC<ChatListProps> = ({
             </div>
           </div>
         </div>
+        )}
         {filtered.length === 0 && <div className="roster-empty">Ничего не найдено</div>}
         {filtered.map((chat) => {
           const last = lastMessages[chat.id];
@@ -346,6 +421,24 @@ const ChatList: React.FC<ChatListProps> = ({
           const isMuted = mutedChatIds.includes(chat.id);
           const showLabel = chat.groupLabel !== lastGroupLabel;
           lastGroupLabel = chat.groupLabel;
+
+          // Галочки показываем только у СВОЕГО последнего сообщения: у чужого
+          // статус относится к чтению собеседником и в списке ничего не значит.
+          const mine = !!last && last.sender_id === currentUserId;
+          const outgoingStatus = mine ? (last!.status || 'sent') : null;
+          const previewThumb = last && last.file_path ? resolveUploadUrl(last.file_path) : null;
+          // Имя автора в превью — там, где собеседник не один: в личной
+          // переписке оно повторяло бы название самой строки.
+          const showAuthor = !!last && (chat.section === 'general' || chat.section === 'group');
+          const previewPrefix = last && showAuthor && last.sender_name
+            ? `${mine ? 'Вы' : last.sender_name}: `
+            : '';
+          const previewBody = last
+            ? (renderTextWithEmoji(last.text || '', customEmoji, `p${chat.id}`)
+              || (last.sticker_fallback ? `${last.sticker_fallback} Стикер` : '')
+              || (last.document_name ? `📎 ${last.document_name}` : '')
+              || (last.file_path ? 'Фотография' : ''))
+            : '';
 
           return (
             <React.Fragment key={chat.id}>
@@ -381,61 +474,64 @@ const ChatList: React.FC<ChatListProps> = ({
                   <div className="row-top">
                     <div className="row-name">
                       <span>{chat.name}</span>
+                      {/* Перечёркнутый колокольчик — у самого имени, а не в
+                          правой колонке: там уже время, галочки и счётчик, и
+                          признак «этот чат молчит» терялся среди них. */}
+                      {isMuted && (
+                        <span className="row-muted" title="Уведомления отключены" aria-label="Уведомления отключены">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 8a6 6 0 0 0-9.3-5" /><path d="M6 8c0 7-3 9-3 9h13" />
+                            <path d="M13.7 21a2 2 0 0 1-3.4 0" /><path d="m2 2 20 20" />
+                          </svg>
+                        </span>
+                      )}
                       {chat.status && (
                         <span className="row-status" title={chat.status.label}>
                           {chat.status.emoji} {chat.status.label}
                         </span>
                       )}
                     </div>
-                    {last && (
-                      <div className="row-time">
-                        {formatChatListTime(last.created_at)}
-                      </div>
-                    )}
+                    <div className="row-side">
+                      {/* Закрепление и время — одна плашка, а не два элемента:
+                          закреплённый чат должен узнаваться сразу, но ради
+                          этого нельзя занимать ещё одну колонку в строке. */}
+                      {(last || isFavorite) && (
+                        <div className={'row-stamp' + (isFavorite ? ' is-pinned' : '')}>
+                          {isFavorite && (
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <path d="M14 3.5 20.5 10l-2.2.6a3 3 0 0 0-1.5.9l-2.6 2.9 1 3.4-1.4 1.4-3.6-3.6-4.6 4-.7-.7 4-4.6L5.3 11l1.4-1.4 3.4 1 2.9-2.6a3 3 0 0 0 .9-1.5Z" />
+                            </svg>
+                          )}
+                          {last ? formatChatListTime(last.created_at) : 'закреплён'}
+                        </div>
+                      )}
+                      {/* Галочки — то же состояние, что и в самой переписке:
+                          отдельной механики статусов тут не заводится. */}
+                      {outgoingStatus && (
+                        <span
+                          className={'row-check' + (outgoingStatus === 'read' ? ' is-read' : '')}
+                          title={outgoingStatus === 'read' ? 'Прочитано' : 'Доставлено'}
+                          aria-label={outgoingStatus === 'read' ? 'Прочитано' : 'Доставлено'}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m1.5 12.5 4 4 8-9" />
+                            {outgoingStatus !== 'sent' && <path d="m10 16.5 8-9" />}
+                          </svg>
+                        </span>
+                      )}
+                      {unreadCount > 0 && <span className="row-unread">{unreadCount > 999 ? '999+' : unreadCount}</span>}
+                    </div>
                   </div>
                   {chat.comment && <div className="row-comment">{chat.comment}</div>}
                   <div className="row-bottom">
+                    {/* Миниатюра — часть превью, а не отдельная колонка: она
+                        стоит перед текстом и не растит высоту строки. */}
+                    {previewThumb && (
+                      <img className="row-thumb" src={previewThumb} alt="" loading="lazy" decoding="async" />
+                    )}
                     <div className="row-preview">
-                      {last
-                        ? (renderTextWithEmoji(last.text || '', customEmoji, `p${chat.id}`)
-                          || (last.file_path ? '📷 Фото' : ''))
-                        : ''}
-                    </div>
-                    <div className="row-actions">
-                      {/* Закреплённый чат теперь узнаётся значком, а не кнопкой:
-                          сами действия уехали в контекстное меню строки. */}
-                      {isFavorite && (
-                        <span className="row-pinned" title="Закреплён" aria-label="Закреплён">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 17v5" />
-                            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-                          </svg>
-                        </span>
-                      )}
-                      {isMuted && (
-                        <span className="row-muted" title="Уведомления отключены" aria-label="Уведомления отключены">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 8a6 6 0 0 0-9.3-5" /><path d="M6 8c0 7-3 9-3 9h13" />
-                            <path d="M13.7 21a2 2 0 0 1-3.4 0" /><path d="m2 2 20 20" />
-                          </svg>
-                        </span>
-                      )}
-                      {unreadCount > 0 && <span className="row-unread">{unreadCount}</span>}
-                      <button
-                        type="button"
-                        className="row-menu-btn"
-                        title="Действия с чатом"
-                        aria-label={`Действия с чатом ${chat.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          openRowMenu(chat.id, rect.right, rect.bottom + 4);
-                        }}
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                          <path d="M12 6h.01" /><path d="M12 12h.01" /><path d="M12 18h.01" />
-                        </svg>
-                      </button>
+                      {previewPrefix && <span className="row-preview-author">{previewPrefix}</span>}
+                      {previewBody}
                     </div>
                   </div>
                 </div>

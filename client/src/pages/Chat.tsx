@@ -19,6 +19,7 @@ import Avatar from '../components/Avatar';
 import NavRail, { SectionId, isSectionAllowedFor, sectionById } from '../components/NavRail';
 import SectionStub from '../components/SectionStub';
 import FilesSection from '../components/FilesSection';
+import HomeSection from '../components/HomeSection';
 import TasksPanel from '../tasks/TasksPanel';
 import CalendarSection from '../components/CalendarSection';
 import PeopleSection from '../components/PeopleSection';
@@ -410,7 +411,7 @@ const Chat: React.FC = () => {
   //
   // Теперь состояние экрана меняется только целиком, поэтому «переписка
   // открыта» физически не может пережить смену раздела.
-  const [view, setView] = useState<ChatView>({ section: 'chats', conversation: false, settings: 'settings' });
+  const [view, setView] = useState<ChatView>({ section: 'home', conversation: false, settings: 'settings' });
   const { section } = view;
   // Ещё один пояс: даже если переписка каким-то образом окажется помеченной
   // открытой вне раздела «Чаты», показывать её мы не станем.
@@ -643,6 +644,7 @@ const Chat: React.FC = () => {
   useEffect(() => { reloadStickerCatalog(); }, [reloadStickerCatalog]);
   const [statusSheetOpen, setStatusSheetOpen] = useState(false);
   const [currentStatusPreset, setCurrentStatusPreset] = useState<string | null>(localStorage.getItem('statusPreset') || null);
+  const [currentStatusExpiresAt, setCurrentStatusExpiresAt] = useState<number | null>(null);
   const [currentStatusCustom, setCurrentStatusCustom] = useState<string | null>(localStorage.getItem('statusCustom') || null);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
 
@@ -1050,6 +1052,7 @@ const Chat: React.FC = () => {
         setMuted(data.muted);
         setCurrentAccountType(data.account_type || 'staff');
         setCurrentStatusPreset(data.status_preset || null);
+        setCurrentStatusExpiresAt(data.status_expires_at || null);
         setCurrentStatusCustom(data.status_custom || null);
         setSelfChatId(data.self_chat_id || '');
         setSelfChatName(data.self_chat_name || 'Избранное');
@@ -2670,6 +2673,9 @@ const Chat: React.FC = () => {
       groupLabel: 'Группы' as string | null,
       chatGroupId: g.id,
       avatarPath: null as string | null,
+      // Канал-объявление — «новостной» чат в фильтре списка: его читают, а не
+      // обсуждают в нём.
+      announcementsOnly: !!g.announcements_only,
     })),
     // Комментарий к имени раньше дописывался в скобках прямо в name — из-за
     // этого длинное имя с комментарием не помещалось в строку и обрезалось,
@@ -2973,6 +2979,8 @@ const Chat: React.FC = () => {
         selfAvatarPath={currentAvatarPath}
         statusPreset={currentStatusPreset}
         statusCustom={currentStatusCustom}
+        statusExpiresAt={currentStatusExpiresAt}
+        currentUserId={currentUserId}
         onOpenStatus={() => setStatusSheetOpen(true)}
         customEmoji={customEmoji}
         chats={chats}
@@ -2999,7 +3007,6 @@ const Chat: React.FC = () => {
         onOpenGroupInfo={(chatGroupId) => setGroupInfoId(chatGroupId)}
         onOpenGeneralInfo={() => setGeneralInfoOpen(true)}
         onCreateGroup={() => setCreateGroupOpen(true)}
-        onOpenSettings={() => goToSection('settings')}
         compact={layout.rosterCompact}
         onExpand={() => saveUiPrefs({ ...uiPrefsRef.current, rosterCollapsed: false })}
         resizeHandle={!narrowLayout && (
@@ -3171,13 +3178,26 @@ const Chat: React.FC = () => {
         </main>
       )}
 
+      {section === 'home' && (
+        <main className="section-host">
+          <HomeSection
+            displayName={currentDisplayName}
+            unreadTotal={totalUnread}
+            onOpenChats={() => goToSection('chats')}
+            onOpenTasks={() => goToSection('tasks')}
+            onOpenCalendar={() => goToSection('calendar')}
+          />
+        </main>
+      )}
+
       {section === 'documents' && (
         <main className="section-host">
           <FilesSection onOpenMessage={handleOpenMessage} />
         </main>
       )}
 
-      {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks' && section !== 'documents' && (
+      {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks'
+        && section !== 'documents' && section !== 'home' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>

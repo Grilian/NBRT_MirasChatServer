@@ -16,6 +16,7 @@ function renderList(onSelectChat = jest.fn()) {
       statusPreset={null}
       statusCustom={null}
       onOpenStatus={() => {}}
+      currentUserId={1}
       chats={chats}
       recentChats={chats}
       activeChat={null}
@@ -32,7 +33,6 @@ function renderList(onSelectChat = jest.fn()) {
       onOpenUserInfo={() => {}}
       onOpenGroupInfo={() => {}}
       onCreateGroup={() => {}}
-      onOpenSettings={() => {}}
     />,
   );
   return { ...result, onSelectChat };
@@ -104,6 +104,7 @@ function renderWithMenu(overrides: Partial<React.ComponentProps<typeof ChatList>
       statusPreset={null}
       statusCustom={null}
       onOpenStatus={() => {}}
+      currentUserId={1}
       chats={[
         { id: 'chat_1_2', name: 'Анна', section: 'staff', groupLabel: null, userId: 2 },
         { id: 'group_5', name: 'Отдел', section: 'group', groupLabel: null },
@@ -121,7 +122,6 @@ function renderWithMenu(overrides: Partial<React.ComponentProps<typeof ChatList>
       onOpenUserInfo={() => {}}
       onOpenGroupInfo={() => {}}
       onCreateGroup={() => {}}
-      onOpenSettings={() => {}}
       mutedChatIds={[]}
       {...handlers}
       {...overrides}
@@ -130,16 +130,26 @@ function renderWithMenu(overrides: Partial<React.ComponentProps<typeof ChatList>
   return handlers;
 }
 
-test('на строке чата больше нет кнопок закрепления и удаления', () => {
+/** Меню строки открывается правым кликом — кнопки «⋮» в строке больше нет. */
+function openMenu(name: string) {
+  const row = screen.getByText(name).closest('.row') as HTMLElement;
+  fireEvent.contextMenu(row);
+}
+
+test('в строке чата нет ни кнопок действий, ни кнопки меню', () => {
   renderWithMenu();
   expect(screen.queryByTitle('Закрепить')).not.toBeInTheDocument();
   expect(screen.queryByTitle('Убрать из списка')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Действия с чатом Анна' })).toBeInTheDocument();
+  expect(document.querySelector('.row-menu-btn')).toBeNull();
+
+  // Правый клик по строке — единственный вход в меню на ПК.
+  openMenu('Анна');
+  expect(screen.getByRole('button', { name: 'Закрепить' })).toBeInTheDocument();
 });
 
 test('в личном чате меню даёт все пять действий', () => {
   renderWithMenu();
-  fireEvent.click(screen.getByRole('button', { name: 'Действия с чатом Анна' }));
+  openMenu('Анна');
 
   for (const label of ['Закрепить', 'Пометить прочитанным', 'Отключить уведомления', 'Очистить переписку', 'Убрать из контактов']) {
     expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
@@ -148,7 +158,7 @@ test('в личном чате меню даёт все пять действи�
 
 test('в группе нельзя ни очистить переписку, ни убрать из контактов', () => {
   renderWithMenu();
-  fireEvent.click(screen.getByRole('button', { name: 'Действия с чатом Отдел' }));
+  openMenu('Отдел');
 
   expect(screen.getByRole('button', { name: 'Закрепить' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Очистить переписку' })).not.toBeInTheDocument();
@@ -157,13 +167,13 @@ test('в группе нельзя ни очистить переписку, н�
 
 test('«Пометить прочитанным» не показывается, когда непрочитанного нет', () => {
   renderWithMenu({ unreadCounts: {} });
-  fireEvent.click(screen.getByRole('button', { name: 'Действия с чатом Анна' }));
+  openMenu('Анна');
   expect(screen.queryByRole('button', { name: 'Пометить прочитанным' })).not.toBeInTheDocument();
 });
 
 test('пункты меню зовут переданные обработчики и закрывают меню', () => {
   const handlers = renderWithMenu();
-  fireEvent.click(screen.getByRole('button', { name: 'Действия с чатом Анна' }));
+  openMenu('Анна');
   fireEvent.click(screen.getByRole('button', { name: 'Очистить переписку' }));
 
   expect(handlers.onClearChat).toHaveBeenCalledWith('chat_1_2', 'Анна');
@@ -172,8 +182,150 @@ test('пункты меню зовут переданные обработчик
 
 test('заглушённый чат предлагает включить уведомления обратно', () => {
   const handlers = renderWithMenu({ mutedChatIds: ['chat_1_2'] });
-  fireEvent.click(screen.getByRole('button', { name: 'Действия с чатом Анна' }));
+  openMenu('Анна');
   fireEvent.click(screen.getByRole('button', { name: 'Включить уведомления' }));
 
   expect(handlers.onToggleMute).toHaveBeenCalledWith('chat_1_2', false);
+});
+
+// ===== Новый вид строки и фильтры =====
+
+const PREVIEW_CHATS: Chat[] = [
+  { id: 'chat_1_2', name: 'Анна', section: 'staff', groupLabel: null, userId: 2 },
+  { id: 'group_5', name: 'Отдел', section: 'group', groupLabel: null },
+  { id: 'group_7', name: 'Объявления', section: 'group', groupLabel: null, announcementsOnly: true },
+  { id: 'general', name: 'Общий чат', section: 'general', groupLabel: null },
+  { id: 'self_1', name: 'Избранное', section: 'self', groupLabel: null },
+];
+
+function renderRoster(overrides: Partial<React.ComponentProps<typeof ChatList>> = {}) {
+  render(
+    <ChatList
+      selfName="Я"
+      selfAvatarPath={null}
+      statusPreset={null}
+      statusCustom={null}
+      currentUserId={1}
+      onOpenStatus={() => {}}
+      chats={PREVIEW_CHATS}
+      recentChats={[]}
+      activeChat={null}
+      onSelectChat={() => {}}
+      onOpenDirectory={() => {}}
+      searchQuery=""
+      onSearchChange={() => {}}
+      lastMessages={{}}
+      unreadCounts={{}}
+      favorites={[]}
+      onToggleFavorite={() => {}}
+      onMarkAllRead={() => {}}
+      onRemoveContact={() => {}}
+      onOpenUserInfo={() => {}}
+      onOpenGroupInfo={() => {}}
+      onCreateGroup={() => {}}
+      {...overrides}
+    />,
+  );
+}
+
+const rowOf = (name: string) => screen.getByText(name).closest('.row') as HTMLElement;
+
+test('закрепление и время — одна плашка, а не два элемента строки', () => {
+  renderRoster({
+    favorites: ['chat_1_2'],
+    lastMessages: {
+      chat_1_2: { chat_id: 'chat_1_2', text: 'привет', created_at: '2026-08-15 10:00:00' },
+    },
+  });
+
+  const stamp = rowOf('Анна').querySelector('.row-stamp');
+  expect(stamp).not.toBeNull();
+  expect(stamp!.className).toContain('is-pinned');
+  // Внутри плашки и значок, и время — отдельной колонки под закрепление нет.
+  expect(stamp!.querySelector('svg')).not.toBeNull();
+  expect(stamp!.textContent).toMatch(/\d{2}:\d{2}/);
+});
+
+test('у своего последнего сообщения в превью те же галочки, что и в переписке', () => {
+  renderRoster({
+    lastMessages: {
+      chat_1_2: {
+        chat_id: 'chat_1_2', text: 'моё', created_at: '2026-08-15 10:00:00',
+        sender_id: 1, status: 'read',
+      },
+      group_5: {
+        chat_id: 'group_5', text: 'чужое', created_at: '2026-08-15 10:00:00',
+        sender_id: 2, sender_name: 'Пётр', status: 'read',
+      },
+    },
+  });
+
+  expect(rowOf('Анна').querySelector('.row-check.is-read')).not.toBeNull();
+  // У чужого сообщения статус относится к чтению собеседником — в списке он
+  // ничего не значит и не показывается.
+  expect(rowOf('Отдел').querySelector('.row-check')).toBeNull();
+  // Зато в группе видно, кто написал.
+  expect(rowOf('Отдел').textContent).toContain('Пётр:');
+});
+
+test('картинка в последнем сообщении даёт миниатюру перед текстом', () => {
+  renderRoster({
+    lastMessages: {
+      chat_1_2: {
+        chat_id: 'chat_1_2', text: '', created_at: '2026-08-15 10:00:00',
+        sender_id: 2, file_path: '/uploads/users/2/images/x.webp',
+      },
+    },
+  });
+
+  const row = rowOf('Анна');
+  expect(row.querySelector('.row-thumb')).not.toBeNull();
+  expect(row.textContent).toContain('Фотография');
+});
+
+test('счётчик непрочитанных стоит в правой колонке под временем', () => {
+  renderRoster({
+    unreadCounts: { chat_1_2: 56 },
+    lastMessages: { chat_1_2: { chat_id: 'chat_1_2', text: 'э', created_at: '2026-08-15 10:00:00' } },
+  });
+
+  const side = rowOf('Анна').querySelector('.row-side');
+  expect(side).not.toBeNull();
+  expect(side!.querySelector('.row-unread')!.textContent).toBe('56');
+});
+
+test('отключённые уведомления видно по значку у имени чата', () => {
+  renderRoster({ mutedChatIds: ['group_5'] });
+
+  const muted = rowOf('Отдел').querySelector('.row-muted');
+  expect(muted).not.toBeNull();
+  // Именно у имени: справа уже время, галочки и счётчик.
+  expect(rowOf('Отдел').querySelector('.row-name')!.contains(muted!)).toBe(true);
+  expect(rowOf('Анна').querySelector('.row-muted')).toBeNull();
+});
+
+test('фильтры отбирают список, не превращаясь в отдельные экраны', () => {
+  renderRoster();
+  const names = () => [...document.querySelectorAll('.row-name span')].map((n) => n.textContent);
+
+  expect(names()).toEqual(expect.arrayContaining(['Анна', 'Отдел', 'Объявления', 'Общий чат', 'Избранное']));
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Личные' }));
+  expect(names()).toEqual(['Анна', 'Избранное']);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Группы' }));
+  expect(names()).toEqual(['Отдел']);
+
+  // «Новостные» — канал-объявление и общий чат: их читают, а не обсуждают.
+  fireEvent.click(screen.getByRole('tab', { name: 'Новостные' }));
+  expect(names()).toEqual(['Объявления', 'Общий чат']);
+});
+
+test('«Мой статус» — отдельный блок над списком, а не первый чат', () => {
+  renderRoster({ statusPreset: 'vacation' });
+
+  const block = document.querySelector('.roster-mystatus');
+  expect(block).not.toBeNull();
+  expect(block!.closest('.roster-list')).toBeNull();
+  expect(block!.textContent).toContain('Изменить статус');
 });

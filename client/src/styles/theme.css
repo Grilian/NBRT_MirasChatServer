@@ -593,15 +593,6 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .mark-all-read-btn:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
 
-/* Вход в «Настройки» на узком экране, где для них не нашлось места в нижней
-   панели (см. .rail-item-settings). На десктопе вертикальный рельс уже даёт
-   вход через аватар/тему внизу — здесь дублировать незачем. */
-.roster-settings-btn {
-  display: none; flex: none; margin-left: auto; width: 30px; height: 30px; border-radius: 50%;
-  border: none; padding: 0; align-items: center; justify-content: center; cursor: pointer;
-  background: none; color: var(--ink-muted);
-}
-.roster-settings-btn:hover { background: var(--row-hover); color: var(--ink); }
 
 .roster-search-open-btn {
   display: none; flex: none; width: 0; height: 30px; padding: 0; border: none;
@@ -2092,18 +2083,23 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   /* Рельс становится нижней панелью вкладок: вертикальный на 84px съел бы
      четверть ширины телефона. Внутри самой переписки он прячется — там нужен
      весь экран, а вернуться можно кнопкой «назад» в шапке. */
+  /* Нижняя панель — «островок»: отделена от края экрана, со своей рамкой и
+     тенью. Это оформление, а не всплывающий элемент: панель постоянна и
+     остаётся основной навигацией. Отступ снизу учитывает жестовую полосу
+     Android и iOS (safe-area), иначе панель ложится прямо на неё. */
   .nav-rail {
-    position: absolute; left: 0; right: 0; bottom: 0; top: auto; z-index: 3;
-    flex-direction: row; height: 58px; padding: 0; gap: 0;
-    border-right: none; border-top: 1px solid var(--line);
+    position: absolute; top: auto; z-index: 3;
+    left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    flex-direction: row; height: 58px; padding: 0 2px; gap: 0;
+    border: 1px solid var(--line); border-radius: 18px;
+    background: var(--paper); box-shadow: var(--shadow-lg);
+    overflow: hidden;
   }
   .rail-brand, .rail-foot { display: none; }
-  /* «Настройки» переехали в шапку списка чатов (.roster-settings-btn) — семи
-     пунктам тут не хватало ширины без горизонтальной прокрутки. Шесть
-     оставшихся делят строку жёстко поровну (flex:1 1 0, min-width:0), без
-     overflow: их число фиксировано, и делить нечего сверх этого. */
-  .rail-item-settings { display: none; }
-  .roster-settings-btn { display: flex; }
+  /* В нижней панели ровно шесть разделов (MOBILE_SECTIONS) — они делят строку
+     поровну (flex:1 1 0, min-width:0). «Пространства» и «Файлы» туда не
+     помещаются и остаются на десктопном рельсе. */
+  .rail-item-desktop-only { display: none; }
   .roster-search-open-btn {
     display: flex; transition: width .22s ease, opacity .18s ease, background var(--ease), color var(--ease);
   }
@@ -2111,6 +2107,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
     width: 30px; opacity: 1; pointer-events: auto;
   }
   .roster-head { padding: 12px 14px 8px; }
+  /* Панель парит над содержимым, поэтому место под неё резервируем сами:
+     иначе последняя строка списка оказывается под ней. */
+  .roster-list { padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px)); }
+  .section-host { padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px)); }
   .roster-account { margin-bottom: 10px; transition: margin-bottom .22s ease; }
   .roster.is-search-collapsed .roster-account { margin-bottom: 0; }
   .roster-search-area {
@@ -2713,6 +2713,97 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    единственным входом в меню остаётся удержание, о котором не догадаться. */
 @media (hover: none) { .row-menu-btn { opacity: 1; } }
 .row-menu { min-width: 210px; }
+
+/* ===== Фильтры списка чатов, «Мой статус», правая часть строки ===== */
+.roster-filters {
+  display: flex; gap: 6px; padding: 0 12px 8px; overflow-x: auto;
+  scrollbar-width: none; flex: none;
+}
+.roster-filters::-webkit-scrollbar { display: none; }
+.roster-filter {
+  flex: none; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-muted);
+  font-size: 12.5px; white-space: nowrap;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.roster-filter:hover { background: var(--row-hover); }
+.roster-filter.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* «Мой статус» — не первый чат в списке, а отдельный блок над ним: своё
+   состояние человек меняет заметно реже, чем открывает переписки. */
+.roster-mystatus {
+  flex: none; display: flex; align-items: center; gap: 10px; width: calc(100% - 24px);
+  margin: 0 12px 8px; padding: 8px 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--line); background: var(--paper-sunken);
+  cursor: pointer; text-align: left; color: inherit;
+  transition: background var(--ease);
+}
+.roster-mystatus:hover { background: var(--row-hover); }
+.roster-mystatus-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.roster-mystatus-title {
+  font-size: 13.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.roster-mystatus-hint { font-size: 11.5px; color: var(--ink-muted); }
+
+/* Правая колонка строки: плашка «булавка + время», под ней галочки и счётчик. */
+.row-side {
+  flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  margin-left: 8px;
+}
+.row-stamp {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; color: var(--ink-muted); white-space: nowrap;
+}
+.row-stamp svg { width: 12px; height: 12px; }
+/* Закреплённый чат — та же плашка, но с фоном: признак читается сразу, а
+   отдельного элемента в строке не появляется. */
+.row-stamp.is-pinned {
+  padding: 2px 8px; border-radius: 999px; background: var(--paper-sunken);
+}
+.row-side-bottom { display: inline-flex; align-items: center; gap: 6px; }
+.row-check { display: inline-flex; color: var(--ink-muted); }
+.row-check svg { width: 15px; height: 15px; }
+.row-check.is-read { color: var(--accent); }
+.row-muted { display: inline-flex; color: var(--ink-muted); opacity: .7; flex: none; }
+.row-muted svg { width: 13px; height: 13px; }
+
+/* Миниатюра последнего сообщения — перед текстом, без роста высоты строки. */
+.row-thumb {
+  flex: none; width: 18px; height: 18px; border-radius: 4px; object-fit: cover;
+  margin-right: 6px; background: var(--paper-sunken);
+}
+.row-preview-author { color: var(--ink-muted); }
+
+/* ===== Главная ===== */
+.home-section {
+  display: flex; flex-direction: column; gap: 18px; min-height: 0; height: 100%;
+  padding: 22px 22px 18px; overflow-y: auto;
+}
+.home-head h1 { margin: 0; font-size: 22px; font-weight: 650; }
+.home-date { margin: 4px 0 0; color: var(--ink-muted); font-size: 13px; }
+.home-group { display: flex; flex-direction: column; gap: 8px; }
+.home-group h2 {
+  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+.home-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.home-card {
+  display: flex; align-items: center; gap: 12px; padding: 13px 14px; cursor: pointer;
+  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
+  color: inherit; text-align: left; transition: background var(--ease), border-color var(--ease);
+}
+.home-card:hover { background: var(--row-hover); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.home-card-icon { font-size: 22px; line-height: 1; flex: none; }
+.home-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.home-card-count { font-size: 20px; font-weight: 650; line-height: 1.1; }
+.home-card-label { font-size: 13px; color: var(--ink-muted); }
+.home-card-go { width: 16px; height: 16px; color: var(--ink-muted); flex: none; }
+.home-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 40px 16px; text-align: center; color: var(--ink-muted); font-size: 14px;
+}
+.home-empty span { font-size: 30px; }
+.home-empty p { margin: 0; max-width: 420px; }
 
 /* ===== Раздел «Файлы»: личное хранилище ===== */
 .files-section {

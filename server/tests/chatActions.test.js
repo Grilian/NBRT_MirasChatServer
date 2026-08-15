@@ -142,8 +142,11 @@ test('очищенное не отдаётся наружу ни собесед�
     assert.equal(message.file_path, null);
   }
 
+  // Превью у очищенного чата не остаётся вовсе: удалённые сообщения перестали
+  // считаться последним событием (см. проверки превью ниже), а других в чате
+  // просто нет.
   const last = await request('/api/messages/meta/last', { token: tokenFor(b) });
-  assert.equal(last.data[chatId].text, '');
+  assert.equal(last.data[chatId], undefined);
 });
 
 test('очистить можно только личную переписку, и только своим участникам', async () => {
@@ -160,4 +163,51 @@ test('очистить можно только личную переписку, 
 
   const general = await request('/api/messages/general/clear', { token: tokenFor(b), method: 'POST' });
   assert.equal(general.response.status, 400, 'общий чат очистить «у всех» нельзя');
+});
+
+// ===== Превью последнего сообщения =====
+
+test('удалённое последнее сообщение уступает место предыдущему живому', async () => {
+  const { a, b, chatId } = seedChat('preview');
+  const insert = db.prepare("INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, 'read')");
+  insert.run(chatId, a, 'предыдущее живое');
+  const deletedId = Number(insert.run(chatId, b, 'это удалят').lastInsertRowid);
+  db.prepare('UPDATE messages SET deleted = 1 WHERE id = ?').run(deletedId);
+
+  const { data } = await request('/api/messages/meta/last', { token: tokenFor(a) });
+  const preview = data[chatId];
+
+  // Раньше сюда попадало удалённое — пустым, и чат в списке выглядел так, будто
+  // в нём ничего нет.
+  assert.equal(preview.text, 'предыдущее живое');
+  assert.equal(preview.sender_id, a);
+  assert.equal(preview.status, 'read', 'статус нужен списку для галочек');
+  assert.ok(preview.sender_name, 'имя автора нужно превью в группах');
+});
+
+test('в превью приезжает картинка для миниатюры, а убранное вложение — нет', async () => {
+  const { a, chatId } = seedChat('thumb');
+  const id = Number(db.prepare(
+    'INSERT INTO messages (chat_id, sender_id, text, file_path, file_width, file_height) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(chatId, a, '', '/uploads/users/1/images/x.webp', 100, 200).lastInsertRowid);
+
+  let { data } = await request('/api/messages/meta/last', { token: tokenFor(a) });
+  assert.equal(data[chatId].file_path, '/uploads/users/1/images/x.webp');
+  assert.equal(data[chatId].file_width, 100);
+
+  db.prepare('UPDATE messages SET attachment_archived_at = ? WHERE id = ?').run(Date.now(), id);
+  ({ data } = await request('/api/messages/meta/last', { token: tokenFor(a) }));
+  assert.equal(data[chatId].file_path, null, 'убранное вложение не должно давать миниатюру');
+});
+
+test('скрытое лично тоже уступает место предыдущему', async () => {
+  const { a, chatId } = seedChat('hidden-preview');
+  const insert = db.prepare("INSERT INTO messages (chat_id, sender_id, text, status) VALUES (?, ?, ?, 'sent')");
+  insert.run(chatId, a, 'видно обоим');
+  const hiddenId = Number(insert.run(chatId, a, 'скрыто у меня').lastInsertRowid);
+  db.prepare('INSERT INTO message_hidden (message_id, user_id, hidden_at) VALUES (?, ?, ?)')
+    .run(hiddenId, a, Date.now());
+
+  const { data } = await request('/api/messages/meta/last', { token: tokenFor(a) });
+  assert.equal(data[chatId].text, 'видно обоим');
 });

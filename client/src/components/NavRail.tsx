@@ -8,6 +8,7 @@ import { describeStatus } from '../utils/statusMeta';
 // появления самих разделов. У нереализованных стоит ready: false — они
 // открываются, но показывают заглушку «В разработке» (см. SectionStub).
 export type SectionId =
+  | 'home'
   | 'chats'
   | 'people'
   | 'spaces'
@@ -34,12 +35,20 @@ const stroke = {
   strokeLinejoin: 'round' as const,
 };
 
-// «Настройки» на узком экране скрыты из нижней панели (см. .rail-item-settings
-// в theme.css) — семи пунктам там банально не хватает ширины без горизонтальной
-// прокрутки. Точка входа переехала в шапку списка чатов (см. roster-settings-btn
-// в ChatList), а на самом рельсе пункт остаётся только для десктопной
-// вертикальной раскладки.
+// Набор пунктов один на обе раскладки, но показывается по-разному: на широком
+// экране это вертикальный рельс целиком, на узком — нижняя панель из шести
+// основных разделов (см. MOBILE_SECTIONS). «Пространства» и «Файлы» в нижнюю
+// панель не помещаются и остаются доступны с рельса и из «Главной».
 export const SECTIONS: SectionMeta[] = [
+  {
+    id: 'home',
+    label: 'Главная',
+    ready: true,
+    summary: 'Личная сводка: непрочитанное, задачи и мероприятия на сегодня.',
+    icon: (
+      <svg {...stroke}><path d="m3 10.5 9-7 9 7" /><path d="M5 9.6V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.6" /><path d="M9.5 21v-6h5v6" /></svg>
+    ),
+  },
   {
     id: 'chats',
     label: 'Чаты',
@@ -51,7 +60,7 @@ export const SECTIONS: SectionMeta[] = [
   },
   {
     id: 'people',
-    label: 'Люди',
+    label: 'Контакты',
     ready: true,
     summary: 'Справочник сотрудников с поиском по подразделениям.',
     icon: (
@@ -130,7 +139,7 @@ function nextTheme(current: ThemePreference): 'light' | 'dark' {
 // незачем видеть пространства, задачи (поручения — это про рабочие
 // обязанности) и документы; календарь остаётся, но общий слой в нём и так
 // не показывает сервер (см. canSeeGlobalCalendar на бэкенде).
-const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['chats', 'people', 'calendar', 'documents', 'settings'];
+const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['home', 'chats', 'people', 'calendar', 'documents', 'settings'];
 
 // Тот же отбор нужен и снаружи рельса: тип аккаунта могут сменить прямо во
 // время сессии, и человек, стоящий в разделе, который ему больше не положен,
@@ -138,6 +147,15 @@ const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['chats', 'people', 'calendar', '
 export function isSectionAllowedFor(accountType: string | undefined, id: SectionId): boolean {
   return accountType !== 'internet' || INTERNET_VISIBLE_SECTIONS.includes(id);
 }
+
+/**
+ * Что показывает нижняя панель на узком экране.
+ *
+ * Шесть пунктов — предел, за которым подписи начинают налезать друг на друга
+ * на 360px. Порядок повторяет рельс, чтобы переход между устройствами не
+ * требовал переучиваться.
+ */
+export const MOBILE_SECTIONS: SectionId[] = ['home', 'tasks', 'calendar', 'people', 'chats', 'settings'];
 
 interface NavRailProps {
   active: SectionId;
@@ -180,7 +198,10 @@ const NavRail: React.FC<NavRailProps> = ({
             <button
               key={section.id}
               type="button"
-              className={'rail-item' + (isActive ? ' is-active' : '') + (section.id === 'settings' ? ' rail-item-settings' : '')}
+              // Пункты вне MOBILE_SECTIONS живут только на десктопном рельсе:
+              // в нижнюю панель их не помещается, и они скрываются медиазапросом.
+              className={'rail-item' + (isActive ? ' is-active' : '')
+                + (MOBILE_SECTIONS.includes(section.id) ? '' : ' rail-item-desktop-only')}
               aria-current={isActive ? 'page' : undefined}
               title={section.label}
               onClick={() => onSelect(section.id)}
