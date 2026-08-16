@@ -894,7 +894,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .thread-messages > .conv-wrap { flex: 1; min-width: 0; }
 .thread-messages .conv-body { padding: 10px 12px 12px; }
 .thread-messages .conv-body.is-initial-positioning { visibility: visible; pointer-events: auto; }
-.thread-messages .msg { max-width: 88%; }
+.thread-messages .bubble { max-width: 88%; }
 .thread-state { flex: 1; display: grid; place-items: center; padding: 20px; color: var(--ink-muted); text-align: center; }
 .thread-state.is-error { color: var(--unread); }
 
@@ -922,17 +922,20 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 
 /* ---- Пузыри ---- */
-.msg { max-width: min(70%, 680px); margin-bottom: 2px; display: flex; flex-direction: column; position: relative; }
+/* Строка сообщения занимает всю ширину ленты. Это не меняет визуальную
+   ширину пузыря, зато вся пустая область слева/справа принадлежит сообщению:
+   правый клик на ПК и тап/удержание на телефоне ловятся так же, как по пузырю. */
+.msg { width: 100%; max-width: none; margin-bottom: 2px; display: flex; flex-direction: column; position: relative; }
 .msg.ends-group { margin-bottom: 10px; }
-.msg.mine { align-self: flex-end; align-items: flex-end; }
-.msg.theirs { align-self: flex-start; align-items: flex-start; }
+.msg.mine { align-self: stretch; align-items: flex-end; }
+.msg.theirs { align-self: stretch; align-items: flex-start; }
 
 /* min-width: 0 обязателен: пузырь — флекс-элемент .msg, а у флекс-элемента
    минимальная ширина по умолчанию равна содержимому. В CSS min-width сильнее
    max-width, поэтому длинная неразрывная строка внутри (цитата с nowrap,
    ссылка) раздувала пузырь ЗА пределы max-width, и текст вылезал за край. */
 .bubble {
-  position: relative; max-width: 100%; min-width: 0;
+  position: relative; max-width: min(70%, 680px); min-width: 0;
   padding: 6px 11px 7px; border-radius: var(--radius-md);
   font-size: 14.5px; line-height: 1.35;
 }
@@ -1765,7 +1768,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 
 /* ===== Карточка опроса в сообщении ===== */
 .bubble.bubble-poll { width: min(430px, calc(100vw - 108px)); padding: 10px 13px 7px; }
-.msg.has-poll { max-width: min(90%, 680px); }
+.msg.has-poll .bubble { max-width: min(90%, 680px); }
 .poll-card { --poll-accent: var(--accent); --poll-muted: var(--ink-muted); min-width: 280px; color: inherit; }
 .msg.mine .poll-card { --poll-accent: var(--accent); --poll-muted: var(--meta-out); }
 .thread-root .poll-card { color: var(--ink); --poll-muted: var(--ink-muted); }
@@ -1834,7 +1837,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   .poll-setting-icon { width: 38px; height: 38px; }
   .poll-duration { width: calc(100% - 86px); margin-left: 70px; }
   .bubble.bubble-poll { width: min(430px, calc(100vw - 42px)); }
-  .msg.has-poll { max-width: 96%; }
+  .msg.has-poll .bubble { max-width: 96%; }
   .poll-card { min-width: 250px; }
   .poll-voters-layer { align-items: flex-end; padding: 0; }
   .poll-voters-sheet { width: 100%; max-height: 78vh; border-radius: 24px 24px 0 0; padding-bottom: env(safe-area-inset-bottom); }
@@ -2082,7 +2085,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   .thread-header .thread-close-mobile { display: inline; font-size: 38px; font-weight: 300; line-height: .7; }
   .thread-root { max-height: 30%; padding: 12px; }
   .thread-messages .conv-body { padding: 10px 9px 12px; }
-  .thread-messages .msg { max-width: 90%; }
+  .thread-messages .bubble { max-width: 90%; }
   @keyframes thread-pane-in {
     from { transform: translateX(10%); opacity: .45; }
     to { transform: translateX(0); opacity: 1; }
@@ -2197,7 +2200,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   }
   .conv-head .back-btn { display: inline-flex; }
   .conv-body { padding: 12px 10px 14px; }
-  .msg { max-width: 86%; }
+  .bubble { max-width: 86%; }
 
   /* Telegram-подобная схема: нижняя emoji-поверхность живёт в WebView
      постоянно. Android IME настроена как adjustNothing и просто накрывает её.

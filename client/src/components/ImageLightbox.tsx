@@ -83,29 +83,6 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose, name, onRep
     setNotice(result.ok ? `Сохранено в «${result.location}»` : (result.error || 'Не удалось сохранить'));
   };
 
-  const handleShare = async () => {
-    setMenu(null);
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
-      const nav = navigator as any;
-      // Системное «Поделиться» есть на телефоне и в части браузеров; если файлы
-      // оно не принимает — отдаём хотя бы ссылку, это всё равно передача.
-      if (nav.canShare?.({ files: [file] })) {
-        await nav.share({ files: [file] });
-      } else if (nav.share) {
-        await nav.share({ url });
-      } else {
-        await navigator.clipboard.writeText(url);
-        setNotice('Ссылка скопирована — на этом устройстве нет системного «Поделиться»');
-      }
-    } catch (e: any) {
-      // Отмена самим человеком — не ошибка, молчим.
-      if (e?.name !== 'AbortError') setNotice('Не удалось поделиться');
-    }
-  };
-
   const handleCopy = async () => {
     setMenu(null);
     try {
@@ -390,7 +367,6 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ url, onClose, name, onRep
             {onReply && (
               <button type="button" onClick={() => { setMenu(null); onClose(); onReply(); }}>Ответить</button>
             )}
-            <button type="button" onClick={handleShare}>Поделиться</button>
             <button type="button" onClick={handleCopy}>Копировать</button>
             <button type="button" onClick={handleDropCache}>Удалить из кэша</button>
             {onDelete && (

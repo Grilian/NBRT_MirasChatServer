@@ -194,7 +194,11 @@ export function renderMessageText(
       }
       nodes.push(React.createElement(CustomEmojiImage, {
         key: `${keyPrefix}-emoji-${nextKey()}`,
-        filePath: item.filePath,
+        // Основной рендер текста сообщения обязан использовать ту же логику,
+        // что превью/цитаты: при включённой анимации берём animatedPath.
+        // Раньше здесь всегда передавался filePath, поэтому в списке чатов
+        // смайлик двигался, а внутри самой переписки оставался статичным.
+        filePath: (animationEnabled && item.animatedPath) || item.filePath,
         fallback: item.fallback,
       }));
       last = match.index + match[0].length;
