@@ -48,7 +48,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onCreated 
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay mobile-page-overlay" onClick={onClose}>
       <div className="modal-card directory-modal create-group-modal" onClick={(e) => e.stopPropagation()}>
         <div className="conv-head">
           <div className="conv-title"><div className="settings-title">Новая группа</div></div>

@@ -39,7 +39,7 @@ const DirectoryModal: React.FC<DirectoryModalProps> = ({ existingContactIds, onC
     .filter(u => nameFor(u).toLowerCase().includes(query.toLowerCase()));
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay mobile-page-overlay" onClick={onClose}>
       <div className="modal-card directory-modal" onClick={(e) => e.stopPropagation()}>
         <div className="conv-head">
           <div className="conv-title"><div className="settings-title">Справочник сотрудников</div></div>

@@ -18,6 +18,7 @@ import GroupInfoModal from '../components/GroupInfoModal';
 import GeneralChatInfoModal from '../components/GeneralChatInfoModal';
 import Avatar from '../components/Avatar';
 import NavRail, { SectionId, isSectionAllowedFor, mobileSectionsFor, sectionById } from '../components/NavRail';
+import AppMenuDrawer from '../components/AppMenuDrawer';
 import SectionStub from '../components/SectionStub';
 import FilesSection from '../components/FilesSection';
 import HomeSection, { HomeCalendarTarget } from '../components/HomeSection';
@@ -77,6 +78,7 @@ import {
 } from '../utils/uiPrefs';
 import { useLayoutMode } from '../utils/useLayoutMode';
 import { widthNeededForRightPanel } from '../utils/layoutMode';
+import { APP_NAME } from '../version';
 import {
   OutgoingMessage,
   OutgoingPayload,
@@ -444,11 +446,20 @@ const Chat: React.FC = () => {
   const [pollSubmitting, setPollSubmitting] = useState(false);
   const [groupInfoId, setGroupInfoId] = useState<number | null>(null);
   const [generalInfoOpen, setGeneralInfoOpen] = useState(false);
-  // Свой профиль — модальное окно поверх любого раздела, а не подэкран
-  // настроек: он открывается по аватару с рельса, откуда бы ни нажали, и
-  // возвращать после него в настройки (где человек не был) неправильно.
+
+  // Десктопное меню — выезжающая панель поверх текущего раздела. Крупные
+  // действия из него открываются компактными окнами, не уводя человека со
+  // страницы, на которой он работал.
+  const [appMenuOpen, setAppMenuOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [tasksModalOpen, setTasksModalOpen] = useState(false);
+  const [profilePreviewOpen, setProfilePreviewOpen] = useState(false);
+
+  // Редактирование своего профиля остаётся отдельным окном. Теперь перед ним
+  // есть публичный просмотр — такой же профиль, какой увидит другой человек.
   const [profileOpen, setProfileOpen] = useState(false);
-  // Справочник «Люди» — тоже окно поверх экрана, не отдельный раздел.
+  // Справочник «Люди» — окно поверх текущего экрана на десктопе; на мобильном
+  // CSS разворачивает его в полноценный экран.
   const [peopleOpen, setPeopleOpen] = useState(false);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSentAt = useRef(0);
@@ -505,7 +516,10 @@ const Chat: React.FC = () => {
   // узком экране можно уйти назад к списку чатов, не закрывая сам чат. Во всех
   // этих случаях сообщение человеку не видно, значит его нельзя считать
   // прочитанным и нельзя проглатывать уведомление о нём.
-  const conversationVisible = windowFocused && conversationOpen;
+  const conversationVisible = windowFocused && conversationOpen
+    && !appMenuOpen && !settingsModalOpen && !tasksModalOpen
+    && !profilePreviewOpen && !profileOpen && !peopleOpen
+    && !createGroupOpen && !directoryOpen;
 
   const currentUserId = Number(localStorage.getItem('userId'));
   const [outgoingQueue, setOutgoingQueue] = useState<OutgoingMessage[]>(() => loadOutgoingQueue(currentUserId));
@@ -866,7 +880,7 @@ const Chat: React.FC = () => {
   useEffect(() => {
     // Картинку оверлея рисуем здесь: в main-процессе нечем (см. badgeIcon.ts).
     window.electronAPI?.setUnreadBadge(totalUnread, renderUnreadBadge(totalUnread) || undefined);
-    document.title = totalUnread > 0 ? `(${totalUnread}) MirasChat` : 'MirasChat';
+    document.title = totalUnread > 0 ? `(${totalUnread}) ${APP_NAME}` : APP_NAME;
   }, [totalUnread]);
 
   // Аппаратная кнопка "назад" на Android — по умолчанию сразу закрывала бы
@@ -953,6 +967,16 @@ const Chat: React.FC = () => {
   // пересоздаётся — держим актуальную версию в ref, как и handleSelectChat.
   const goToSectionRef = useRef(goToSection);
   goToSectionRef.current = goToSection;
+
+  // В старой схеме Настройки были самостоятельным десктопным разделом и
+  // могли сохраниться как последний экран. После переноса в модалку такой
+  // сохранённый section дал бы пустую центральную область. При первом широком
+  // рендере превращаем старое состояние в новый вариант: чаты под модалкой.
+  useEffect(() => {
+    if (narrowLayout || section !== 'settings') return;
+    setSettingsModalOpen(true);
+    goToSection('chats');
+  }, [narrowLayout, section, goToSection]);
 
   // Тип аккаунта сменили, пока человек сидит в разделе, которого у него больше
   // нет (задачи, документы, пространства) — уводим в чаты. Эффектом, а не в
@@ -2663,8 +2687,9 @@ const Chat: React.FC = () => {
     // того и делают, чтобы чат был первым. В отдельный раздел их не выносим —
     // они остаются обычными строками, просто наверху.
     if (favorites.includes(c.id)) return -2;
-    if (c.section === 'general') return -1;
-    if (c.section === 'self') return -0.5;
+    // Общий чат больше не закреплён: живёт среди обычных чатов и поднимается
+    // только свежестью последнего сообщения.
+    if (c.section === 'general') return 1;
     // Групповые чаты (созданные вручную, не отдел из панели супер-админа) —
     // отдельным блоком сразу после закреплённых, до отделов настоящих.
     if (c.section === 'group') return 0.5;
@@ -2680,14 +2705,12 @@ const Chat: React.FC = () => {
     return 1 + realGroupNames.length; // "Без группы" — всегда последними
   }
 
-  // Формирование списка чатов: закреплённые (по свежести), затем Общий чат,
-  // затем свои групповые чаты, затем реальные группы (настроены в панели
-  // супер-админа), внутри каждой — тоже по свежести.
+  // Формирование списка чатов: закреплённые, затем все остальные по существующим
+  // правилам группировки и свежести. Общий чат специального места больше не имеет.
   const allChats: RosterChat[] = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
-    // Личный чат «для себя» — сразу за общим, до всех остальных: это заметки
-    // и пересылки, к нему возвращаются часто, и искать его среди переписок по
-    // свежести было бы неудобно.
+    // «Избранное» — обычная личная переписка по месту в списке: её позицию
+    // определяет последнее сообщение, а не специальное закрепление.
     ...(selfChatId ? [{
       id: selfChatId,
       name: selfChatName,
@@ -2879,11 +2902,14 @@ const Chat: React.FC = () => {
 
   const activeSection = sectionById(section);
 
-  // Через setView целиком, а не setSection + setSettingsView по отдельности:
-  // раньше этот переход менял раздел, не трогая состояние переписки, — та же
-  // ловушка, что чинили в кнопках «назад» у настроек и календаря.
-  const openOwnProfile = () => {
+  const openOwnProfilePreview = () => {
     closeKeyboard();
+    setProfilePreviewOpen(true);
+  };
+
+  const openOwnProfileEdit = () => {
+    closeKeyboard();
+    setProfilePreviewOpen(false);
     setProfileOpen(true);
   };
 
@@ -3014,20 +3040,45 @@ const Chat: React.FC = () => {
       />
 
       <NavRail
-        active={section}
-        // «Люди» — не раздел, а окно поверх текущего экрана: справочник
-        // открывают, чтобы посмотреть человека и вернуться к тому, что делали,
-        // а не чтобы уйти из переписки.
-        onSelect={(id) => (id === 'people' ? setPeopleOpen(true) : goToSection(id))}
+        active={settingsModalOpen ? 'settings' : (peopleOpen ? 'people' : section)}
+        // На десктопе «Контакты» и «Настройки» — компактные окна поверх
+        // текущего рабочего контекста. На телефоне Настройки остаются
+        // полноценным разделом нижней навигации.
+        onSelect={(id) => {
+          if (id === 'people') {
+            if (narrowLayout) goToSection('people');
+            else setPeopleOpen(true);
+            return;
+          }
+          if (id === 'settings' && !narrowLayout) { setSettingsModalOpen(true); return; }
+          goToSection(id);
+        }}
         unreadTotal={totalUnread}
-        username={currentDisplayName}
-        avatarPath={currentAvatarPath}
-        online={socketConnected}
-        statusPreset={currentStatusPreset}
-        statusCustom={currentStatusCustom}
-        onOpenProfile={openOwnProfile}
+        onOpenMenu={() => setAppMenuOpen(true)}
+        menuOpen={appMenuOpen}
         accountType={currentAccountType}
       />
+
+      {!narrowLayout && (
+        <AppMenuDrawer
+          open={appMenuOpen}
+          username={currentDisplayName}
+          avatarPath={currentAvatarPath}
+          online={socketConnected}
+          statusPreset={currentStatusPreset}
+          statusCustom={currentStatusCustom}
+          favoritesAvailable={!!selfChatId}
+          onClose={() => setAppMenuOpen(false)}
+          onOpenProfile={openOwnProfilePreview}
+          onOpenStatus={() => setStatusSheetOpen(true)}
+          onOpenChats={() => goToSection('chats')}
+          onOpenTasks={() => setTasksModalOpen(true)}
+          onCreateGroup={() => setCreateGroupOpen(true)}
+          onOpenContacts={() => setPeopleOpen(true)}
+          onOpenFavorites={() => { if (selfChatId) handleSelectChat(selfChatId); }}
+          onOpenSettings={() => setSettingsModalOpen(true)}
+        />
+      )}
 
       {showRoster && (
       <ChatList
@@ -3104,21 +3155,85 @@ const Chat: React.FC = () => {
           }}
         />
       )}
-      {section === 'settings' && (
+      {narrowLayout && section === 'settings' && (
         <main className="section-host">
           <SettingsPanel
             username={currentDisplayName}
             avatarPath={currentAvatarPath}
             onClose={() => goToSection('chats')}
-            onOpenProfile={openOwnProfile}
+            onOpenProfile={openOwnProfileEdit}
             onDeleteAccount={handleDeleteSelf}
             onLogout={handleLogout}
           />
         </main>
       )}
 
+      {narrowLayout && section === 'people' && (
+        <main className="section-host">
+          <PeopleSection
+            currentUserId={currentUserId}
+            existingContactIds={users.map(u => u.id)}
+            onlineUserIds={onlineUsers}
+            onOpenChat={(user) => { handleStartChat(user); }}
+            onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
+            onAddContact={handleAddContact}
+            onClose={() => goToSection('chats')}
+          />
+        </main>
+      )}
+
+      {!narrowLayout && settingsModalOpen && (
+        <div className="modal-overlay" onClick={() => setSettingsModalOpen(false)}>
+          <div className="modal-card settings-modal" onClick={(e) => e.stopPropagation()}>
+            <SettingsPanel
+              username={currentDisplayName}
+              avatarPath={currentAvatarPath}
+              onClose={() => setSettingsModalOpen(false)}
+              onOpenProfile={openOwnProfileEdit}
+              onDeleteAccount={handleDeleteSelf}
+              onLogout={handleLogout}
+              closeMode="close"
+            />
+          </div>
+        </div>
+      )}
+
+      {!narrowLayout && tasksModalOpen && (
+        <div className="modal-overlay" onClick={() => setTasksModalOpen(false)}>
+          <div className="modal-card tasks-modal" onClick={(e) => e.stopPropagation()}>
+            <TasksPanel
+              currentUserId={currentUserId}
+              changeToken={tasksChangeToken}
+              onClose={() => setTasksModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {profilePreviewOpen && (
+        <UserInfoModal
+          user={{
+            id: currentUserId,
+            username: currentUsername,
+            display_name: currentDisplayName,
+            avatarPath: currentAvatarPath,
+            bio: currentBio,
+            phone: currentPhone,
+            department: currentDepartment,
+            position: currentPosition,
+            birthDate: currentBirthDate,
+          }}
+          online={socketConnected}
+          currentUserId={currentUserId}
+          ownProfilePreview
+          profileStatus={describeStatus(currentStatusPreset, currentStatusCustom)}
+          onEditProfile={openOwnProfileEdit}
+          onClose={() => setProfilePreviewOpen(false)}
+        />
+      )}
+
       {profileOpen && (
-        <div className="modal-overlay" onClick={() => setProfileOpen(false)}>
+        <div className="modal-overlay mobile-page-overlay" onClick={() => setProfileOpen(false)}>
           <div className="modal-card profile-modal" onClick={(e) => e.stopPropagation()}>
             <ProfileEdit
               currentUsername={currentUsername}
@@ -3138,7 +3253,11 @@ const Chat: React.FC = () => {
                 localStorage.setItem('statusCustom', custom || '');
               }}
               onBack={() => setProfileOpen(false)}
-              onSaved={handleProfileSaved}
+              onSaved={(profile) => {
+                handleProfileSaved(profile);
+                setProfileOpen(false);
+                setProfilePreviewOpen(true);
+              }}
               onAvatarChanged={handleAvatarChanged}
             />
           </div>
@@ -3198,7 +3317,7 @@ const Chat: React.FC = () => {
       )}
 
       {peopleOpen && (
-        <div className="modal-overlay" onClick={() => setPeopleOpen(false)}>
+        <div className="modal-overlay mobile-page-overlay" onClick={() => setPeopleOpen(false)}>
           <div className="modal-card people-modal" onClick={(e) => e.stopPropagation()}>
             <PeopleSection
               currentUserId={currentUserId}
@@ -3257,7 +3376,7 @@ const Chat: React.FC = () => {
       )}
 
       {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks'
-        && section !== 'documents' && section !== 'home' && (
+        && section !== 'documents' && section !== 'home' && section !== 'people' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>
@@ -3441,7 +3560,7 @@ const Chat: React.FC = () => {
       {/* Именно threadPaneOpen, а не сам activeThread: намерение открыть ветку
           сохраняется и тогда, когда для неё нет места, — иначе её нельзя было
           бы вернуть саму при расширении окна. Но РИСОВАТЬ панель в этот момент
-          нельзя: колонки под неё в гриде нет, и панель складывалась в 92px
+          нельзя: колонки под неё в гриде нет, и панель складывалась в ширину рельса
           поверх рельса (поймано при проверке). */}
       {/* Сведения о чате и профиль на десктопе живут в ПРАВОЙ ОБЛАСТИ, а не
           поверх переписки: их открывают, чтобы посмотреть и вернуться к делу,

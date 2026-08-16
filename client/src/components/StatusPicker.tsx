@@ -42,6 +42,11 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
   // выбирать дважды там, где почти всегда нужен сегодняшний или завтрашний день.
   const [until, setUntil] = useState('');
   const [saving, setSaving] = useState(false);
+  // Пресет теперь сначала только выбирается в окне. На сервер он уходит
+  // исключительно по кнопке «Установить», чтобы можно было спокойно примерить
+  // вариант и срок, не закрывая окно на первом клике.
+  const initialPreset = (statusPreset && STATUS_PRESETS[statusPreset as StatusPreset]) ? statusPreset as StatusPreset : null;
+  const [selectedPreset, setSelectedPreset] = useState<StatusPreset | null>(initialPreset);
 
   const expiryPayload = () => {
     // Указанный вручную момент побеждает длительность: он точнее, чем
@@ -73,9 +78,13 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
     }
   };
 
-  const submitCustomStatus = (e: React.FormEvent) => {
+  const submitStatus = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = customStatus.trim();
+    if (selectedPreset) {
+      saveStatus(selectedPreset, null);
+      return;
+    }
     if (trimmed) saveStatus(null, `${emoji} ${trimmed}`.trim());
   };
 
@@ -90,9 +99,12 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
             <button
               key={preset}
               type="button"
-              className={'status-preset-btn' + (statusPreset === preset ? ' is-active' : '')}
+              className={'status-preset-btn' + (selectedPreset === preset ? ' is-active' : '')}
               disabled={saving}
-              onClick={() => saveStatus(statusPreset === preset ? null : preset, null)}
+              onClick={() => {
+                setSelectedPreset(selectedPreset === preset ? null : preset);
+                if (selectedPreset !== preset) setCustomStatus('');
+              }}
             >
               <span className="status-preset-emoji">{STATUS_PRESETS[preset].emoji}</span>
               {STATUS_PRESETS[preset].label}
@@ -101,7 +113,7 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
         </div>
       </section>
 
-      <form className="status-custom-form" onSubmit={submitCustomStatus}>
+      <form className="status-custom-form" onSubmit={submitStatus}>
         <section className="status-picker-section">
           <div className="status-section-label">Свой статус</div>
           <div className="status-custom-field">
@@ -118,7 +130,7 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
               type="text"
               placeholder="Свой статус…"
               value={customStatus}
-              onChange={(e) => setCustomStatus(e.target.value)}
+              onChange={(e) => { setCustomStatus(e.target.value); setSelectedPreset(null); }}
               maxLength={58}
             />
           </div>
@@ -191,7 +203,7 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
         </section>
 
         <div className="status-actions">
-          <button type="submit" className="btn-primary" disabled={saving || !customStatus.trim()}>
+          <button type="submit" className="btn-primary" disabled={saving || (!selectedPreset && !customStatus.trim())}>
             Установить
           </button>
           {hasStatus && (

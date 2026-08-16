@@ -41,6 +41,10 @@ interface UserInfoModalProps {
   currentUserId: number;
   /** Открыть переписку на конкретном сообщении — из списка вложений. */
   onOpenMessage?: (chatId: string, messageId: number) => void;
+  /** Просмотр собственного публичного профиля: те же данные, что видят другие, без действий над собеседником. */
+  ownProfilePreview?: boolean;
+  profileStatus?: { emoji: string; label: string } | null;
+  onEditProfile?: () => void;
   onClose: () => void;
 }
 
@@ -68,7 +72,8 @@ const PLANNED_ACTIONS = [
 
 const UserInfoModal: React.FC<UserInfoModalProps> = ({
   user, online, notificationsMuted = false, onToggleNotifications,
-  canModerate, groups = [], comment, onUpdateComment, chatId, currentUserId, onOpenMessage, onClose,
+  canModerate, groups = [], comment, onUpdateComment, chatId, currentUserId, onOpenMessage,
+  ownProfilePreview = false, profileStatus = null, onEditProfile, onClose,
 }) => {
   const name = nameFor(user);
   const coverUrl = resolveUploadUrl(user.avatarPath);
@@ -166,13 +171,6 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
   return (
     <div className="modal-overlay modal-overlay-nested" onClick={onClose}>
       <div className="modal-card user-info-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="conv-head">
-          <div className="conv-title"><div className="settings-title">Профиль</div></div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-        </div>
-
         <div className="user-info-body">
           {/* Верх профиля целиком лежит НА фотографии: сверху она резкая, ниже
               уходит в размытие, и уже по размытому снимку идут имя, кнопки и
@@ -181,15 +179,28 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
           <div className={'user-info-top' + (coverUrl ? '' : ' has-no-photo')}>
             {coverUrl && <img className="user-info-cover-img" src={coverUrl} alt="" />}
             <div className="user-info-cover-fade" />
+            <div className="user-info-floating-head">
+              <button type="button" className="user-info-glass-btn" onClick={onClose} aria-label="Назад" title="Назад">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+              </button>
+              {onEditProfile && (
+                <button type="button" className="user-info-glass-btn" onClick={onEditProfile} aria-label="Редактировать профиль" title="Редактировать профиль">
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                </button>
+              )}
+            </div>
 
             <div className="user-info-top-content">
               {!coverUrl && (
                 <div className="user-info-cover-fallback"><Avatar name={name} avatarPath={null} size="md" /></div>
               )}
               <div className="user-info-name">{name}</div>
-              <div className={'user-info-status' + (online ? ' is-online' : '')}>{online ? 'в сети' : 'не в сети'}</div>
+              <div className={'user-info-status' + (online ? ' is-online' : '')}>
+                {profileStatus ? `${profileStatus.emoji} ${profileStatus.label}` : (online ? 'в сети' : 'не в сети')}
+              </div>
 
-              {/* Уведомления работают; остальные кнопки пока показывают статус разработки. */}
+              {/* В своём превью не показываем действия над собеседником: это именно публичный вид профиля. */}
+              {!ownProfilePreview && (
               <div className="user-info-actions">
                 {PLANNED_ACTIONS.map((action) => (
                   <button
@@ -211,6 +222,7 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
                   </button>
                 ))}
               </div>
+              )}
 
               <div className="user-info-fields">
             {user.groupName && (

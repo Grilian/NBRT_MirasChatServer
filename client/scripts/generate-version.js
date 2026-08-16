@@ -4,6 +4,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const packageJson = require('../package.json');
 
 function safeExec(cmd) {
   try {
@@ -21,7 +22,10 @@ const now = new Date();
 const pad = (n) => String(n).padStart(2, '0');
 const builtAt = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
+const appName = packageJson.productName || packageJson.name || 'MirasChat';
+
 const out = `// Автогенерируется scripts/generate-version.js перед build/start — не редактировать вручную.
+export const APP_NAME = ${JSON.stringify(appName)};
 export const APP_VERSION = ${JSON.stringify(version)};
 export const BUILT_AT = ${JSON.stringify(builtAt)};
 `;

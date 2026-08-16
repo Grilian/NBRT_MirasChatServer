@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { APP_NAME } from '../version';
 
 // Рендерится только внутри Electron (window.electronAPI появляется из preload.js).
 // В обычной веб-версии этот файл просто не монтируется — родной хром браузера остаётся как есть.
@@ -16,7 +17,7 @@ export default function TitleBar() {
     <div className="titlebar">
       <div className="titlebar-brand">
         <span className="roundel roundel-sm">М</span>
-        <span className="titlebar-title">MirasChat</span>
+        <span className="titlebar-title">{APP_NAME}</span>
       </div>
       <div className="titlebar-controls">
         <button

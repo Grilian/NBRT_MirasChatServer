@@ -5,6 +5,7 @@ import { nameFor } from '../utils/user';
 import { resolveUploadUrl } from '../utils/uploads';
 import ImageLightbox from './ImageLightbox';
 import StatusPicker from './StatusPicker';
+import ProfilePhotoEditor from './ProfilePhotoEditor';
 import {
   isValidLogin, isValidPassword, isValidDisplayName, isValidPhone,
   LOGIN_HINT, PASSWORD_HINT,
@@ -64,6 +65,7 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [photoEditorFile, setPhotoEditorFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Сам выбор статуса живёт в StatusPicker: его же открывают отдельным листом
@@ -82,11 +84,17 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
 
   const handleAvatarPick = () => fileInputRef.current?.click();
 
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    // Сначала человек кадрирует фотографию в реальном макете профиля.
+    // На сервер уходит уже подготовленный JPEG, а не исходник с телефона.
+    setPhotoEditorFile(file);
+  };
 
+  const uploadPreparedAvatar = async (file: File) => {
+    setPhotoEditorFile(null);
     setAvatarBusy(true);
     setError('');
     try {
@@ -120,6 +128,27 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    const hasFormChanges = (
+      username !== currentUsername
+      || displayName !== currentDisplayName
+      || bio !== currentBio
+      || phone !== currentPhone
+      || position !== currentPosition
+      || birthDate !== currentBirthDate
+      || !!newPassword
+    );
+
+    // «Сохранить» без изменений — это по сути «готово»: никаких запросов и
+    // требования пароля, просто возвращаемся к просмотру своего профиля.
+    if (!hasFormChanges) {
+      onSaved({
+        username: currentUsername, display_name: currentDisplayName, avatar_path: avatarPath,
+        bio: currentBio, phone: currentPhone, department: departmentName || currentDepartment,
+        position: currentPosition, birth_date: currentBirthDate,
+      });
+      return;
+    }
 
     if (!currentPassword) {
       setError('Введите текущий пароль для подтверждения');
@@ -184,24 +213,32 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
       </div>
 
       <div className="settings-body">
-        <div className="profile-avatar-section">
-          {/* Клик по самому аватару открывает фото, а не выбор файла: сменить
-              его есть чем ниже, а посмотреть своё фото целиком было нечем. */}
-          <button
-            type="button"
-            className="profile-avatar-btn"
-            onClick={() => (avatarPath ? setAvatarPreview(true) : handleAvatarPick())}
-            disabled={avatarBusy}
-            aria-label={avatarPath ? 'Открыть фото' : 'Добавить фото'}
-          >
-            <Avatar name={nameFor({ username, display_name: displayName })} avatarPath={avatarPath} />
-          </button>
-          <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarChange} style={{ display: 'none' }} />
-          <div className="profile-avatar-name">{displayName || username}</div>
-          <div className="profile-avatar-username">@{username}</div>
-          <div className="profile-avatar-actions">
-            <button type="button" onClick={handleAvatarPick} disabled={avatarBusy}>Сменить фото</button>
-            {avatarPath && <button type="button" onClick={handleAvatarRemove} disabled={avatarBusy}>Убрать</button>}
+        <div className={'profile-avatar-section' + (avatarPath ? ' has-photo' : '')}>
+          {avatarPath && (
+            <button
+              type="button"
+              className="profile-edit-cover"
+              onClick={() => setAvatarPreview(true)}
+              disabled={avatarBusy}
+              aria-label="Открыть фото"
+            >
+              <img src={resolveUploadUrl(avatarPath) || ''} alt="" />
+            </button>
+          )}
+          <div className="profile-edit-cover-fade" />
+          <div className="profile-avatar-content">
+            {!avatarPath && (
+              <button type="button" className="profile-avatar-btn" onClick={handleAvatarPick} disabled={avatarBusy} aria-label="Добавить фото">
+                <Avatar name={nameFor({ username, display_name: displayName })} avatarPath={null} />
+              </button>
+            )}
+            <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarChange} style={{ display: 'none' }} />
+            <div className="profile-avatar-name">{displayName || username}</div>
+            <div className="profile-avatar-username">@{username}</div>
+            <div className="profile-avatar-actions">
+              <button type="button" onClick={handleAvatarPick} disabled={avatarBusy}>Сменить фото</button>
+              {avatarPath && <button type="button" onClick={handleAvatarRemove} disabled={avatarBusy}>Убрать</button>}
+            </div>
           </div>
         </div>
 
@@ -250,7 +287,7 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
           </div>
           <div className="field">
             <label>Текущий пароль</label>
-            <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Для подтверждения изменений" required />
+            <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Только если что-то меняете" />
           </div>
 
           {error && <p className="form-error">{error}</p>}
@@ -261,6 +298,16 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
           </button>
         </form>
       </div>
+
+      {photoEditorFile && (
+        <ProfilePhotoEditor
+          file={photoEditorFile}
+          displayName={displayName}
+          username={username}
+          onCancel={() => setPhotoEditorFile(null)}
+          onApply={uploadPreparedAvatar}
+        />
+      )}
 
       {avatarPreview && avatarPath && (
         <ImageLightbox url={resolveUploadUrl(avatarPath) || ''} onClose={() => setAvatarPreview(false)} />

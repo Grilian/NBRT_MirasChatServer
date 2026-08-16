@@ -20,7 +20,7 @@ import {
 /** Ширины областей, px. Подобраны замером реальной вёрстки, а не «на глаз». */
 export const LAYOUT_SIZES = {
   /** Рельс разделов — фиксированный, см. .chat-layout в theme.css. */
-  navRail: 92,
+  navRail: 68,
   /** Пределы полного списка чатов — те же, что у ручного изменения ширины. */
   rosterMin: ROSTER_MIN_WIDTH,
   rosterMax: ROSTER_MAX_WIDTH,

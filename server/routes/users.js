@@ -19,12 +19,15 @@ const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
 fs.mkdirSync(AVATARS_DIR, { recursive: true });
 
 const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
-const AVATAR_MAX_DIMENSION = 320; // сторона квадрата — достаточно для круглого аватара, не для полноэкранного фото
-const AVATAR_JPEG_QUALITY = 80;
+const PROFILE_PHOTO_MAX_WIDTH = 1200;
+const PROFILE_PHOTO_MAX_HEIGHT = 1600;
+const AVATAR_JPEG_QUALITY = 85;
 
-// Буфер в памяти, а не сразу на диск — файл нужно сначала прогнать через
-// sharp (телефоны присылают многомегабайтные фото, а нужен маленький
-// сжатый квадрат), и только потом сохранить готовый результат.
+// Буфер в памяти, а не сразу на диск — файл сначала прогоняем через sharp.
+// avatar_path теперь используется не только маленьким круглым аватаром, но и
+// вертикальным hero-фото профиля. Поэтому больше НЕ режем файл в квадрат:
+// сохраняем его пропорции, только ограничиваем размер и качество. Круглый
+// Avatar сам берёт центральный квадрат через object-fit: cover.
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
@@ -327,9 +330,10 @@ router.put('/me/status', verifyToken, (req, res) => {
   }
 });
 
-// Загрузить/заменить свой аватар — сжимаем и обрезаем в квадрат перед
-// сохранением, вместо того чтобы хранить исходник как есть (с телефонов
-// приходят многомегабайтные фото на маленький круглый аватар).
+// Загрузить/заменить фото профиля. Новый клиент заранее готовит вертикальный
+// кадр 3:4, но сервер всё равно не доверяет размеру входа: поворачивает по EXIF,
+// ограничивает габариты и перекодирует в JPEG. В квадрат здесь НЕ режем — один
+// файл нужен и полному профилю, и круглому аватару.
 router.post('/me/avatar', verifyToken, (req, res) => {
   avatarUpload.single('avatar')(req, res, async (err) => {
     if (err) {
@@ -344,8 +348,13 @@ router.post('/me/avatar', verifyToken, (req, res) => {
       const outputPath = path.join(userStorage.userDir(req.userId, 'avatar'), filename);
 
       await sharp(req.file.buffer)
-        .rotate() // на случай EXIF-ориентации с телефонных камер — иначе кроп в квадрат может уйти боком
-        .resize(AVATAR_MAX_DIMENSION, AVATAR_MAX_DIMENSION, { fit: 'cover' })
+        .rotate() // учитываем EXIF-ориентацию с телефонных камер
+        .resize({
+          width: PROFILE_PHOTO_MAX_WIDTH,
+          height: PROFILE_PHOTO_MAX_HEIGHT,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
         .jpeg({ quality: AVATAR_JPEG_QUALITY })
         .toFile(outputPath);
 

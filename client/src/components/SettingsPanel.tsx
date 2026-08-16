@@ -16,7 +16,7 @@ import { isNativeMobile } from '../utils/mobileNotify';
 import { playIncomingSound } from '../utils/sound';
 import { formatMoscowDateTime } from '../utils/time';
 import { MobileUpdateInfo, checkMobileUpdate, mobileVersionName, openMobileUpdate } from '../utils/mobileUpdate';
-import { APP_VERSION, BUILT_AT } from '../version';
+import { APP_NAME, APP_VERSION, BUILT_AT } from '../version';
 import AndroidQrModal from './AndroidQrModal';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
@@ -28,6 +28,8 @@ interface SettingsPanelProps {
   onOpenProfile: () => void;
   onDeleteAccount: () => void;
   onLogout: () => void;
+  /** В модалке десктопа закрываем крестиком; полноэкранный мобильный раздел — стрелкой назад. */
+  closeMode?: 'back' | 'close';
 }
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -37,7 +39,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 ];
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
-  username, avatarPath, onClose, onOpenProfile, onDeleteAccount, onLogout
+  username, avatarPath, onClose, onOpenProfile, onDeleteAccount, onLogout, closeMode = 'back'
 }) => {
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
@@ -165,10 +167,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   return (
     <div className="settings-panel">
       <div className="conv-head">
-        <button type="button" className="icon-btn back-btn" onClick={onClose} aria-label="Назад" style={{ display: 'inline-flex' }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
-        </button>
+        {closeMode === 'back' && (
+          <button type="button" className="icon-btn back-btn" onClick={onClose} aria-label="Назад" style={{ display: 'inline-flex' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
+          </button>
+        )}
         <div className="conv-title"><div className="settings-title">Настройки</div></div>
+        {closeMode === 'close' && (
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        )}
       </div>
 
       <div className="settings-body">
@@ -475,7 +484,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             строка обновления, и человеку есть с чем сравнить. Хэш сборки
             остаётся в вебе — там номера версии просто нет, а знать, какой
             коммит раскатан, всё равно нужно (см. README, проверка деплоя). */}
-        <div className="app-version">MirasChat {appVersion ?? APP_VERSION} · {BUILT_AT}</div>
+        <div className="app-version">{APP_NAME} {appVersion ?? APP_VERSION} · {BUILT_AT}</div>
       </div>
     </div>
   );
