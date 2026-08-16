@@ -25,6 +25,8 @@ test('sets a preset status through the server and updates the UI state', async (
   );
 
   fireEvent.click(screen.getByRole('button', { name: /В отпуске/ }));
+  expect(put).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Установить' }));
   await waitFor(() => expect(put).toHaveBeenCalledWith('/users/me/status', expect.objectContaining({
     status_preset: 'vacation',
     status_custom: null,
@@ -43,7 +45,7 @@ test('removes an active status through the server', async () => {
     />,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: 'Убрать статус' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Снять статус' }));
   await waitFor(() => expect(put).toHaveBeenCalledWith('/users/me/status', {
     status_preset: null,
     status_custom: null,

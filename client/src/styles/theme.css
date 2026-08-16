@@ -3909,11 +3909,32 @@ button.app-menu-item:disabled { opacity: .42; cursor: default; }
    а навигация и редактирование лежат поверх него. */
 .user-info-modal { width: min(440px, calc(100vw - 48px)); max-width: 440px; max-height: min(860px, 92vh); background: var(--paper-raised); }
 .user-info-modal .user-info-body { padding: 0 0 22px; align-items: stretch; text-align: left; gap: 0; }
-.user-info-modal .user-info-top { width: 100%; margin: 0 0 14px; min-height: 590px; border-radius: 0; background: linear-gradient(160deg, #202b36, #111820); }
-.user-info-modal .user-info-cover-img { object-position: center center; }
+.user-info-modal .user-info-top {
+  width: 100%; margin: 0 0 14px; min-height: 590px; border-radius: 0;
+  background: linear-gradient(180deg, #151c23 0%, #10161d 100%);
+}
+/* ВАЖНО: файл редактора уже сохранён строго в 3:4. Публичный профиль не
+   должен снова растягивать этот кадр на фактическую высоту содержимого:
+   у чужого профиля есть ряд действий, поэтому .user-info-top выше, чем в
+   собственном preview, и прежний height:100% + object-fit:cover незаметно
+   делал дополнительный zoom/crop. Фото теперь всегда занимает отдельный
+   неизменный кадр 3:4; всё, что не помещается, продолжается ниже на тёмной
+   подложке, но сам результат редактора остаётся пиксель-в-пиксель тем же. */
+.user-info-modal .user-info-cover-img {
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: center center;
+}
 .user-info-modal .user-info-cover-fade {
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
   backdrop-filter: none; -webkit-mask-image: none; mask-image: none;
-  background: linear-gradient(to bottom, rgba(4,8,12,.08) 0%, rgba(4,8,12,.08) 36%, rgba(4,8,12,.48) 63%, rgba(4,8,12,.92) 100%);
+  background: linear-gradient(to bottom, rgba(4,8,12,.04) 0%, rgba(4,8,12,.06) 38%, rgba(4,8,12,.42) 66%, rgba(4,8,12,.90) 100%);
 }
 .user-info-floating-head {
   position: absolute; z-index: 3; top: 16px; left: 16px; right: 16px;
@@ -4116,4 +4137,350 @@ button.app-menu-item:disabled { opacity: .42; cursor: default; }
   .photo-editor-mini-card { height: 82px; }
   .photo-editor-mini-circle { width: 56px; height: 56px; }
   .photo-editor-mini-profile { width: 48px; }
+}
+
+/* ===== 2026-08 grouped app menu + compact status editor ===== */
+.app-menu-profile {
+  padding: 17px 16px 14px;
+  border-bottom: none;
+  background:
+    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 50%),
+    var(--paper-raised);
+}
+.app-menu-profile-meta {
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+.app-menu-profile-meta span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-menu-status,
+.app-menu-status-label { display: none; }
+.app-menu-items {
+  padding: 7px 10px 8px;
+  gap: 0;
+}
+.app-menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+}
+.app-menu-separator {
+  height: 1px;
+  margin: 5px 10px;
+  background: color-mix(in srgb, var(--line) 82%, transparent);
+}
+.app-menu-item {
+  min-height: 43px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  gap: 10px;
+}
+.app-menu-item-icon {
+  width: 31px;
+  height: 31px;
+  border-radius: 9px;
+  background: transparent;
+}
+.app-menu-item-icon svg { width: 20px; height: 20px; stroke-width: 2; }
+.app-menu-item-icon.is-chats { color: #4aa7f3; background: color-mix(in srgb, #4aa7f3 10%, transparent); }
+.app-menu-item-icon.is-status { color: #43c875; background: color-mix(in srgb, #43c875 10%, transparent); }
+.app-menu-item-icon.is-bookmarks { color: #ef5577; background: color-mix(in srgb, #ef5577 10%, transparent); }
+.app-menu-item-icon.is-tasks { color: #f29b45; background: color-mix(in srgb, #f29b45 10%, transparent); }
+.app-menu-item-icon.is-apps { color: #549df2; background: color-mix(in srgb, #549df2 10%, transparent); }
+.app-menu-item-icon.is-groups { color: #b56ce6; background: color-mix(in srgb, #b56ce6 10%, transparent); }
+.app-menu-item-icon.is-contacts { color: #48c978; background: color-mix(in srgb, #48c978 10%, transparent); }
+.app-menu-item-icon.is-calls { color: #459ee8; background: color-mix(in srgb, #459ee8 10%, transparent); }
+.app-menu-item-icon.is-favorites { color: #ed5877; background: color-mix(in srgb, #ed5877 10%, transparent); }
+.app-menu-item-icon.is-settings { color: #91a0b1; background: color-mix(in srgb, #91a0b1 9%, transparent); }
+.app-menu-item-icon.is-theme { color: #94a3b7; background: color-mix(in srgb, #94a3b7 9%, transparent); }
+.app-menu-item-body > span { font-size: 13.5px; font-weight: 560; }
+.app-menu-item-body small {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+}
+.app-menu-footer {
+  padding: 12px 17px 15px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--paper) 72%, transparent), var(--paper));
+}
+
+/* StatusPicker uses one DOM structure everywhere. Container queries let the
+   standalone dialog use two compact cards while the same component inside
+   profile settings collapses to one column without a second mobile markup. */
+.status-sheet {
+  max-width: 650px;
+  width: min(650px, calc(100vw - 24px));
+}
+.status-sheet-body { padding: 13px; }
+.status-picker {
+  width: 100%;
+  container-type: inline-size;
+}
+.status-picker-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.status-status-card,
+.status-expiry-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--paper-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .055), inset 0 1px 0 color-mix(in srgb, #fff 3%, transparent);
+}
+.status-status-card { position: relative; padding: 12px; }
+.status-expiry-card { padding: 13px; }
+.status-card-kicker {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+.status-current-block {
+  padding-bottom: 11px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.status-current-value {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.status-current-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+.status-current-dot.is-custom {
+  background: #39c870;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #39c870 12%, transparent);
+}
+.status-list-title,
+.status-expiry-title {
+  margin: 0 0 7px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 680;
+}
+.status-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.status-preset-row,
+.status-custom-row {
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  display: grid;
+  grid-template-columns: 29px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 7px 4px 5px;
+  text-align: left;
+  font: 540 12.5px/1.2 var(--font-ui);
+  transition: background var(--ease), border-color var(--ease), transform .12s ease, box-shadow var(--ease);
+}
+button.status-preset-row { cursor: pointer; }
+.status-preset-row:hover,
+.status-custom-row:focus-within {
+  background: var(--row-hover);
+}
+.status-preset-row.is-active,
+.status-custom-row.is-active {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--paper-raised));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.status-preset-row:active { transform: scale(.992); }
+.status-preset-row-icon,
+.status-custom-emoji {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 16px;
+  line-height: 1;
+}
+.status-custom-emoji { cursor: pointer; }
+.status-preset-check {
+  justify-self: center;
+  color: var(--accent);
+  opacity: 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+.status-preset-row.is-active .status-preset-check,
+.status-custom-row.is-active .status-preset-check { opacity: 1; }
+.status-custom-row input {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: 540 12.5px/1.2 var(--font-ui);
+}
+.status-custom-row input::placeholder { color: var(--ink-faint); font-weight: 450; }
+.status-emoji-popover {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 64px;
+  z-index: 9;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  box-shadow: 0 18px 38px rgba(0,0,0,.28);
+  overflow: hidden;
+}
+.status-status-card.has-emoji-popover { padding-bottom: 56px; }
+.status-emoji-popover .emoji-picker { max-height: 220px; }
+.status-install-button {
+  width: 100%;
+  min-height: 39px;
+  margin-top: 11px;
+  border-radius: 10px;
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.status-remove-button {
+  width: 100%;
+  margin-top: 5px;
+  padding: 7px 8px 2px;
+  border: none;
+  background: transparent;
+  color: var(--ink-muted);
+  font: 540 11.5px/1.2 var(--font-ui);
+  cursor: pointer;
+}
+.status-remove-button:hover { color: var(--danger, #e35f67); }
+.status-error {
+  margin-top: 7px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: color-mix(in srgb, #d85b66 11%, transparent);
+  color: #d96a73;
+  font-size: 11px;
+}
+.status-expiry-inline-hint {
+  margin-top: 8px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.status-expiry-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-expiry-option {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 9px;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.status-expiry-option:hover { background: var(--row-hover); color: var(--ink); }
+.status-expiry-option.is-active { color: var(--ink); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.status-expiry-option input { position: absolute; opacity: 0; pointer-events: none; }
+.status-radio-mark {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1.5px solid color-mix(in srgb, var(--ink-muted) 58%, transparent);
+  border-radius: 50%;
+}
+.status-expiry-option.is-active .status-radio-mark { border-color: var(--accent); }
+.status-expiry-option.is-active .status-radio-mark::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.status-custom-date {
+  margin-top: 8px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+.status-custom-date input[type="datetime-local"] {
+  width: 100%;
+  height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 12px/1 var(--font-ui);
+}
+.status-custom-date input[type="datetime-local"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent);
+}
+.status-custom-date .status-expiry-hint {
+  margin: 6px 1px 0;
+  font-size: 10.5px;
+}
+.status-existing-expiry {
+  margin-top: 9px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: var(--paper-sunken);
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+@container (min-width: 520px) {
+  .status-picker-layout {
+    grid-template-columns: minmax(0, 1.2fr) minmax(188px, .8fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .status-sheet {
+    width: calc(100vw - 14px);
+    max-height: calc(100dvh - 14px);
+    border-radius: 18px;
+  }
+  .status-sheet-head { min-height: 61px; padding: 10px 12px 9px 15px; }
+  .status-sheet-body { padding: 9px; overflow-y: auto; }
+  .status-status-card,
+  .status-expiry-card { border-radius: 13px; }
 }
