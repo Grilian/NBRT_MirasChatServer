@@ -4,7 +4,6 @@ import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
 import { formatDate } from '../utils/time';
 import { describeStatus } from '../utils/statusMeta';
-import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 
 export interface DirectoryUser {
   id: number;
@@ -23,7 +22,6 @@ interface PeopleSectionProps {
   currentUserId: number;
   existingContactIds: number[];
   onlineUserIds: number[];
-  customEmoji?: CustomEmojiMap;
   onOpenChat: (user: DirectoryUser) => void;
   onOpenUserInfo: (userId: number) => void;
   onAddContact: (user: DirectoryUser) => void;
@@ -52,7 +50,7 @@ function pluralPeople(n: number): string {
 // экран и с группировкой по подразделениям: из рельса им пользуются не чтобы
 // быстро начать чат, а чтобы посмотреть, кто вообще есть в организации.
 const PeopleSection: React.FC<PeopleSectionProps> = ({
-  currentUserId, existingContactIds, onlineUserIds, customEmoji = {}, onOpenChat, onOpenUserInfo, onAddContact, onClose
+  currentUserId, existingContactIds, onlineUserIds, onOpenChat, onOpenUserInfo, onAddContact, onClose
 }) => {
   const [users, setUsers] = useState<DirectoryUser[]>([]);
   const [query, setQuery] = useState('');
@@ -159,11 +157,9 @@ const PeopleSection: React.FC<PeopleSectionProps> = ({
                     <div className="row-top">
                       <div className="row-name"><span>{nameFor(user)}</span></div>
                       {(() => {
-                        const status = describeStatus(user.status_preset, user.status_custom, customEmoji);
+                        const status = describeStatus(user.status_preset, user.status_custom);
                         return status && (
-                          <span className="people-tag is-status" title={status.label}>
-                            {renderTextWithEmoji(`${status.emoji} ${status.label}`, customEmoji, `people-status-${user.id}`)}
-                          </span>
+                          <span className="people-tag is-status" title={status.label}>{status.emoji} {status.label}</span>
                         );
                       })()}
                     </div>

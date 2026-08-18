@@ -7,7 +7,6 @@ import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountM
 import { resolveUploadUrl } from '../utils/uploads';
 import { acquireStandardKeyboardResizeMode } from '../utils/mobileKeyboard';
 import ChatAttachments from './ChatAttachments';
-import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 
 interface UserInfoModalProps {
   user: {
@@ -45,7 +44,6 @@ interface UserInfoModalProps {
   /** Просмотр собственного публичного профиля: те же данные, что видят другие, без действий над собеседником. */
   ownProfilePreview?: boolean;
   profileStatus?: { emoji: string; label: string } | null;
-  customEmoji?: CustomEmojiMap;
   onEditProfile?: () => void;
   onClose: () => void;
 }
@@ -75,7 +73,7 @@ const PLANNED_ACTIONS = [
 const UserInfoModal: React.FC<UserInfoModalProps> = ({
   user, online, notificationsMuted = false, onToggleNotifications,
   canModerate, groups = [], comment, onUpdateComment, chatId, currentUserId, onOpenMessage,
-  ownProfilePreview = false, profileStatus = null, customEmoji = {}, onEditProfile, onClose,
+  ownProfilePreview = false, profileStatus = null, onEditProfile, onClose,
 }) => {
   const name = nameFor(user);
   const coverUrl = resolveUploadUrl(user.avatarPath);
@@ -198,9 +196,7 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
               )}
               <div className="user-info-name">{name}</div>
               <div className={'user-info-status' + (online ? ' is-online' : '')}>
-                {profileStatus
-                  ? renderTextWithEmoji(`${profileStatus.emoji} ${profileStatus.label}`, customEmoji, 'profile-status')
-                  : (online ? 'в сети' : 'не в сети')}
+                {profileStatus ? `${profileStatus.emoji} ${profileStatus.label}` : (online ? 'в сети' : 'не в сети')}
               </div>
 
               {/* В своём превью не показываем действия над собеседником: это именно публичный вид профиля. */}

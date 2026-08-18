@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
-import { CustomEmoji, CustomEmojiImage, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
+import { resolveUploadUrl } from '../utils/uploads';
+import { CustomEmoji, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
 import { PickedCustomEmoji } from './EmojiComposerField';
 import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
@@ -30,6 +31,10 @@ interface EmojiPickerProps {
    * вложенных контейнера с двумя независимыми обработчиками закрытия.
    */
   embedded?: boolean;
+  /** Готовые паки для мест со своим API (например, панели супер-админа). */
+  packsOverride?: EmojiPack[];
+  /** Shortcodes уже выбранных картинок — подсвечиваются в общей сетке. */
+  selectedCustomEmoji?: string[];
 }
 
 // Кэш только чтобы не мигать пустой панелью на каждое открытие (компонент
@@ -52,18 +57,28 @@ export const invalidateEmojiPackCache = () => { cachedPacks = null; };
 
 const EmojiPicker: React.FC<EmojiPickerProps> = ({
   onPick, onClose, mobilePanel = false, mobileHeight, embedded = false,
+  packsOverride, selectedCustomEmoji = [],
 }) => {
-  const [packs, setPacks] = useState<EmojiPack[]>(cachedPacks || []);
+  const [loadedPacks, setLoadedPacks] = useState<EmojiPack[]>(cachedPacks || []);
   const [activePack, setActivePack] = useState(0);
-  const [loading, setLoading] = useState(!cachedPacks);
+  const [loading, setLoading] = useState(!cachedPacks && !packsOverride);
   const rootRef = useRef<HTMLDivElement>(null);
+  const packs = packsOverride || loadedPacks;
 
   useEffect(() => {
+    if (packsOverride) {
+      setLoading(false);
+      return;
+    }
     api.get('/emoji')
-      .then(({ data }) => { cachedPacks = data; setPacks(data); })
-      .catch(() => { if (!cachedPacks) setPacks([]); })
+      .then(({ data }) => { cachedPacks = data; setLoadedPacks(data); })
+      .catch(() => { if (!cachedPacks) setLoadedPacks([]); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [packsOverride]);
+
+  useEffect(() => {
+    if (activePack >= packs.length) setActivePack(0);
+  }, [activePack, packs.length]);
 
   // Закрытие по клику мимо и по Escape. Клик по самой кнопке-смайлику в
   // composer'е сюда не долетает — она останавливает всплытие и переключает
@@ -109,12 +124,9 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
                   телефоне вкладки от них не помещались. Название осталось в
                   подсказке и в aria-label — для мыши и для читалки. */}
               <span className="emoji-tab-icon">
-                {pack.custom?.[0]
-                  ? <CustomEmojiImage
-                      filePath={pack.custom[0].file_path}
-                      fallback={pack.custom[0].fallback || pack.emoji[0] || DEFAULT_EMOJI_FALLBACK}
-                    />
-                  : (pack.emoji[0] || DEFAULT_EMOJI_FALLBACK)}
+                {pack.emoji[0] || (pack.custom?.[0]
+                  ? <img className="custom-emoji" src={resolveUploadUrl(pack.custom[0].file_path) || ''} alt="" />
+                  : '🙂')}
               </span>
             </button>
           ))}
@@ -132,7 +144,8 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
           <button
             key={`c${item.id}`}
             type="button"
-            className="emoji-cell"
+            className={'emoji-cell' + (selectedCustomEmoji.includes(`:${item.name}:`) ? ' is-selected' : '')}
+            aria-pressed={selectedCustomEmoji.includes(`:${item.name}:`)}
             title={`:${item.name}:`}
             onMouseDown={(e) => e.preventDefault()}
             // В сообщение всё равно уходит код, а не картинка — формат хранения
@@ -144,15 +157,10 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
               fallback: item.fallback || DEFAULT_EMOJI_FALLBACK,
             })}
           >
-            <CustomEmojiImage
-              filePath={item.file_path}
-              fallback={item.fallback || DEFAULT_EMOJI_FALLBACK}
-            />
+            <img className="custom-emoji" src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
           </button>
         ))}
-        {/* Системный набор показываем только как резерв, если в выбранном
-            паке вообще нет загруженных изображений. */}
-        {!current?.custom?.length && current?.emoji.map((emoji, index) => (
+        {current?.emoji.map((emoji, index) => (
           <button
             key={`${emoji}-${index}`}
             type="button"

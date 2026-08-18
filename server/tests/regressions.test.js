@@ -285,21 +285,24 @@ test('client message ids are idempotent per sender', () => {
   assert.doesNotThrow(() => insert.run(otherSenderId, 'msg_queue_test_123456'));
 });
 
-test('reaction settings use uploaded emoji shortcodes and reject unknown values', () => {
+test('reaction settings accept the full uploaded selection without a 12-item limit', () => {
   db.prepare("DELETE FROM app_settings WHERE key = 'reaction_emoji'").run();
   const packId = db.prepare(
     'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, ?, 1, ?)'
-  ).run('Reaction test pack', 999, Date.now()).lastInsertRowid;
-  db.prepare(`
+  ).run('Unlimited reactions test', 999, Date.now()).lastInsertRowid;
+  const insert = db.prepare(`
     INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, retired, position)
-    VALUES (?, '', ?, ?, ?, 0, 0)
-  `).run(packId, 'ink_like', '/uploads/emoji/ink_like.webp', '👍');
+    VALUES (?, '', ?, ?, ?, 0, ?)
+  `);
+  const tokens = [];
+  for (let index = 0; index < 15; index += 1) {
+    const name = `reaction_test_${index}`;
+    insert.run(packId, name, `/uploads/emoji/${name}.webp`, index === 0 ? '👍' : '🙂', index);
+    tokens.push(`:${name}:`);
+  }
 
-  assert.equal(getReactionEmoji()[0], ':ink_like:');
-  assert.deepEqual(
-    setReactionEmoji([':ink_like:', ':missing:', '👍', ':ink_like:']),
-    [':ink_like:'],
-  );
+  assert.equal(getReactionEmoji()[0], ':reaction_test_0:');
+  assert.deepEqual(setReactionEmoji([...tokens, ':missing:']), tokens);
   assert.equal(isValidEmoji(`:${'a'.repeat(32)}:`), true);
   assert.equal(isValidEmoji(`:${'a'.repeat(33)}:`), false);
 });

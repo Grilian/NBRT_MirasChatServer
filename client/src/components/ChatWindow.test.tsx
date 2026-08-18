@@ -176,50 +176,6 @@ describe('ChatWindow строка под пузырём', () => {
     expect(row.querySelector(':scope > .thread-link')).toBeInTheDocument();
   });
 
-  test('загруженный смайлик рисуется картинкой в реакции, меню и списке людей', () => {
-    const customEmoji = {
-      ink_like: { filePath: '/uploads/emoji/ink_like.webp', fallback: '👍' },
-    };
-    const reaction = {
-      emoji: ':ink_like:',
-      created_at: Date.now(),
-      user: { id: 2, username: 'user', display_name: null, avatar_path: null },
-    };
-    const { container, unmount } = render(
-      <ChatWindow
-        chatId="group_1"
-        messages={[{ ...message, file_path: null, reactions: [reaction] }]}
-        currentUserId={1}
-        customEmoji={customEmoji}
-        reactionEmoji={[':ink_like:']}
-        onToggleReaction={() => {}}
-        onStartEdit={() => {}}
-        onDeleteMessage={() => {}}
-      />,
-    );
-
-    expect(container.querySelector('.reaction-chip-emoji img.custom-emoji')?.getAttribute('src'))
-      .toContain('/uploads/emoji/ink_like.webp');
-
-    const row = container.querySelector('[data-msg-id="1"]') as HTMLElement;
-    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
-    expect(container.querySelector('.msg-menu-reaction img.custom-emoji')).toBeInTheDocument();
-
-    unmount();
-    const details = render(
-      <ChatWindow
-        chatId="group_1"
-        messages={[{ ...message, file_path: null, reactions: [reaction] }]}
-        currentUserId={1}
-        customEmoji={customEmoji}
-        onStartEdit={() => {}}
-        onDeleteMessage={() => {}}
-      />,
-    );
-    fireEvent.click(details.container.querySelector('.reaction-chip') as HTMLElement);
-    expect(details.container.querySelector('.reaction-row-emoji img.custom-emoji')).toBeInTheDocument();
-  });
-
   test('без реакций и без веток лишний ряд не создаётся', () => {
     const { container } = render(
       <ChatWindow

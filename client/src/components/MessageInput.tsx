@@ -143,23 +143,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const docInputRef = useRef<HTMLInputElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
-  const resumeKeyboardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /**
-   * Android не обязан сохранять согласованное состояние WebView и IME через
-   * блокировку экрана. Поэтому нижнюю поверхность не восстанавливаем вслепую:
-   * фон всегда закрывает и app-панель, и клавиатуру, а следующий тап откроет
-   * ровно один выбранный режим заново.
-   */
-  const resetMobileInputAfterLifecycle = useCallback(() => {
-    keyboardHideIntentRef.current = 'close';
-    keyboardHideIntentUntilRef.current = 0;
-    richRef.current?.blur();
-    textareaRef.current?.blur();
-    setMobileEmojiVisible(false);
-    setMobileMode('closed');
-    hideMobileKeyboard();
-  }, [setMobileEmojiVisible, setMobileMode]);
 
   useEffect(() => {
     if (!autoFocus || disabled) return;
@@ -214,41 +197,19 @@ const MessageInput: React.FC<MessageInputProps> = ({
   useEffect(() => {
     if (!isNativeMobile) return undefined;
     const releaseResizeMode = acquireChatKeyboardResizeMode();
-    // После блокировки/разблокировки Android может восстановить manifest resize
-    // mode уже ПОСЛЕ onResume. Одного вызова здесь было недостаточно: WebView
-    // успевал перейти в adjustResize, React одновременно сохранял отступ под
-    // app-панель, и чат получал двойную высоту клавиатуры.
+    // После блокировки/разблокировки Android может восстановить manifest resize mode уже после
+    // onResume. Повторяем overlay-команду из JS; нативный плагин дополнительно делает то же сам.
     const listenerPromise = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (resumeKeyboardTimerRef.current !== null) {
-        clearTimeout(resumeKeyboardTimerRef.current);
-        resumeKeyboardTimerRef.current = null;
-      }
-
-      resetMobileInputAfterLifecycle();
-      if (!isActive) return;
-
-      refreshMobileKeyboardResizeMode();
-      // Второй проход — после того, как Activity и WebView закончат resume.
-      // Если человек уже успел явно открыть поле, его новый режим не закрываем.
-      resumeKeyboardTimerRef.current = setTimeout(() => {
-        resumeKeyboardTimerRef.current = null;
-        refreshMobileKeyboardResizeMode();
-        if (mobileInputModeRef.current === 'closed') {
-          richRef.current?.blur();
-          textareaRef.current?.blur();
-          hideMobileKeyboard();
-        }
-      }, 250);
+      if (isActive) refreshMobileKeyboardResizeMode();
     });
     const restoreOverlayAfterRotation = () => refreshMobileKeyboardResizeMode();
     window.addEventListener('orientationchange', restoreOverlayAfterRotation);
     return () => {
       window.removeEventListener('orientationchange', restoreOverlayAfterRotation);
-      if (resumeKeyboardTimerRef.current !== null) clearTimeout(resumeKeyboardTimerRef.current);
       listenerPromise.then((handle) => handle.remove()).catch(() => {});
       releaseResizeMode();
     };
-  }, [resetMobileInputAfterLifecycle]);
+  }, []);
 
   // Высоту зарезервированного места подтягиваем из последней реальной
   // клавиатуры — тогда emoji-панель занимает ровно то же место, и взгляду

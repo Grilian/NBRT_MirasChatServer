@@ -73,12 +73,11 @@ function setInternetSeenAt(ms) {
   setSetting(INTERNET_SEEN_AT, String(ms));
 }
 
-// Базовый набор реакций — shortcodes загруженных картинок. Unicode из старых
-// настроек преобразуем по fallback_emoji; сам системный символ оставляем лишь
-// резервом, когда соответствующей картинки в каталоге ещё нет.
+// Базовый набор реакций хранит shortcodes загруженных картинок. Старые Unicode
+// значения преобразуются по fallback_emoji, чтобы системные эмодзи оставались
+// только резервом на случай отсутствующей или сломанной картинки.
 const REACTION_EMOJI = 'reaction_emoji';
 const DEFAULT_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-const MAX_REACTIONS = 12;
 const SHORTCODE = /^:([a-z0-9_]{2,32}):$/;
 
 function reactionCatalog() {
@@ -89,7 +88,6 @@ function reactionCatalog() {
     WHERE i.file_path IS NOT NULL AND i.name IS NOT NULL
     ORDER BY p.position, i.position, i.id
   `).all();
-
   const allByName = new Map();
   const enabledByFallback = new Map();
   for (const row of rows) {
@@ -101,12 +99,10 @@ function reactionCatalog() {
   return { allByName, enabledByFallback };
 }
 
-function uniqueLimited(values) {
-  return [...new Set(values)].slice(0, MAX_REACTIONS);
-}
+const unique = (values) => [...new Set(values)];
 
 function defaultsForCatalog(catalog) {
-  return uniqueLimited(DEFAULT_REACTIONS.map((fallback) => {
+  return unique(DEFAULT_REACTIONS.map((fallback) => {
     const name = catalog.enabledByFallback.get(fallback);
     return name ? `:${name}:` : fallback;
   }));
@@ -116,20 +112,19 @@ function getReactionEmoji() {
   const catalog = reactionCatalog();
   const raw = getSetting(REACTION_EMOJI);
   if (!raw) return defaultsForCatalog(catalog);
-
   const list = raw.split(/\s+/).filter(Boolean).map((value) => {
     const shortcode = SHORTCODE.exec(value);
     if (shortcode) return catalog.allByName.has(shortcode[1]) ? value : null;
     const name = catalog.enabledByFallback.get(value);
     return name ? `:${name}:` : value;
   }).filter(Boolean);
-  return list.length ? uniqueLimited(list) : defaultsForCatalog(catalog);
+  return list.length ? unique(list) : defaultsForCatalog(catalog);
 }
 
 function setReactionEmoji(value) {
   const catalog = reactionCatalog();
   const source = Array.isArray(value) ? value : String(value || '').split(/\s+/);
-  const list = uniqueLimited(source.map((raw) => String(raw || '').trim()).filter(Boolean).map((item) => {
+  const list = unique(source.map((raw) => String(raw || '').trim()).filter(Boolean).map((item) => {
     const shortcode = SHORTCODE.exec(item);
     if (shortcode) {
       const row = catalog.allByName.get(shortcode[1]);

@@ -1,11 +1,9 @@
 import React from 'react';
 import StatusPicker from './StatusPicker';
-import { CustomEmojiMap } from '../utils/customEmoji';
 
 interface StatusSheetProps {
   statusPreset: string | null;
   statusCustom: string | null;
-  customEmoji?: CustomEmojiMap;
   onStatusChanged: (preset: string | null, custom: string | null) => void;
   onClose: () => void;
 }
@@ -17,7 +15,7 @@ interface StatusSheetProps {
  * убрать, а не спрятать его на шаг ближе.
  */
 const StatusSheet: React.FC<StatusSheetProps> = ({
-  statusPreset, statusCustom, customEmoji = {}, onStatusChanged, onClose,
+  statusPreset, statusCustom, onStatusChanged, onClose,
 }) => (
   <div className="modal-overlay modal-overlay-nested" onClick={onClose}>
     <div className="modal-card status-sheet" onClick={(e) => e.stopPropagation()}>
@@ -34,7 +32,6 @@ const StatusSheet: React.FC<StatusSheetProps> = ({
         <StatusPicker
           statusPreset={statusPreset}
           statusCustom={statusCustom}
-          customEmoji={customEmoji}
           onStatusChanged={onStatusChanged}
           onDone={onClose}
         />

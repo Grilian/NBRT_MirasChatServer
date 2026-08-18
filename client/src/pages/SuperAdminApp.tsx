@@ -6,6 +6,7 @@ import { resolveUploadUrl } from '../utils/uploads';
 import { useDragReorder } from '../utils/useDragReorder';
 import StickerPacksPanel from '../components/StickerPacksPanel';
 import ReleaseRollbackPanel from '../components/ReleaseRollbackPanel';
+import EmojiPicker, { EmojiPack as PickerEmojiPack } from '../components/EmojiPicker';
 import { CustomEmojiImage, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
 
 interface Group {
@@ -1195,13 +1196,12 @@ function GoogleCalendarPanel({ users }: { users: UserRow[] }) {
   );
 }
 
-// Базовые реакции выбираются из того же каталога загруженных смайликов, который
-// используется в сообщениях. В настройке храним shortcode, а не Unicode: так
-// клиент всегда рисует загруженную картинку и оставляет системный символ только
-// запасным вариантом на случай ошибки загрузки файла.
+// Базовые реакции выбираются из общей панели загруженных смайликов. В настройке
+// хранится shortcode, а системный Unicode остаётся только запасным отображением.
 function ReactionsPanel() {
   const [selected, setSelected] = useState<string[]>([]);
   const [packs, setPacks] = useState<EmojiPack[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
 
@@ -1212,7 +1212,7 @@ function ReactionsPanel() {
         superAdminApi.get('/emoji/admin'),
       ]);
       setSelected(reactionsResponse.data.emoji || []);
-      setPacks(emojiResponse.data.packs || []);
+      setPacks(emojiResponse.data.packs || emojiResponse.data || []);
       setError('');
     } catch {
       setError('Не удалось загрузить реакции');
@@ -1233,32 +1233,25 @@ function ReactionsPanel() {
     }
   };
 
-  const available = packs
-    .filter((pack) => pack.enabled)
+  const pickerPacks: PickerEmojiPack[] = packs
+    .filter((pack) => pack.enabled && (pack.custom || []).length > 0)
     .map((pack) => ({
-      ...pack,
-      custom: (pack.custom || []).filter((item) => item.file_path),
-    }))
-    .filter((pack) => (pack.custom || []).length > 0);
+      id: pack.id,
+      name: pack.name,
+      emoji: [],
+      custom: pack.custom || [],
+    }));
 
-  const byToken = new Map<string, EmojiCustomItem>();
+  const itemsByToken = new Map<string, EmojiCustomItem>();
   for (const pack of packs) {
-    for (const item of pack.custom || []) byToken.set(`:${item.name}:`, item);
+    for (const item of pack.custom || []) itemsByToken.set(`:${item.name}:`, item);
   }
 
   const toggle = (token: string) => {
     setStatus('');
-    setSelected((current) => {
-      if (current.includes(token)) return current.filter((value) => value !== token);
-      return current.length < 12 ? [...current, token] : current;
-    });
-  };
-
-  const renderReaction = (token: string) => {
-    const item = byToken.get(token);
-    return item ? (
-      <CustomEmojiImage filePath={item.file_path} fallback={item.fallback || DEFAULT_EMOJI_FALLBACK} />
-    ) : token;
+    setSelected((current) => current.includes(token)
+      ? current.filter((item) => item !== token)
+      : [...current, token]);
   };
 
   return (
@@ -1267,49 +1260,49 @@ function ReactionsPanel() {
       {error && <p className="form-error">{error}</p>}
 
       <p className="sa-hint">
-        Выберите до 12 загруженных смайликов — этот ряд человек увидит над меню
-        сообщения. Уже поставленные реакции останутся, даже если убрать смайлик
-        из списка.
+        Выберите загруженные смайлики, которые человек увидит над меню сообщения.
+        Количество не ограничено. Уже поставленные реакции останутся, даже если
+        убрать смайлик из этого списка.
       </p>
 
       <div className="sa-reaction-preview" aria-label="Выбранные реакции">
-        {selected.length === 0 && <span className="sa-hint">Ничего не выбрано</span>}
-        {selected.map((token) => (
-          <button key={token} type="button" onClick={() => toggle(token)} title="Убрать реакцию">
-            {renderReaction(token)}
-          </button>
-        ))}
+        {selected.length === 0 && <span className="sa-hint">Реакции пока не выбраны</span>}
+        {selected.map((token) => {
+          const item = itemsByToken.get(token);
+          return (
+            <button key={token} type="button" onClick={() => toggle(token)} title="Убрать реакцию">
+              {item
+                ? <CustomEmojiImage filePath={item.file_path} fallback={item.fallback || DEFAULT_EMOJI_FALLBACK} />
+                : token}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="sa-reaction-catalog">
-        {available.length === 0 && <p className="sa-hint">Сначала загрузите смайлики и включите их набор.</p>}
-        {available.map((pack) => (
-          <section key={pack.id} className="sa-reaction-pack">
-            <h3>{pack.name}</h3>
-            <div className="sa-reaction-grid">
-              {(pack.custom || []).map((item) => {
-                const token = `:${item.name}:`;
-                const active = selected.includes(token);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={active ? 'is-selected' : ''}
-                    onClick={() => toggle(token)}
-                    aria-pressed={active}
-                    title={item.name}
-                  >
-                    <CustomEmojiImage filePath={item.file_path} fallback={item.fallback || DEFAULT_EMOJI_FALLBACK} />
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ))}
-      </div>
+      <button
+        type="button"
+        className="sa-reaction-picker-toggle"
+        onClick={() => setPickerOpen((open) => !open)}
+      >
+        {pickerOpen ? 'Закрыть смайлики' : 'Выбрать смайлики'}
+      </button>
+
+      {pickerOpen && (
+        <div className="sa-reaction-picker">
+          <EmojiPicker
+            embedded
+            packsOverride={pickerPacks}
+            selectedCustomEmoji={selected}
+            onClose={() => setPickerOpen(false)}
+            onPick={(picked) => {
+              if (typeof picked !== 'string') toggle(`:${picked.name}:`);
+            }}
+          />
+        </div>
+      )}
 
       <form onSubmit={save} className="sa-reaction-save">
-        <span className="sa-hint">Выбрано: {selected.length} из 12</span>
+        <span className="sa-hint">Выбрано: {selected.length}</span>
         <button type="submit" className="btn-primary">Сохранить</button>
       </form>
 

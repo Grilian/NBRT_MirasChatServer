@@ -3,68 +3,15 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import StatusPicker from './StatusPicker';
 import { describeStatus, statusExpiryOn } from '../utils/statusMeta';
-import { invalidateEmojiPackCache } from './EmojiPicker';
 
 jest.mock('../api/client', () => ({
   __esModule: true,
-  default: { get: jest.fn(), put: jest.fn() },
+  default: { put: jest.fn() },
 }));
 
-const get = api.get as jest.Mock;
 const put = api.put as jest.Mock;
 
-beforeEach(() => {
-  get.mockReset();
-  put.mockReset();
-  invalidateEmojiPackCache();
-  get.mockResolvedValue({ data: [] });
-});
-
-test('панель загруженных смайликов закрывается явной кнопкой', async () => {
-  render(
-    <StatusPicker statusPreset={null} statusCustom={null} onStatusChanged={jest.fn()} />,
-  );
-
-  fireEvent.click(screen.getByRole('button', { name: 'Выбрать эмодзи' }));
-  const close = await screen.findByRole('button', { name: 'Закрыть панель смайликов' });
-  fireEvent.click(close);
-  expect(screen.queryByRole('button', { name: 'Закрыть панель смайликов' })).not.toBeInTheDocument();
-});
-
-test('загруженный смайлик сохраняется в статусе своим shortcode, а не системным fallback', async () => {
-  get.mockResolvedValue({
-    data: [{
-      id: 1,
-      name: 'Чернильцы',
-      emoji: ['😊'],
-      custom: [{ id: 7, name: 'ink_smile', file_path: '/uploads/emoji/ink_smile.webp', fallback: '😊' }],
-    }],
-  });
-  put.mockResolvedValue({ data: { status_preset: null, status_custom: ':ink_smile: занята' } });
-
-  render(
-    <StatusPicker
-      statusPreset={null}
-      statusCustom={null}
-      customEmoji={{ ink_smile: { filePath: '/uploads/emoji/ink_smile.webp', fallback: '😊' } }}
-      onStatusChanged={jest.fn()}
-    />,
-  );
-
-  fireEvent.click(screen.getByRole('button', { name: 'Выбрать эмодзи' }));
-  const uploaded = await screen.findByTitle(':ink_smile:');
-  // Если в паке есть загруженные изображения, системная копия набора не
-  // рисуется рядом: Unicode остаётся только резервом для пустого пака.
-  expect(document.querySelectorAll('.emoji-cell')).toHaveLength(1);
-  fireEvent.click(uploaded);
-  fireEvent.change(screen.getByPlaceholderText('Свой статус…'), { target: { value: 'занята' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Установить' }));
-
-  await waitFor(() => expect(put).toHaveBeenCalledWith('/users/me/status', expect.objectContaining({
-    status_preset: null,
-    status_custom: ':ink_smile: занята',
-  })));
-});
+beforeEach(() => put.mockReset());
 
 test('sets a preset status through the server and updates the UI state', async () => {
   put.mockResolvedValue({ data: { status_preset: 'vacation', status_custom: null } });
@@ -135,9 +82,6 @@ describe('срок статуса', () => {
     expect(describeStatus(null, 'просто текст')).toEqual({ emoji: '💬', label: 'просто текст' });
     // Один эмодзи без текста — это ещё не подпись, значок остаётся общим.
     expect(describeStatus(null, '🚗')).toEqual({ emoji: '💬', label: '🚗' });
-    expect(describeStatus(null, ':ink_car: в дороге', {
-      ink_car: { filePath: '/uploads/emoji/ink_car.webp', fallback: '🚗' },
-    })).toEqual({ emoji: ':ink_car:', label: 'в дороге' });
   });
 });
 
