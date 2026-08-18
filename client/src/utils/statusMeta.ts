@@ -1,3 +1,5 @@
+import { CustomEmojiMap, preferCustomEmojiToken } from './customEmoji';
+
 // Пресеты статуса профиля — фиксированным набором, а не тем, что пришлёт
 // сервер: эмодзи и подпись живут только здесь, в базе хранится лишь ключ
 // (см. server/routes/users.js, STATUS_PRESETS), иначе правки текста/эмодзи
@@ -68,20 +70,43 @@ export function statusExpiryAt(time: string): number | null {
 /** Что показать рядом с именем — пресет, свой текст или ничего. */
 export function describeStatus(
   preset: string | null | undefined,
-  custom: string | null | undefined
+  custom: string | null | undefined,
+  customEmoji: CustomEmojiMap = {},
 ): { emoji: string; label: string } | null {
   if (custom && custom.trim()) {
-    // Свой статус может начинаться с выбранного эмодзи — он и становится
-    // значком, а остаток текста подписью. Без этого выбранный эмодзи
-    // дублировался бы: и как значок 💬, и как первый символ подписи.
-    const trimmed = custom.trim();
-    const first = Array.from(trimmed)[0];
-    if (first && /\p{Extended_Pictographic}/u.test(first)) {
-      const label = trimmed.slice(first.length).replace(/^[️‍]+/, '').trim();
-      if (label) return { emoji: first, label };
+    const parsed = splitStatusIcon(custom);
+    if (parsed.emoji && parsed.text) {
+      return { emoji: preferCustomEmojiToken(parsed.emoji, customEmoji), label: parsed.text };
     }
-    return { emoji: '💬', label: trimmed };
+    return { emoji: preferCustomEmojiToken('💬', customEmoji), label: custom.trim() };
   }
-  if (preset && preset in STATUS_PRESETS) return STATUS_PRESETS[preset as StatusPreset];
+  if (preset && preset in STATUS_PRESETS) {
+    const value = STATUS_PRESETS[preset as StatusPreset];
+    return { emoji: preferCustomEmojiToken(value.emoji, customEmoji), label: value.label };
+  }
   return null;
+}
+
+/** Отделяет shortcode либо первый Unicode-графем от текста своего статуса. */
+export function splitStatusIcon(value: string): { emoji: string; text: string } {
+  const trimmed = value.trim();
+  if (!trimmed) return { emoji: '', text: '' };
+
+  const shortcode = /^(:[a-z0-9_]{2,32}:)(?:\s+|$)/.exec(trimmed);
+  if (shortcode) return { emoji: shortcode[1], text: trimmed.slice(shortcode[0].length).trim() };
+
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    const Segmenter = (Intl as any).Segmenter;
+    const segmenter = new Segmenter(undefined, { granularity: 'grapheme' });
+    const first = Array.from(segmenter.segment(trimmed) as Iterable<{ segment: string }>)[0]?.segment || '';
+    if (first && /\p{Extended_Pictographic}/u.test(first)) {
+      return { emoji: first, text: trimmed.slice(first.length).trim() };
+    }
+  }
+
+  const first = Array.from(trimmed)[0];
+  if (first && /\p{Extended_Pictographic}/u.test(first)) {
+    return { emoji: first, text: trimmed.slice(first.length).replace(/^[️‍]+/, '').trim() };
+  }
+  return { emoji: '', text: trimmed };
 }

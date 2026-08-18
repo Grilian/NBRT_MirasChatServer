@@ -1,9 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import EmojiPicker from './EmojiPicker';
 import {
+  CustomEmojiMap, preferCustomEmojiToken, renderTextWithEmoji,
+} from '../utils/customEmoji';
+import {
   STATUS_PRESETS, STATUS_PRESET_ORDER, StatusPreset,
-  describeStatus, statusExpiryOn,
+  describeStatus, splitStatusIcon, statusExpiryOn,
 } from '../utils/statusMeta';
 
 interface StatusPickerProps {
@@ -11,11 +14,14 @@ interface StatusPickerProps {
   statusCustom: string | null;
   statusExpiresAt?: number | null;
   onStatusChanged: (preset: string | null, custom: string | null) => void;
+  /** Каталог нужен и для выбранного изображения, и для fallback-отрисовки. */
+  customEmoji?: CustomEmojiMap;
   /** Выбор подтверждён кнопкой «Установить» — внешнее окно можно закрыть. */
   onDone?: () => void;
 }
 
 type ExpiryChoice = 'never' | '30m' | '1h' | '3h' | 'today' | 'tomorrow' | 'custom';
+const MAX_STATUS_LENGTH = 60;
 
 const EXPIRY_CHOICES: Array<{ value: ExpiryChoice; label: string }> = [
   { value: 'never', label: 'Без срока' },
@@ -36,9 +42,10 @@ const EXPIRY_CHOICES: Array<{ value: ExpiryChoice; label: string }> = [
  */
 const StatusPicker: React.FC<StatusPickerProps> = ({
   statusPreset, statusCustom, statusExpiresAt = null, onStatusChanged, onDone,
+  customEmoji = {},
 }) => {
-  const parsed = splitEmoji(statusCustom || '');
-  const [emoji, setEmoji] = useState(parsed.emoji || '💬');
+  const parsed = splitStatusIcon(statusCustom || '');
+  const [emoji, setEmoji] = useState(parsed.emoji || preferCustomEmojiToken('💬', customEmoji));
   const [customStatus, setCustomStatus] = useState(parsed.text);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [expiryChoice, setExpiryChoice] = useState<ExpiryChoice>('never');
@@ -46,14 +53,23 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!emojiOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEmojiOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [emojiOpen]);
+
   const initialPreset = (statusPreset && STATUS_PRESETS[statusPreset as StatusPreset])
     ? statusPreset as StatusPreset
     : null;
   const [selectedPreset, setSelectedPreset] = useState<StatusPreset | null>(initialPreset);
 
   const currentStatus = useMemo(
-    () => describeStatus(statusPreset, statusCustom),
-    [statusPreset, statusCustom],
+    () => describeStatus(statusPreset, statusCustom, customEmoji),
+    [statusPreset, statusCustom, customEmoji],
   );
 
   const customSelected = !selectedPreset && !!customStatus.trim();
@@ -85,7 +101,7 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
       });
       onStatusChanged(data.status_preset, data.status_custom);
       if (data.status_custom) {
-        const next = splitEmoji(data.status_custom);
+        const next = splitStatusIcon(data.status_custom);
         setCustomStatus(next.text);
         if (next.emoji) setEmoji(next.emoji);
       }
@@ -117,7 +133,9 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
             <span className="status-card-kicker">Текущий статус</span>
             <div className="status-current-value">
               <span className={'status-current-dot' + (currentStatus ? ' is-custom' : '')} />
-              <span>{currentStatus ? `${currentStatus.emoji} ${currentStatus.label}` : 'Без статуса'}</span>
+              <span>{currentStatus
+                ? renderTextWithEmoji(`${currentStatus.emoji} ${currentStatus.label}`, customEmoji, 'status-current')
+                : 'Без статуса'}</span>
             </div>
           </div>
 
@@ -135,7 +153,13 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
                   setEmojiOpen(false);
                 }}
               >
-                <span className="status-preset-row-icon">{STATUS_PRESETS[preset].emoji}</span>
+                <span className="status-preset-row-icon">
+                  {renderTextWithEmoji(
+                    preferCustomEmojiToken(STATUS_PRESETS[preset].emoji, customEmoji),
+                    customEmoji,
+                    `status-preset-${preset}`,
+                  )}
+                </span>
                 <span>{STATUS_PRESETS[preset].label}</span>
                 <span className="status-preset-check" aria-hidden="true">✓</span>
               </button>
@@ -152,13 +176,13 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
                   setEmojiOpen((open) => !open);
                 }}
               >
-                {emoji}
+                {renderTextWithEmoji(emoji, customEmoji, 'status-selected')}
               </button>
               <input
                 type="text"
                 placeholder="Свой статус…"
                 value={customStatus}
-                maxLength={58}
+                maxLength={Math.max(1, MAX_STATUS_LENGTH - emoji.length - 1)}
                 onFocus={() => setSelectedPreset(null)}
                 onChange={(event) => {
                   setCustomStatus(event.target.value);
@@ -171,10 +195,33 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
 
           {emojiOpen && (
             <div className="status-emoji-popover">
+              <button
+                type="button"
+                className="status-emoji-popover-close"
+                onClick={() => setEmojiOpen(false)}
+                aria-label="Закрыть панель смайликов"
+                title="Закрыть"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
               <EmojiPicker
                 embedded
                 onPick={(picked) => {
-                  setEmoji(typeof picked === 'string' ? picked : (picked.fallback || '💬'));
+                  // Для загруженного смайлика сохраняем стабильный shortcode,
+                  // а не fallback: иначе любой выбор превращался в одну и ту
+                  // же системную улыбку и терял связь со своим изображением.
+                  const nextEmoji = typeof picked === 'string' ? picked : `:${picked.name}:`;
+                  setEmoji(nextEmoji);
+                  // Сервер принимает статус целиком длиной до 60 символов.
+                  // Shortcode длиннее одного Unicode-графема, поэтому при
+                  // смене значка уже набранную подпись подрезаем до честного
+                  // лимита, а не отправляем заведомо невалидный запрос.
+                  setCustomStatus((value) => value.slice(
+                    0,
+                    Math.max(1, MAX_STATUS_LENGTH - nextEmoji.length - 1),
+                  ));
                   setSelectedPreset(null);
                   setEmojiOpen(false);
                 }}
@@ -258,27 +305,6 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
     </div>
   );
 };
-
-/** Первый графемный кластер своего статуса считаем эмодзи, если он pictographic. */
-function splitEmoji(value: string): { emoji: string; text: string } {
-  const trimmed = value.trim();
-  if (!trimmed) return { emoji: '', text: '' };
-
-  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-    const Segmenter = (Intl as any).Segmenter;
-    const segmenter = new Segmenter(undefined, { granularity: 'grapheme' });
-    const first = Array.from(segmenter.segment(trimmed) as Iterable<{ segment: string }>)[0]?.segment || '';
-    if (first && /\p{Extended_Pictographic}/u.test(first)) {
-      return { emoji: first, text: trimmed.slice(first.length).trim() };
-    }
-  }
-
-  const first = Array.from(trimmed)[0];
-  if (first && /\p{Extended_Pictographic}/u.test(first)) {
-    return { emoji: first, text: trimmed.slice(first.length).trim() };
-  }
-  return { emoji: '', text: trimmed };
-}
 
 function endOfDay(dayOffset: number): number {
   const target = new Date();

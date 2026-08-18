@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
-import { resolveUploadUrl } from '../utils/uploads';
-import { CustomEmoji, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
+import { CustomEmoji, CustomEmojiImage, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
 import { PickedCustomEmoji } from './EmojiComposerField';
 import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
@@ -110,9 +109,12 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
                   телефоне вкладки от них не помещались. Название осталось в
                   подсказке и в aria-label — для мыши и для читалки. */}
               <span className="emoji-tab-icon">
-                {pack.emoji[0] || (pack.custom?.[0]
-                  ? <img className="custom-emoji" src={resolveUploadUrl(pack.custom[0].file_path) || ''} alt="" />
-                  : '🙂')}
+                {pack.custom?.[0]
+                  ? <CustomEmojiImage
+                      filePath={pack.custom[0].file_path}
+                      fallback={pack.custom[0].fallback || pack.emoji[0] || DEFAULT_EMOJI_FALLBACK}
+                    />
+                  : (pack.emoji[0] || DEFAULT_EMOJI_FALLBACK)}
               </span>
             </button>
           ))}
@@ -142,10 +144,15 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
               fallback: item.fallback || DEFAULT_EMOJI_FALLBACK,
             })}
           >
-            <img className="custom-emoji" src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
+            <CustomEmojiImage
+              filePath={item.file_path}
+              fallback={item.fallback || DEFAULT_EMOJI_FALLBACK}
+            />
           </button>
         ))}
-        {current?.emoji.map((emoji, index) => (
+        {/* Системный набор показываем только как резерв, если в выбранном
+            паке вообще нет загруженных изображений. */}
+        {!current?.custom?.length && current?.emoji.map((emoji, index) => (
           <button
             key={`${emoji}-${index}`}
             type="button"

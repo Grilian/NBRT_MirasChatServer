@@ -6,6 +6,7 @@ import { resolveUploadUrl } from '../utils/uploads';
 import ImageLightbox from './ImageLightbox';
 import StatusPicker from './StatusPicker';
 import ProfilePhotoEditor from './ProfilePhotoEditor';
+import { CustomEmojiMap } from '../utils/customEmoji';
 import {
   isValidLogin, isValidPassword, isValidDisplayName, isValidPhone,
   LOGIN_HINT, PASSWORD_HINT,
@@ -23,6 +24,7 @@ interface ProfileEditProps {
   /** Статус живёт здесь, а не в настройках: это то, что человек о себе сообщает. */
   statusPreset: string | null;
   statusCustom: string | null;
+  customEmoji?: CustomEmojiMap;
   onStatusChanged: (preset: string | null, custom: string | null) => void;
   onBack: () => void;
   onSaved: (profile: {
@@ -35,7 +37,7 @@ interface ProfileEditProps {
 const ProfileEdit: React.FC<ProfileEditProps> = ({
   currentUsername, currentDisplayName, currentAvatarPath, currentBio, currentPhone,
   currentDepartment, currentPosition, currentBirthDate,
-  statusPreset, statusCustom, onStatusChanged,
+  statusPreset, statusCustom, customEmoji = {}, onStatusChanged,
   onBack, onSaved, onAvatarChanged
 }) => {
   const [username, setUsername] = useState(currentUsername);
@@ -246,6 +248,7 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
         <StatusPicker
           statusPreset={statusPreset}
           statusCustom={statusCustom}
+          customEmoji={customEmoji}
           onStatusChanged={onStatusChanged}
         />
         <div className="settings-hint">Срок применяется к статусу, который поставите следующим.</div>
