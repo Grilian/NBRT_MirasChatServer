@@ -439,13 +439,45 @@ const Chat: React.FC = () => {
   // открытой вне раздела «Чаты», показывать её мы не станем.
   const conversationOpen = view.section === 'chats' && view.conversation;
   const [directoryOpen, setDirectoryOpen] = useState(false);
-  const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
+  // Сведения о пользователе, группе и общем чате занимают одно и то же место
+  // интерфейса, поэтому и состояние у них должно быть одно. Три независимых
+  // state раньше позволяли одновременно оставить открытой группу и запросить
+  // профиль пользователя; приоритет ветки groupInfoId в infoContent затем
+  // неизменно рисовал группу поверх профиля.
+  const [infoPanel, setInfoPanel] = useState<
+    | { kind: 'user'; userId: number }
+    | { kind: 'group'; groupId: number }
+    | { kind: 'general' }
+    | null
+  >(null);
+  const infoModalUserId = infoPanel?.kind === 'user' ? infoPanel.userId : null;
+  const groupInfoId = infoPanel?.kind === 'group' ? infoPanel.groupId : null;
+  const generalInfoOpen = infoPanel?.kind === 'general';
+  const setInfoModalUserId = useCallback((userId: number | null) => {
+    setInfoPanel((current) => (
+      userId !== null
+        ? { kind: 'user', userId }
+        : current?.kind === 'user' ? null : current
+    ));
+  }, []);
+  const setGroupInfoId = useCallback((groupId: number | null) => {
+    setInfoPanel((current) => (
+      groupId !== null
+        ? { kind: 'group', groupId }
+        : current?.kind === 'group' ? null : current
+    ));
+  }, []);
+  const setGeneralInfoOpen = useCallback((open: boolean) => {
+    setInfoPanel((current) => (
+      open
+        ? { kind: 'general' }
+        : current?.kind === 'general' ? null : current
+    ));
+  }, []);
   const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
   const [pollSubmitting, setPollSubmitting] = useState(false);
-  const [groupInfoId, setGroupInfoId] = useState<number | null>(null);
-  const [generalInfoOpen, setGeneralInfoOpen] = useState(false);
 
   // Десктопное меню — выезжающая панель поверх текущего раздела. Крупные
   // действия из него открываются компактными окнами, не уводя человека со
@@ -961,7 +993,7 @@ const Chat: React.FC = () => {
     // перепиской, «Настройки» — списком настроек, а не подэкраном профиля, на
     // котором человек был в прошлый раз.
     setView({ section: id, conversation: false, settings: 'settings' });
-  }, [closeKeyboard]);
+  }, [closeKeyboard, setGeneralInfoOpen, setGroupInfoId, setInfoModalUserId]);
 
   // Подписка на сокет живёт столько же, сколько сам сокет, а goToSection
   // пересоздаётся — держим актуальную версию в ref, как и handleSelectChat.
@@ -1021,7 +1053,7 @@ const Chat: React.FC = () => {
       CapApp.minimizeApp();
     });
     return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
-  }, [leaveConversation]);
+  }, [leaveConversation, setGeneralInfoOpen, setGroupInfoId, setInfoModalUserId]);
 
   // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
   // ни 'stop_typing' (вкладка закрылась, сеть оборвалась) — гасим индикатор сами,
