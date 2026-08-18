@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import superAdminApi from '../api/superAdminClient';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 import { formatMoscowDateTime, fromMoscowInputValue, toMoscowInputValue } from '../utils/time';
@@ -6,6 +6,7 @@ import { resolveUploadUrl } from '../utils/uploads';
 import { useDragReorder } from '../utils/useDragReorder';
 import StickerPacksPanel from '../components/StickerPacksPanel';
 import ReleaseRollbackPanel from '../components/ReleaseRollbackPanel';
+import { CustomEmojiImage, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
 
 interface Group {
   id: number;
@@ -1194,20 +1195,25 @@ function GoogleCalendarPanel({ users }: { users: UserRow[] }) {
   );
 }
 
-// Базовые реакции — короткий ряд, который предлагается над контекстным меню
-// сообщения. Правится одним полем, как и пак смайликов: это набор строк, а не
-// сущности со своими свойствами.
+// Базовые реакции выбираются из того же каталога загруженных смайликов, который
+// используется в сообщениях. В настройке храним shortcode, а не Unicode: так
+// клиент всегда рисует загруженную картинку и оставляет системный символ только
+// запасным вариантом на случай ошибки загрузки файла.
 function ReactionsPanel() {
-  const [value, setValue] = useState('');
-  const [saved, setSaved] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [packs, setPacks] = useState<EmojiPack[]>([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
 
   const load = async () => {
     try {
-      const { data } = await superAdminApi.get('/superadmin/reactions');
-      setSaved(data.emoji);
-      setValue(data.emoji.join(' '));
+      const [reactionsResponse, emojiResponse] = await Promise.all([
+        superAdminApi.get('/superadmin/reactions'),
+        superAdminApi.get('/emoji/admin'),
+      ]);
+      setSelected(reactionsResponse.data.emoji || []);
+      setPacks(emojiResponse.data.packs || []);
+      setError('');
     } catch {
       setError('Не удалось загрузить реакции');
     }
@@ -1218,14 +1224,41 @@ function ReactionsPanel() {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { data } = await superAdminApi.put('/superadmin/reactions', { emoji: value });
-      setSaved(data.emoji);
-      setValue(data.emoji.join(' '));
+      const { data } = await superAdminApi.put('/superadmin/reactions', { emoji: selected });
+      setSelected(data.emoji || []);
       setError('');
       setStatus('Сохранено');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Не удалось сохранить');
     }
+  };
+
+  const available = packs
+    .filter((pack) => pack.enabled)
+    .map((pack) => ({
+      ...pack,
+      custom: (pack.custom || []).filter((item) => item.file_path),
+    }))
+    .filter((pack) => (pack.custom || []).length > 0);
+
+  const byToken = new Map<string, EmojiCustomItem>();
+  for (const pack of packs) {
+    for (const item of pack.custom || []) byToken.set(`:${item.name}:`, item);
+  }
+
+  const toggle = (token: string) => {
+    setStatus('');
+    setSelected((current) => {
+      if (current.includes(token)) return current.filter((value) => value !== token);
+      return current.length < 12 ? [...current, token] : current;
+    });
+  };
+
+  const renderReaction = (token: string) => {
+    const item = byToken.get(token);
+    return item ? (
+      <CustomEmojiImage filePath={item.file_path} fallback={item.fallback || DEFAULT_EMOJI_FALLBACK} />
+    ) : token;
   };
 
   return (
@@ -1234,22 +1267,49 @@ function ReactionsPanel() {
       {error && <p className="form-error">{error}</p>}
 
       <p className="sa-hint">
-        Через пробел, до 12 штук — этот ряд человек видит над меню сообщения.
-        Уже поставленные реакции набор не меняет: они останутся, даже если убрать
-        эмодзи из списка. Пустое поле вернёт набор по умолчанию.
+        Выберите до 12 загруженных смайликов — этот ряд человек увидит над меню
+        сообщения. Уже поставленные реакции останутся, даже если убрать смайлик
+        из списка.
       </p>
 
-      <div className="sa-reaction-preview">
-        {saved.map((emoji) => <span key={emoji}>{emoji}</span>)}
+      <div className="sa-reaction-preview" aria-label="Выбранные реакции">
+        {selected.length === 0 && <span className="sa-hint">Ничего не выбрано</span>}
+        {selected.map((token) => (
+          <button key={token} type="button" onClick={() => toggle(token)} title="Убрать реакцию">
+            {renderReaction(token)}
+          </button>
+        ))}
       </div>
 
-      <form onSubmit={save} className="sa-inline-form">
-        <input
-          type="text"
-          value={value}
-          placeholder="👍 ❤️ 😂"
-          onChange={(e) => { setValue(e.target.value); setStatus(''); }}
-        />
+      <div className="sa-reaction-catalog">
+        {available.length === 0 && <p className="sa-hint">Сначала загрузите смайлики и включите их набор.</p>}
+        {available.map((pack) => (
+          <section key={pack.id} className="sa-reaction-pack">
+            <h3>{pack.name}</h3>
+            <div className="sa-reaction-grid">
+              {(pack.custom || []).map((item) => {
+                const token = `:${item.name}:`;
+                const active = selected.includes(token);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={active ? 'is-selected' : ''}
+                    onClick={() => toggle(token)}
+                    aria-pressed={active}
+                    title={item.name}
+                  >
+                    <CustomEmojiImage filePath={item.file_path} fallback={item.fallback || DEFAULT_EMOJI_FALLBACK} />
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <form onSubmit={save} className="sa-reaction-save">
+        <span className="sa-hint">Выбрано: {selected.length} из 12</span>
         <button type="submit" className="btn-primary">Сохранить</button>
       </form>
 

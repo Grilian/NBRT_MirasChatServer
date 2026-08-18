@@ -2447,7 +2447,20 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-google-add .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; }
 
 .sa-verified-badge { color: var(--accent); font-weight: 700; margin-left: 4px; }
-.sa-reaction-preview { display: flex; gap: 8px; font-size: 22px; margin: 4px 0 12px; }
+.sa-reaction-preview { display: flex; flex-wrap: wrap; gap: 8px; font-size: 22px; margin: 4px 0 12px; }
+.sa-reaction-preview button, .sa-reaction-grid button {
+  width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.sa-reaction-preview button:hover, .sa-reaction-grid button:hover { border-color: var(--accent); }
+.sa-reaction-preview .custom-emoji, .sa-reaction-grid .custom-emoji { width: 30px; height: 30px; }
+.sa-reaction-catalog { display: flex; flex-direction: column; gap: 14px; max-height: 52vh; overflow-y: auto; }
+.sa-reaction-pack h3 { margin: 0 0 7px; font-size: 13px; color: var(--ink-muted); }
+.sa-reaction-grid { display: flex; flex-wrap: wrap; gap: 7px; }
+.sa-reaction-grid button.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.sa-reaction-save { margin-top: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sa-reaction-save .btn-primary { width: auto; margin-top: 0; }
 .sa-new-badge {
   display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill);
   background: var(--unread); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .03em;
@@ -2509,6 +2522,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .reaction-chip.is-mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .reaction-chip .avatar { width: 18px; height: 18px; font-size: 8px; }
 .reaction-chip-emoji { font-size: 14px; }
+.reaction-chip-emoji .custom-emoji { width: 18px; height: 18px; }
 .reaction-chip-remove {
   display: none; border: none; background: none; color: var(--ink-faint);
   cursor: pointer; padding: 0 0 0 2px; line-height: 1;
@@ -2545,10 +2559,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .msg-menu-reaction:hover { background: var(--row-hover); }
 .msg-menu-reaction.is-active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.msg-menu-reaction .custom-emoji { width: 30px; height: 30px; }
 
 .reactions-modal { max-width: 380px; }
 .reaction-row { cursor: default; }
 .reaction-row-emoji { font-size: 20px; flex: none; }
+.reaction-row-emoji .custom-emoji { width: 24px; height: 24px; }
 .reaction-row-remove { flex: none; }
 
 /* Подтверждение удаления: область действия выбирается здесь, а не в

@@ -25,6 +25,8 @@ const notificationSettingsRoutes = require('../routes/notificationSettings');
 const { isValidBirthDate } = require('../utils/validators');
 const { markRead } = require('../services/readReceipts');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
+const { getReactionEmoji, setReactionEmoji } = require('../services/appSettings');
+const { isValidEmoji } = require('../services/reactions');
 
 const emitted = [];
 const io = {
@@ -281,6 +283,25 @@ test('client message ids are idempotent per sender', () => {
     /UNIQUE constraint failed/,
   );
   assert.doesNotThrow(() => insert.run(otherSenderId, 'msg_queue_test_123456'));
+});
+
+test('reaction settings use uploaded emoji shortcodes and reject unknown values', () => {
+  db.prepare("DELETE FROM app_settings WHERE key = 'reaction_emoji'").run();
+  const packId = db.prepare(
+    'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, ?, 1, ?)'
+  ).run('Reaction test pack', 999, Date.now()).lastInsertRowid;
+  db.prepare(`
+    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, retired, position)
+    VALUES (?, '', ?, ?, ?, 0, 0)
+  `).run(packId, 'ink_like', '/uploads/emoji/ink_like.webp', '👍');
+
+  assert.equal(getReactionEmoji()[0], ':ink_like:');
+  assert.deepEqual(
+    setReactionEmoji([':ink_like:', ':missing:', '👍', ':ink_like:']),
+    [':ink_like:'],
+  );
+  assert.equal(isValidEmoji(`:${'a'.repeat(32)}:`), true);
+  assert.equal(isValidEmoji(`:${'a'.repeat(33)}:`), false);
 });
 
 test('account deletion clears dependent records and transfers group ownership', () => {

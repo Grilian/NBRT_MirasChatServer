@@ -1457,10 +1457,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReactionsFor(msg.id); }
                           }}
                         >
-                          {/* Реакции ставятся из фиксированного юникодного
-                              набора, но значение приходит от клиента, а сервер
-                              ограничивает его только длиной — разбор кодов тут
-                              страховка, чтобы `:cat:` не оказался на виду. */}
+                          {/* Реакции хранят shortcode загруженного смайлика.
+                              Неизвестный код остаётся текстом лишь для обратной
+                              совместимости со старыми записями. */}
                           <span className="reaction-chip-emoji">{renderTextWithEmoji(emoji, customEmoji, `rc${msg.id}`)}</span>
                           {/* До трёх — лица внахлёст, дальше их не разобрать, и
                               число читается быстрее любой стопки аватаров. */}
@@ -1570,7 +1569,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       className={'msg-menu-reaction' + (isCurrent ? ' is-active' : '')}
                       onClick={() => { setMenuFor(null); onToggleReaction(menuMsg.id, emoji); }}
                     >
-                      {emoji}
+                      {renderTextWithEmoji(emoji, customEmoji, `menu-reaction-${emoji}`)}
                     </button>
                   );
                 })}
@@ -1648,6 +1647,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         return (
           <ReactionDetailsModal
             reactions={msg.reactions || []}
+            customEmoji={customEmoji}
             canRemoveOthers={msg.sender_id === currentUserId}
             currentUserId={currentUserId}
             onClose={() => setReactionsFor(null)}
