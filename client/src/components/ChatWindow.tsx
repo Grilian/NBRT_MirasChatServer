@@ -10,6 +10,7 @@ import { StickerCatalog } from '../utils/stickerCatalog';
 import { fileGlyph, formatFileSize } from '../utils/fileLimits';
 import { registerBackInterceptor } from '../utils/backInterceptors';
 import { downloadFile } from '../utils/downloadFile';
+import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 import Avatar from './Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from './ImageLightbox';
@@ -285,7 +286,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const [lightbox, setLightbox] = useState<{ url: string; message: Message } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const suppressOutsideActivationUntilRef = useRef(0);
 
   // Режим выбора доступен всем и на любых сообщениях. При уходе из чата гасим
   // его, а не оставляем висеть с id из прошлой переписки.
@@ -525,40 +525,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     });
   }, [selectMode]);
 
-  // Первый тап снаружи только закрывает контекстное меню. Pointer-событие и
-  // следующий за ним click поглощаются, чтобы картинка/ссылка под меню не
-  // открылась тем же самым касанием.
+  // Первый внешний жест только закрывает контекстное меню. Общий helper
+  // поглощает не один click, а весь Android-хвост pointer/touch/mouse: иначе
+  // следующий сигнал того же тапа успевал открыть меню уже у другой реплики.
   useEffect(() => {
     if (!menuFor) return;
     const onOutsidePointer = (e: Event) => {
       if (!menuRef.current || menuRef.current.contains(e.target as Node)) return;
-      suppressOutsideActivationUntilRef.current = Date.now() + 700;
-      e.preventDefault();
-      e.stopPropagation();
-      if ('stopImmediatePropagation' in e) e.stopImmediatePropagation();
-      setMenuFor(null);
+      dismissLayerWithoutUnderlayActivation(e, () => setMenuFor(null));
     };
-    document.addEventListener('pointerdown', onOutsidePointer, true);
-    document.addEventListener('mousedown', onOutsidePointer, true);
-    document.addEventListener('touchstart', onOutsidePointer, { capture: true, passive: false });
+    window.addEventListener('pointerdown', onOutsidePointer, true);
+    window.addEventListener('mousedown', onOutsidePointer, true);
+    window.addEventListener('touchstart', onOutsidePointer, { capture: true, passive: false });
     return () => {
-      document.removeEventListener('pointerdown', onOutsidePointer, true);
-      document.removeEventListener('mousedown', onOutsidePointer, true);
-      document.removeEventListener('touchstart', onOutsidePointer, true);
+      window.removeEventListener('pointerdown', onOutsidePointer, true);
+      window.removeEventListener('mousedown', onOutsidePointer, true);
+      window.removeEventListener('touchstart', onOutsidePointer, true);
     };
   }, [menuFor]);
-
-  useEffect(() => {
-    const swallowDismissClick = (e: MouseEvent) => {
-      if (Date.now() > suppressOutsideActivationUntilRef.current) return;
-      suppressOutsideActivationUntilRef.current = 0;
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-    };
-    document.addEventListener('click', swallowDismissClick, true);
-    return () => document.removeEventListener('click', swallowDismissClick, true);
-  }, []);
 
   // Меню открывается ровно в точке клика/долгого нажатия — у сообщения
   // близко к правому или нижнему краю экрана оно раньше вылезало за

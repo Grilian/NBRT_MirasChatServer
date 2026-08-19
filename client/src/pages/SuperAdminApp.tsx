@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import superAdminApi from '../api/superAdminClient';
 import { AccountType, ACCOUNT_TYPE_LABELS, ROLE_LABELS } from '../utils/accountMeta';
 import { formatMoscowDateTime, fromMoscowInputValue, toMoscowInputValue } from '../utils/time';
@@ -8,6 +8,7 @@ import StickerPacksPanel from '../components/StickerPacksPanel';
 import ReleaseRollbackPanel from '../components/ReleaseRollbackPanel';
 import EmojiPicker, { EmojiPack as PickerEmojiPack } from '../components/EmojiPicker';
 import { CustomEmojiImage, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
+import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
 interface Group {
   id: number;
@@ -1204,6 +1205,23 @@ function ReactionsPanel() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pickerOpen) return undefined;
+    const closeOutside = (event: Event) => {
+      if (pickerRef.current?.contains(event.target as Node)) return;
+      dismissLayerWithoutUnderlayActivation(event, () => setPickerOpen(false));
+    };
+    window.addEventListener('pointerdown', closeOutside, true);
+    window.addEventListener('mousedown', closeOutside, true);
+    window.addEventListener('touchstart', closeOutside, { capture: true, passive: false });
+    return () => {
+      window.removeEventListener('pointerdown', closeOutside, true);
+      window.removeEventListener('mousedown', closeOutside, true);
+      window.removeEventListener('touchstart', closeOutside, true);
+    };
+  }, [pickerOpen]);
 
   const load = async () => {
     try {
@@ -1288,7 +1306,7 @@ function ReactionsPanel() {
       </button>
 
       {pickerOpen && (
-        <div className="sa-reaction-picker">
+        <div className="sa-reaction-picker" ref={pickerRef}>
           <EmojiPicker
             embedded
             packsOverride={pickerPacks}
