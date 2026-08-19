@@ -167,6 +167,28 @@ router.post('/admin', verifySuperAdmin, (req, res) => {
   }
 });
 
+// Порядок паков задаётся целиком: так две параллельные перестановки не оставят
+// одинаковые position и клиент всегда получит ровно тот порядок вкладок,
+// который видит администратор после drag-and-drop.
+router.put('/admin/reorder', verifySuperAdmin, (req, res) => {
+  try {
+    const order = Array.isArray(req.body.order) ? req.body.order.map(Number) : [];
+    const existing = db.prepare('SELECT id FROM sticker_packs ORDER BY position, id').all().map((row) => row.id);
+    const unique = new Set(order);
+    if (order.length !== existing.length || unique.size !== order.length || order.some((id) => !existing.includes(id))) {
+      return res.status(400).json({ error: 'Список не совпадает с наборами стикеров' });
+    }
+
+    const setPosition = db.prepare('UPDATE sticker_packs SET position = ? WHERE id = ?');
+    db.transaction(() => order.forEach((id, index) => setPosition.run(index, id)))();
+
+    notifyStickersChanged(req);
+    res.json(adminPacks());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.put('/admin/:id', verifySuperAdmin, (req, res) => {
   try {
     const id = Number(req.params.id);

@@ -1784,22 +1784,59 @@ function EmojiPacksPanel() {
     }
   };
 
+  const savePackOrder = async (order: number[]) => {
+    try {
+      const { data } = await superAdminApi.put('/emoji/admin/reorder', { order });
+      apply(data);
+      setError('');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось сохранить порядок паков');
+      void load();
+    }
+  };
+
+  const {
+    order: packOrder,
+    dragId: draggedPackId,
+    containerRef: packListRef,
+    tileHandlers: packDragHandlers,
+  } = useDragReorder({
+    items: packs,
+    onReorder: savePackOrder,
+    dataAttribute: 'data-emoji-pack-id',
+  });
+
   return (
     <div className="sa-card sa-card--compact">
       <h2>Смайлики</h2>
       <p className="sa-hint">
         Пак — вкладка в панели смайликов у сотрудников. Смайлик с картинкой уезжает
         в сообщение кодом, без картинки — обычным символом. Порядок меняется
-        перетаскиванием, всё остальное — в карточке смайлика по нажатию.
+        перетаскиванием. Сами паки тоже можно менять местами за ручку слева.
+        Всё остальное — в карточке смайлика по нажатию.
       </p>
       {error && <p className="form-error">{error}</p>}
 
-      {packs.map((pack) => {
-        const open = openPack === pack.id;
-        const items = pack.items || [];
-        return (
-          <div key={pack.id} className={`sa-emoji-pack${open ? ' is-open' : ''}`}>
+      <div className="sa-emoji-pack-list" ref={packListRef}>
+        {packOrder.map((pack) => {
+          const open = openPack === pack.id;
+          const items = pack.items || [];
+          return (
+          <div
+            key={pack.id}
+            data-emoji-pack-id={pack.id}
+            className={`sa-emoji-pack${open ? ' is-open' : ''}${draggedPackId === pack.id ? ' is-dragging' : ''}`}
+          >
             <div className="sa-emoji-pack-head">
+              <button
+                type="button"
+                className="sa-pack-drag-handle"
+                aria-label={`Переместить пак ${pack.name}`}
+                title="Перетащить пак"
+                {...packDragHandlers(pack)}
+              >
+                ⋮⋮
+              </button>
               <button
                 type="button"
                 className="sa-emoji-pack-toggle"
@@ -1881,8 +1918,9 @@ function EmojiPacksPanel() {
               </div>
             )}
           </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       <form onSubmit={create} className="sa-inline-form">
         <input type="text" placeholder="Новый пак…" value={newName} onChange={(e) => setNewName(e.target.value)} />

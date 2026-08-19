@@ -260,6 +260,36 @@ test('порядок стикеров меняется полным списко
   assert.equal(bogus.response.status, 400);
 });
 
+test('порядок стикерпаков задаёт порядок вкладок в пикере', async () => {
+  const admin = superAdminToken();
+  const firstCreated = await request('/api/stickers/admin', {
+    token: admin, method: 'POST', body: { name: 'Первый переставляемый пак' },
+  });
+  const firstId = firstCreated.data.find((p) => p.name === 'Первый переставляемый пак').id;
+  const secondCreated = await request('/api/stickers/admin', {
+    token: admin, method: 'POST', body: { name: 'Второй переставляемый пак' },
+  });
+  const secondId = secondCreated.data.find((p) => p.name === 'Второй переставляемый пак').id;
+  const order = secondCreated.data.map((p) => p.id);
+  const firstIndex = order.indexOf(firstId);
+  const secondIndex = order.indexOf(secondId);
+  [order[firstIndex], order[secondIndex]] = [order[secondIndex], order[firstIndex]];
+
+  const reordered = await request('/api/stickers/admin/reorder', {
+    token: admin, method: 'PUT', body: { order },
+  });
+  assert.equal(reordered.response.status, 200);
+  assert.ok(
+    reordered.data.findIndex((p) => p.id === secondId) < reordered.data.findIndex((p) => p.id === firstId),
+    'переставленный пак приходит раньше и в админке, и в пользовательском API',
+  );
+
+  const incomplete = await request('/api/stickers/admin/reorder', {
+    token: admin, method: 'PUT', body: { order: [firstId, secondId] },
+  });
+  assert.equal(incomplete.response.status, 400);
+});
+
 test('загрузка без эмодзи отклоняется — он обязателен как метаданные и fallback', async () => {
   const admin = superAdminToken();
   const packId = (await request('/api/stickers/admin', {

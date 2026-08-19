@@ -259,6 +259,27 @@ router.post('/admin', verifySuperAdmin, (req, res) => {
   }
 });
 
+// Порядок паков = порядок компактных вкладок в пользовательском пикере.
+// Принимаем полный список id и меняем позиции одной транзакцией.
+router.put('/admin/reorder', verifySuperAdmin, (req, res) => {
+  try {
+    const order = Array.isArray(req.body.order) ? req.body.order.map(Number) : [];
+    const existing = db.prepare('SELECT id FROM emoji_packs ORDER BY position, id').all().map((row) => row.id);
+    const unique = new Set(order);
+    if (order.length !== existing.length || unique.size !== order.length || order.some((id) => !existing.includes(id))) {
+      return res.status(400).json({ error: 'Список не совпадает с паками смайликов' });
+    }
+
+    const setPosition = db.prepare('UPDATE emoji_packs SET position = ? WHERE id = ?');
+    db.transaction(() => order.forEach((id, index) => setPosition.run(index, id)))();
+
+    notifyEmojiChanged(req);
+    res.json(adminPacks());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.put('/admin/:id', verifySuperAdmin, (req, res) => {
   try {
     const id = Number(req.params.id);

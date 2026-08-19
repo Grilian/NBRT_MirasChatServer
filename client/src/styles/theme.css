@@ -1886,6 +1886,21 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .sticker-cell:hover { background: var(--row-hover); }
 .sticker-cell img { width: 100%; height: 100%; object-fit: contain; }
+.sticker-pack-tab img {
+  width: 28px; height: 28px; object-fit: contain; pointer-events: none;
+}
+.sa-sticker-pack-card.is-dragging, .sa-emoji-pack.is-dragging {
+  opacity: .55; border-style: dashed;
+}
+.sa-pack-drag-handle {
+  flex: none; width: 28px; height: 36px; border: none; border-radius: var(--radius-sm);
+  background: none; color: var(--ink-faint); cursor: grab; font-size: 17px; letter-spacing: -4px;
+  display: inline-flex; align-items: center; justify-content: center; padding-right: 5px;
+  touch-action: pan-y;
+}
+.sa-pack-drag-handle:hover { color: var(--accent); background: var(--row-hover); }
+.sa-pack-drag-handle:active { cursor: grabbing; }
+.sticker-pack-tab-fallback { font-size: 19px; line-height: 1; }
 
 .emoji-tabs { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
 /* Вкладка пака — только значок: с названиями шапка расплывалась по ширине, а
