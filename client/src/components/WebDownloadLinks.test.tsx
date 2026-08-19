@@ -31,6 +31,11 @@ test('в веб-настройках показывает все три дист
   expect(screen.getByRole('link', { name: /Linux/ })).toHaveAttribute('href', expect.stringContaining('.deb'));
 
   fireEvent.click(screen.getByRole('button', { name: /iPhone/ }));
-  expect(screen.getByText(/Откройте эту страницу в Safari/)).toBeInTheDocument();
-  expect(screen.getByText(/На экран „Домой“/)).toBeInTheDocument();
+  const guide = screen.getByRole('region', { name: /Инструкция установки на iPhone/ });
+  expect(guide).toBeVisible();
+  expect(screen.getByText(/Откройте MirasChat именно в Safari/)).toBeVisible();
+  expect(screen.getByText(/На экран „Домой“/)).toBeVisible();
+
+  fireEvent.click(screen.getByRole('button', { name: /Закрыть инструкцию/ }));
+  expect(guide).not.toBeInTheDocument();
 });

@@ -113,21 +113,30 @@ const WebDownloadLinks: React.FC<WebDownloadLinksProps> = ({ variant = 'compact'
             className="web-ios-install-button"
             onClick={() => setIosGuideOpen((open) => !open)}
             aria-expanded={iosGuideOpen}
+            aria-controls="web-ios-install-guide"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 13.1c0-2.7 2.2-4 2.3-4.1-1.3-1.9-3.3-2.1-4-2.1-1.7-.2-3.3 1-4.1 1-.8 0-2.1-1-3.5-1-1.8 0-3.5 1.1-4.5 2.7-1.9 3.3-.5 8.2 1.4 10.9.9 1.3 2 2.8 3.5 2.7 1.4-.1 1.9-.9 3.7-.9 1.7 0 2.2.9 3.7.9 1.5 0 2.5-1.3 3.4-2.7 1.1-1.5 1.5-3 1.5-3.1-.1 0-3.4-1.3-3.4-5.3ZM13.9 5.1c.8-1 1.4-2.4 1.2-3.7-1.2.1-2.7.8-3.6 1.8-.8.9-1.5 2.3-1.3 3.6 1.4.1 2.8-.7 3.7-1.7Z" /></svg>
-            <span><strong>iPhone</strong><small>Добавить на экран «Домой»</small></span>
+            <span><strong>iPhone</strong><small>Инструкция установки</small></span>
           </button>
           {iosGuideOpen && (
-            <div className="web-ios-install-guide" role="note">
-              <strong>Установка на iPhone</strong>
-              <span>
-                Откройте эту страницу в Safari, нажмите значок «Поделиться»
-                <svg viewBox="0 0 24 24" aria-label="Поделиться" role="img">
-                  <path d="M12 3v12" /><path d="m8 7 4-4 4 4" />
-                  <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
-                </svg>
-                и выберите «На экран „Домой“».
-              </span>
+            <div id="web-ios-install-guide" className="web-ios-install-guide" role="region" aria-label="Инструкция установки на iPhone">
+              <div className="web-ios-install-guide-head">
+                <strong>Как установить MirasChat на iPhone</strong>
+                <button type="button" onClick={() => setIosGuideOpen(false)} aria-label="Закрыть инструкцию">✕</button>
+              </div>
+              <ol>
+                <li>Откройте MirasChat именно в Safari.</li>
+                <li>
+                  Нажмите значок «Поделиться»
+                  <svg viewBox="0 0 24 24" aria-label="Поделиться" role="img">
+                    <path d="M12 3v12" /><path d="m8 7 4-4 4 4" />
+                    <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+                  </svg>
+                  внизу экрана.
+                </li>
+                <li>Выберите «На экран „Домой“», затем нажмите «Добавить».</li>
+              </ol>
+              <p>iOS не разрешает сайту выполнить установку автоматически.</p>
             </div>
           )}
         </>

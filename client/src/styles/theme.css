@@ -1926,11 +1926,19 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .web-download-links.is-settings strong { font-size: 13.5px; line-height: 1.2; }
 .web-download-links.is-settings small { color: var(--ink-muted); font-size: 11.5px; line-height: 1.25; }
 .web-ios-install-guide {
-  grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px;
-  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--paper-sunken); font-size: 12.5px; line-height: 1.45;
+  grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px;
+  padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 7%, var(--paper-sunken)); font-size: 12.5px; line-height: 1.45;
 }
-.web-ios-install-guide > span { color: var(--ink-muted); }
+.web-ios-install-guide-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.web-ios-install-guide-head > button {
+  flex: none; width: 26px; height: 26px; padding: 0; border: none; border-radius: 50%;
+  display: grid; place-items: center; background: transparent; color: var(--ink-muted); cursor: pointer;
+}
+.web-ios-install-guide-head > button:hover { background: var(--row-hover); color: var(--ink); }
+.web-ios-install-guide ol { margin: 0; padding-left: 20px; color: var(--ink); }
+.web-ios-install-guide li + li { margin-top: 4px; }
+.web-ios-install-guide p { margin: 0; color: var(--ink-muted); }
 .web-ios-install-guide svg {
   display: inline-block; width: 14px; height: 14px; margin: 0 4px;
   vertical-align: -3px; fill: none; stroke: currentColor; stroke-width: 2;
