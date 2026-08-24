@@ -1908,6 +1908,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   padding: 6px 0; border-radius: var(--radius-sm);
 }
 .emoji-cell:hover { background: var(--row-hover); }
+.emoji-cell.is-selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);
+}
 .emoji-empty { grid-column: 1 / -1; padding: 18px 10px; text-align: center; font-size: 13px; color: var(--ink-faint); }
 
 /* ===== Всплывающие уведомления ===== */

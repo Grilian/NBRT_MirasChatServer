@@ -31,6 +31,13 @@ interface EmojiPickerProps {
    * вложенных контейнера с двумя независимыми обработчиками закрытия.
    */
   embedded?: boolean;
+  /**
+   * Готовые данные вместо запроса API. Нужны тестам компонента, чтобы проверять
+   * выбор смайлика детерминированно и не подменять общий HTTP-клиент.
+   */
+  packsOverride?: EmojiPack[];
+  /** Имена уже выбранных кастомных смайликов — для визуальной отметки. */
+  selectedCustomEmoji?: string[];
 }
 
 // Кэш только чтобы не мигать пустой панелью на каждое открытие (компонент
@@ -53,18 +60,25 @@ export const invalidateEmojiPackCache = () => { cachedPacks = null; };
 
 const EmojiPicker: React.FC<EmojiPickerProps> = ({
   onPick, onClose, mobilePanel = false, mobileHeight, embedded = false,
+  packsOverride, selectedCustomEmoji = [],
 }) => {
-  const [packs, setPacks] = useState<EmojiPack[]>(cachedPacks || []);
+  const [packs, setPacks] = useState<EmojiPack[]>(packsOverride || cachedPacks || []);
   const [activePack, setActivePack] = useState(0);
-  const [loading, setLoading] = useState(!cachedPacks);
+  const [loading, setLoading] = useState(!packsOverride && !cachedPacks);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (packsOverride) {
+      setPacks(packsOverride);
+      setActivePack((currentIndex) => Math.min(currentIndex, Math.max(0, packsOverride.length - 1)));
+      setLoading(false);
+      return;
+    }
     api.get('/emoji')
       .then(({ data }) => { cachedPacks = data; setPacks(data); })
       .catch(() => { if (!cachedPacks) setPacks([]); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [packsOverride]);
 
   // Закрытие по клику мимо и по Escape. Клик по самой кнопке-смайлику в
   // composer'е сюда не долетает — она останавливает всплытие и переключает
@@ -130,7 +144,8 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
           <button
             key={`c${item.id}`}
             type="button"
-            className="emoji-cell"
+            className={'emoji-cell' + (selectedCustomEmoji.includes(item.name) ? ' is-selected' : '')}
+            aria-pressed={selectedCustomEmoji.includes(item.name)}
             title={`:${item.name}:`}
             onMouseDown={(e) => e.preventDefault()}
             // В сообщение всё равно уходит код, а не картинка — формат хранения
