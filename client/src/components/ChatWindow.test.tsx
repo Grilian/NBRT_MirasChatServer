@@ -43,40 +43,6 @@ describe('ChatWindow context menu', () => {
     expect(container.querySelector('.lightbox-overlay')).toBeInTheDocument();
   });
 
-  test('tap on another message closes the old menu without opening a new one', () => {
-    jest.useFakeTimers();
-    const second = { ...message, id: 2, text: 'Второе', file_path: null };
-    const { container } = render(
-      <ChatWindow
-        chatId="test"
-        messages={[message, second]}
-        currentUserId={1}
-        onStartEdit={() => {}}
-        onDeleteMessage={() => {}}
-      />,
-    );
-    const firstRow = container.querySelector('[data-msg-id="1"]') as HTMLElement;
-    const secondRow = container.querySelector('[data-msg-id="2"]') as HTMLElement;
-
-    fireEvent.contextMenu(firstRow, { clientX: 100, clientY: 100 });
-    expect(container.querySelector('.msg-context-menu')).toBeInTheDocument();
-
-    // Реальный Android присылает все эти события для одного физического тапа.
-    fireEvent.pointerDown(secondRow, { clientX: 120, clientY: 180 });
-    fireEvent.touchStart(secondRow, { touches: [{ clientX: 120, clientY: 180 }] });
-    fireEvent.pointerUp(secondRow, { clientX: 120, clientY: 180 });
-    fireEvent.touchEnd(secondRow, { changedTouches: [{ clientX: 120, clientY: 180 }] });
-    expect(container.querySelector('.msg-context-menu')).not.toBeInTheDocument();
-
-    // WebView после preventDefault может не прислать click. Следующий тап всё
-    // равно обязан сработать с первого раза, сразу после завершения жеста.
-    act(() => { jest.advanceTimersByTime(40); });
-    fireEvent.touchStart(secondRow, { touches: [{ clientX: 120, clientY: 180 }] });
-    fireEvent.touchEnd(secondRow, { changedTouches: [{ clientX: 120, clientY: 180 }] });
-    expect(container.querySelector('.msg-context-menu')).toBeInTheDocument();
-    jest.useRealTimers();
-  });
-
   test('uses the visible chat area as the context-menu height limit', () => {
     const { container } = renderWindow();
     const chat = container.querySelector('.conv-body') as HTMLElement;
@@ -343,7 +309,7 @@ describe('ChatWindow стикеры', () => {
     username: 'me',
     created_at: '2026-08-09T10:00:00.000Z',
   };
-  const catalog = { 7: { filePath: '/uploads/stickers/s.webp', animatedPath: null, emoji: '🔥' } };
+  const catalog = { 7: { filePath: '/uploads/stickers/s.webp', emoji: '🔥' } };
 
   function renderSticker(overrides: Record<string, unknown> = {}) {
     return render(
@@ -371,6 +337,25 @@ describe('ChatWindow стикеры', () => {
 
     fireEvent.click(sticker);
     expect(container.querySelector('.lightbox-overlay')).not.toBeInTheDocument();
+  });
+
+  test('использует единственный файл стикера — браузер сам воспроизводит WebP/GIF', () => {
+    const animatedCatalog = { 7: { filePath: '/uploads/stickers/animated.webp', emoji: '🔥' } };
+    const { container } = render(
+      <ChatWindow
+        chatId="test"
+        messages={[stickerMessage]}
+        currentUserId={1}
+        stickerCatalog={animatedCatalog}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('.bubble-sticker')).toHaveAttribute(
+      'src',
+      expect.stringContaining('/uploads/stickers/animated.webp'),
+    );
   });
 
   test('пузырь стикера без подложки и без полей', () => {

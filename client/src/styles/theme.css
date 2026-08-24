@@ -1886,80 +1886,6 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .sticker-cell:hover { background: var(--row-hover); }
 .sticker-cell img { width: 100%; height: 100%; object-fit: contain; }
-.sticker-pack-tab img {
-  width: 28px; height: 28px; object-fit: contain; pointer-events: none;
-}
-
-/* Полноценные кнопки дистрибутивов в веб-настройках. Компактные иконки в
-   шапке списка остаются прежними; эти правила действуют только на variant
-   settings и возвращают видимые подписи. */
-.web-distributions-group { padding: 8px; }
-.web-download-links.is-settings {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: 100%; gap: 8px;
-}
-.web-download-links.is-settings a,
-.web-download-links.is-settings .web-ios-install-button {
-  width: auto; min-width: 0; height: 58px; padding: 8px 11px;
-  display: flex; align-items: center; justify-content: flex-start; gap: 10px;
-  border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--paper-sunken); color: var(--ink); cursor: pointer;
-  text-align: left; font: inherit; text-decoration: none;
-  transition: border-color var(--ease), background var(--ease), color var(--ease);
-}
-.web-download-links.is-settings a:hover,
-.web-download-links.is-settings .web-ios-install-button:hover {
-  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-  background: var(--row-hover);
-}
-.web-download-links.is-settings a.is-disabled { pointer-events: none; opacity: .45; }
-.web-download-links.is-settings > a > svg,
-.web-download-links.is-settings .web-ios-install-button > svg {
-  width: 22px; height: 22px; flex: none; fill: currentColor;
-}
-.web-download-links.is-settings > a > span,
-.web-download-links.is-settings .web-ios-install-button > span {
-  position: static; width: auto; height: auto; padding: 0; margin: 0;
-  overflow: visible; clip-path: none; white-space: normal;
-  display: flex; min-width: 0; flex-direction: column; gap: 2px;
-}
-.web-download-links.is-settings strong { font-size: 13.5px; line-height: 1.2; }
-.web-download-links.is-settings small { color: var(--ink-muted); font-size: 11.5px; line-height: 1.25; }
-.web-ios-install-guide {
-  grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px;
-  padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 7%, var(--paper-sunken)); font-size: 12.5px; line-height: 1.45;
-}
-.web-ios-install-guide-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.web-ios-install-guide-head > button {
-  flex: none; width: 26px; height: 26px; padding: 0; border: none; border-radius: 50%;
-  display: grid; place-items: center; background: transparent; color: var(--ink-muted); cursor: pointer;
-}
-.web-ios-install-guide-head > button:hover { background: var(--row-hover); color: var(--ink); }
-.web-ios-install-guide ol { margin: 0; padding-left: 20px; color: var(--ink); }
-.web-ios-install-guide li + li { margin-top: 4px; }
-.web-ios-install-guide p { margin: 0; color: var(--ink-muted); }
-.web-ios-install-guide svg {
-  display: inline-block; width: 14px; height: 14px; margin: 0 4px;
-  vertical-align: -3px; fill: none; stroke: currentColor; stroke-width: 2;
-  stroke-linecap: round; stroke-linejoin: round;
-}
-@media (max-width: 480px) {
-  .web-download-links.is-settings { grid-template-columns: 1fr; }
-  .web-ios-install-guide { grid-column: 1; }
-}
-.sa-sticker-pack-card.is-dragging, .sa-emoji-pack.is-dragging {
-  opacity: .55; border-style: dashed;
-}
-.sa-pack-drag-handle {
-  flex: none; width: 28px; height: 36px; border: none; border-radius: var(--radius-sm);
-  background: none; color: var(--ink-faint); cursor: grab; font-size: 17px; letter-spacing: -4px;
-  display: inline-flex; align-items: center; justify-content: center; padding-right: 5px;
-  touch-action: pan-y;
-}
-.sa-pack-drag-handle:hover { color: var(--accent); background: var(--row-hover); }
-.sa-pack-drag-handle:active { cursor: grabbing; }
-.sticker-pack-tab-fallback { font-size: 19px; line-height: 1; }
 
 .emoji-tabs { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
 /* Вкладка пака — только значок: с названиями шапка расплывалась по ширине, а
@@ -2521,30 +2447,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-google-add .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; }
 
 .sa-verified-badge { color: var(--accent); font-weight: 700; margin-left: 4px; }
-.sa-reaction-preview { display: flex; flex-wrap: wrap; gap: 7px; font-size: 22px; margin: 4px 0 12px; }
-.sa-reaction-preview button {
-  width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--surface); display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer;
-}
-.sa-reaction-preview button:hover { border-color: var(--accent); background: var(--row-hover); }
-.sa-reaction-preview .custom-emoji { width: 30px; height: 30px; }
-.sa-reaction-picker-toggle {
-  border: 1px solid var(--line); border-radius: 9px; background: var(--surface);
-  color: var(--accent); cursor: pointer; padding: 9px 13px; font-weight: 600;
-}
-.sa-reaction-picker-toggle:hover { background: var(--row-hover); }
-.sa-reaction-picker {
-  margin-top: 10px; max-height: 300px; overflow: hidden;
-  border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
-}
-.sa-reaction-picker .emoji-grid { max-height: 238px; overflow-y: auto; }
-.sa-reaction-picker .emoji-cell.is-selected {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
-.sa-reaction-save { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.sa-reaction-save .btn-primary { width: auto; margin-top: 0; }
+.sa-reaction-preview { display: flex; gap: 8px; font-size: 22px; margin: 4px 0 12px; }
 .sa-new-badge {
   display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill);
   background: var(--unread); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .03em;
@@ -2606,7 +2509,6 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .reaction-chip.is-mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .reaction-chip .avatar { width: 18px; height: 18px; font-size: 8px; }
 .reaction-chip-emoji { font-size: 14px; }
-.reaction-chip-emoji .custom-emoji { width: 18px; height: 18px; }
 .reaction-chip-remove {
   display: none; border: none; background: none; color: var(--ink-faint);
   cursor: pointer; padding: 0 0 0 2px; line-height: 1;
@@ -2643,12 +2545,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .msg-menu-reaction:hover { background: var(--row-hover); }
 .msg-menu-reaction.is-active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.msg-menu-reaction .custom-emoji { width: 30px; height: 30px; }
 
 .reactions-modal { max-width: 380px; }
 .reaction-row { cursor: default; }
 .reaction-row-emoji { font-size: 20px; flex: none; }
-.reaction-row-emoji .custom-emoji { width: 24px; height: 24px; }
 .reaction-row-remove { flex: none; }
 
 /* Подтверждение удаления: область действия выбирается здесь, а не в

@@ -2,7 +2,6 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import MessageInput from './MessageInput';
-import ChatWindow from './ChatWindow';
 
 // Фокус ставится внутри requestAnimationFrame (композер в этот момент ещё
 // меняет высоту под появившуюся панель), поэтому в тестах кадр прогоняем руками.
@@ -164,43 +163,5 @@ describe('MessageInput прикрепление картинки', () => {
     expect(error!.textContent).toContain('Выберите его заново');
     // Прикреплять нечего — превью не появилось.
     expect(container.querySelector('.composer-attachment')).toBeNull();
-  });
-});
-
-describe('MessageInput всплывающие панели', () => {
-  test('тап по сообщению за открытой скрепкой только закрывает скрепку', () => {
-    const { container } = render(
-      <>
-        <ChatWindow
-          chatId="test"
-          messages={[{
-            id: 1,
-            text: 'Сообщение',
-            sender_id: 2,
-            username: 'user',
-            created_at: '2026-08-19T10:00:00.000Z',
-          }]}
-          currentUserId={1}
-          onStartEdit={() => {}}
-          onDeleteMessage={() => {}}
-        />
-        <MessageInput onSend={noopSend} />
-      </>,
-    );
-
-    fireEvent.click(container.querySelector('.attach-btn') as HTMLElement);
-    expect(container.querySelector('.composer-attach-menu')).toBeInTheDocument();
-
-    const row = container.querySelector('[data-msg-id="1"]') as HTMLElement;
-    fireEvent.pointerDown(row, { clientX: 80, clientY: 80 });
-    fireEvent.touchStart(row, { touches: [{ clientX: 80, clientY: 80 }] });
-    fireEvent.pointerUp(row, { clientX: 80, clientY: 80 });
-    fireEvent.touchEnd(row, { changedTouches: [{ clientX: 80, clientY: 80 }] });
-    fireEvent.mouseDown(row, { clientX: 80, clientY: 80 });
-    fireEvent.mouseUp(row, { clientX: 80, clientY: 80 });
-    fireEvent.click(row, { clientX: 80, clientY: 80 });
-
-    expect(container.querySelector('.composer-attach-menu')).not.toBeInTheDocument();
-    expect(container.querySelector('.msg-context-menu')).not.toBeInTheDocument();
   });
 });

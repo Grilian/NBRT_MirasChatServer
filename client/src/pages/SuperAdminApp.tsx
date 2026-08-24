@@ -6,9 +6,6 @@ import { resolveUploadUrl } from '../utils/uploads';
 import { useDragReorder } from '../utils/useDragReorder';
 import StickerPacksPanel from '../components/StickerPacksPanel';
 import ReleaseRollbackPanel from '../components/ReleaseRollbackPanel';
-import EmojiPicker, { EmojiPack as PickerEmojiPack } from '../components/EmojiPicker';
-import { CustomEmojiImage, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
-import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
 interface Group {
   id: number;
@@ -1197,41 +1194,20 @@ function GoogleCalendarPanel({ users }: { users: UserRow[] }) {
   );
 }
 
-// Базовые реакции выбираются из общей панели загруженных смайликов. В настройке
-// хранится shortcode, а системный Unicode остаётся только запасным отображением.
+// Базовые реакции — короткий ряд, который предлагается над контекстным меню
+// сообщения. Правится одним полем, как и пак смайликов: это набор строк, а не
+// сущности со своими свойствами.
 function ReactionsPanel() {
-  const [selected, setSelected] = useState<string[]>([]);
-  const [packs, setPacks] = useState<EmojiPack[]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const [saved, setSaved] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
-  const pickerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!pickerOpen) return undefined;
-    const closeOutside = (event: Event) => {
-      if (pickerRef.current?.contains(event.target as Node)) return;
-      dismissLayerWithoutUnderlayActivation(event, () => setPickerOpen(false));
-    };
-    window.addEventListener('pointerdown', closeOutside, true);
-    window.addEventListener('mousedown', closeOutside, true);
-    window.addEventListener('touchstart', closeOutside, { capture: true, passive: false });
-    return () => {
-      window.removeEventListener('pointerdown', closeOutside, true);
-      window.removeEventListener('mousedown', closeOutside, true);
-      window.removeEventListener('touchstart', closeOutside, true);
-    };
-  }, [pickerOpen]);
 
   const load = async () => {
     try {
-      const [reactionsResponse, emojiResponse] = await Promise.all([
-        superAdminApi.get('/superadmin/reactions'),
-        superAdminApi.get('/emoji/admin'),
-      ]);
-      setSelected(reactionsResponse.data.emoji || []);
-      setPacks(emojiResponse.data.packs || emojiResponse.data || []);
-      setError('');
+      const { data } = await superAdminApi.get('/superadmin/reactions');
+      setSaved(data.emoji);
+      setValue(data.emoji.join(' '));
     } catch {
       setError('Не удалось загрузить реакции');
     }
@@ -1242,34 +1218,14 @@ function ReactionsPanel() {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { data } = await superAdminApi.put('/superadmin/reactions', { emoji: selected });
-      setSelected(data.emoji || []);
+      const { data } = await superAdminApi.put('/superadmin/reactions', { emoji: value });
+      setSaved(data.emoji);
+      setValue(data.emoji.join(' '));
       setError('');
       setStatus('Сохранено');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Не удалось сохранить');
     }
-  };
-
-  const pickerPacks: PickerEmojiPack[] = packs
-    .filter((pack) => pack.enabled && (pack.custom || []).length > 0)
-    .map((pack) => ({
-      id: pack.id,
-      name: pack.name,
-      emoji: [],
-      custom: pack.custom || [],
-    }));
-
-  const itemsByToken = new Map<string, EmojiCustomItem>();
-  for (const pack of packs) {
-    for (const item of pack.custom || []) itemsByToken.set(`:${item.name}:`, item);
-  }
-
-  const toggle = (token: string) => {
-    setStatus('');
-    setSelected((current) => current.includes(token)
-      ? current.filter((item) => item !== token)
-      : [...current, token]);
   };
 
   return (
@@ -1278,49 +1234,22 @@ function ReactionsPanel() {
       {error && <p className="form-error">{error}</p>}
 
       <p className="sa-hint">
-        Выберите загруженные смайлики, которые человек увидит над меню сообщения.
-        Количество не ограничено. Уже поставленные реакции останутся, даже если
-        убрать смайлик из этого списка.
+        Через пробел, до 12 штук — этот ряд человек видит над меню сообщения.
+        Уже поставленные реакции набор не меняет: они останутся, даже если убрать
+        эмодзи из списка. Пустое поле вернёт набор по умолчанию.
       </p>
 
-      <div className="sa-reaction-preview" aria-label="Выбранные реакции">
-        {selected.length === 0 && <span className="sa-hint">Реакции пока не выбраны</span>}
-        {selected.map((token) => {
-          const item = itemsByToken.get(token);
-          return (
-            <button key={token} type="button" onClick={() => toggle(token)} title="Убрать реакцию">
-              {item
-                ? <CustomEmojiImage filePath={item.file_path} fallback={item.fallback || DEFAULT_EMOJI_FALLBACK} />
-                : token}
-            </button>
-          );
-        })}
+      <div className="sa-reaction-preview">
+        {saved.map((emoji) => <span key={emoji}>{emoji}</span>)}
       </div>
 
-      <button
-        type="button"
-        className="sa-reaction-picker-toggle"
-        onClick={() => setPickerOpen((open) => !open)}
-      >
-        {pickerOpen ? 'Закрыть смайлики' : 'Выбрать смайлики'}
-      </button>
-
-      {pickerOpen && (
-        <div className="sa-reaction-picker" ref={pickerRef}>
-          <EmojiPicker
-            embedded
-            packsOverride={pickerPacks}
-            selectedCustomEmoji={selected}
-            onClose={() => setPickerOpen(false)}
-            onPick={(picked) => {
-              if (typeof picked !== 'string') toggle(`:${picked.name}:`);
-            }}
-          />
-        </div>
-      )}
-
-      <form onSubmit={save} className="sa-reaction-save">
-        <span className="sa-hint">Выбрано: {selected.length}</span>
+      <form onSubmit={save} className="sa-inline-form">
+        <input
+          type="text"
+          value={value}
+          placeholder="👍 ❤️ 😂"
+          onChange={(e) => { setValue(e.target.value); setStatus(''); }}
+        />
         <button type="submit" className="btn-primary">Сохранить</button>
       </form>
 
@@ -1802,59 +1731,22 @@ function EmojiPacksPanel() {
     }
   };
 
-  const savePackOrder = async (order: number[]) => {
-    try {
-      const { data } = await superAdminApi.put('/emoji/admin/reorder', { order });
-      apply(data);
-      setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Не удалось сохранить порядок паков');
-      void load();
-    }
-  };
-
-  const {
-    order: packOrder,
-    dragId: draggedPackId,
-    containerRef: packListRef,
-    tileHandlers: packDragHandlers,
-  } = useDragReorder({
-    items: packs,
-    onReorder: savePackOrder,
-    dataAttribute: 'data-emoji-pack-id',
-  });
-
   return (
     <div className="sa-card sa-card--compact">
       <h2>Смайлики</h2>
       <p className="sa-hint">
         Пак — вкладка в панели смайликов у сотрудников. Смайлик с картинкой уезжает
         в сообщение кодом, без картинки — обычным символом. Порядок меняется
-        перетаскиванием. Сами паки тоже можно менять местами за ручку слева.
-        Всё остальное — в карточке смайлика по нажатию.
+        перетаскиванием, всё остальное — в карточке смайлика по нажатию.
       </p>
       {error && <p className="form-error">{error}</p>}
 
-      <div className="sa-emoji-pack-list" ref={packListRef}>
-        {packOrder.map((pack) => {
-          const open = openPack === pack.id;
-          const items = pack.items || [];
-          return (
-          <div
-            key={pack.id}
-            data-emoji-pack-id={pack.id}
-            className={`sa-emoji-pack${open ? ' is-open' : ''}${draggedPackId === pack.id ? ' is-dragging' : ''}`}
-          >
+      {packs.map((pack) => {
+        const open = openPack === pack.id;
+        const items = pack.items || [];
+        return (
+          <div key={pack.id} className={`sa-emoji-pack${open ? ' is-open' : ''}`}>
             <div className="sa-emoji-pack-head">
-              <button
-                type="button"
-                className="sa-pack-drag-handle"
-                aria-label={`Переместить пак ${pack.name}`}
-                title="Перетащить пак"
-                {...packDragHandlers(pack)}
-              >
-                ⋮⋮
-              </button>
               <button
                 type="button"
                 className="sa-emoji-pack-toggle"
@@ -1936,9 +1828,8 @@ function EmojiPacksPanel() {
               </div>
             )}
           </div>
-          );
-        })}
-      </div>
+        );
+      })}
 
       <form onSubmit={create} className="sa-inline-form">
         <input type="text" placeholder="Новый пак…" value={newName} onChange={(e) => setNewName(e.target.value)} />

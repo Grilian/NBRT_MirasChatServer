@@ -9,8 +9,7 @@ const db = require('../db');
 // на каждой установке нельзя: набор меняют, а уже поставленные реакции должны
 // пережить это. Поэтому ограничиваем только длину — на случай, если вместо
 // эмодзи придёт простыня.
-// : + имя до 32 символов + :
-const MAX_EMOJI_LENGTH = 34;
+const MAX_EMOJI_LENGTH = 16;
 
 function isValidEmoji(value) {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_EMOJI_LENGTH;

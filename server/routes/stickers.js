@@ -33,13 +33,13 @@ const stickerUpload = multer({
 
 const normalizeEmoji = (raw) => String(raw || '').trim().slice(0, MAX_EMOJI_LENGTH);
 
-// Сохранение картинки стикера — тот же пайплайн, что у смайлика (sharp →
-// webp), только крупнее. Анимация (animated_path) на схеме уже заложена под
-// будущее (та же пара static/animated, что у emoji_items), но загрузку
-// анимированной версии эта фаза не даёт — берём только первый кадр.
-async function saveStickerImage(buffer, prefix) {
+// У стикера ровно один файл: если исходник анимированный (GIF/WebP), sharp
+// сохраняет все его кадры в итоговый WebP; если статичный — итог остаётся
+// статичным. Отдельной static/animated-пары, как у смайликов, здесь нет.
+// Обложку пака намеренно оставляем статичной: это метаданные набора, не стикер.
+async function saveStickerImage(buffer, prefix, { preserveAnimation = false } = {}) {
   const filename = `${prefix}_${crypto.randomBytes(6).toString('hex')}.webp`;
-  await sharp(buffer)
+  await sharp(buffer, preserveAnimation ? { animated: true } : {})
     .resize(STICKER_MAX_DIMENSION, STICKER_MAX_DIMENSION, { fit: 'inside', withoutEnlargement: true })
     .webp({ quality: 90 })
     .toFile(path.join(STICKER_DIR, filename));
@@ -76,7 +76,7 @@ function packsWithItems({ onlyEnabled, includeRetired = false }) {
   `).all();
 
   const items = db.prepare(
-    `SELECT id, pack_id, file_path, animated_path, emoji, retired, position
+    `SELECT id, pack_id, file_path, emoji, retired, position
      FROM sticker_items ${includeRetired ? '' : 'WHERE retired = 0'} ORDER BY position, id`
   ).all();
   const byPack = new Map();
@@ -85,7 +85,6 @@ function packsWithItems({ onlyEnabled, includeRetired = false }) {
     byPack.get(item.pack_id).push({
       id: item.id,
       file_path: item.file_path,
-      animated_path: item.animated_path || null,
       emoji: item.emoji,
       ...(includeRetired ? { retired: !!item.retired } : {}),
     });
@@ -131,7 +130,7 @@ router.get('/', verifyToken, (req, res) => {
 router.get('/catalog', verifyToken, (req, res) => {
   try {
     res.json(db.prepare(`
-      SELECT id, file_path, animated_path, emoji
+      SELECT id, file_path, emoji
       FROM sticker_items
     `).all());
   } catch (e) {
@@ -162,28 +161,6 @@ router.post('/admin', verifySuperAdmin, (req, res) => {
 
     notifyStickersChanged(req);
     res.status(201).json(adminPacks());
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Порядок паков задаётся целиком: так две параллельные перестановки не оставят
-// одинаковые position и клиент всегда получит ровно тот порядок вкладок,
-// который видит администратор после drag-and-drop.
-router.put('/admin/reorder', verifySuperAdmin, (req, res) => {
-  try {
-    const order = Array.isArray(req.body.order) ? req.body.order.map(Number) : [];
-    const existing = db.prepare('SELECT id FROM sticker_packs ORDER BY position, id').all().map((row) => row.id);
-    const unique = new Set(order);
-    if (order.length !== existing.length || unique.size !== order.length || order.some((id) => !existing.includes(id))) {
-      return res.status(400).json({ error: 'Список не совпадает с наборами стикеров' });
-    }
-
-    const setPosition = db.prepare('UPDATE sticker_packs SET position = ? WHERE id = ?');
-    db.transaction(() => order.forEach((id, index) => setPosition.run(index, id)))();
-
-    notifyStickersChanged(req);
-    res.json(adminPacks());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -262,7 +239,7 @@ router.post('/admin/:id/items', verifySuperAdmin, (req, res) => {
     if (count >= MAX_ITEMS_PER_PACK) return res.status(400).json({ error: 'В паке слишком много стикеров' });
 
     try {
-      const filePath = await saveStickerImage(req.file.buffer, 'sticker');
+      const filePath = await saveStickerImage(req.file.buffer, 'sticker', { preserveAnimation: true });
       const nextPosition = db.prepare(
         'SELECT COALESCE(MAX(position), -1) + 1 AS p FROM sticker_items WHERE pack_id = ?'
       ).get(packId).p;
@@ -308,7 +285,7 @@ router.post('/admin/items/:itemId/image', verifySuperAdmin, (req, res) => {
     if (!item) return res.status(404).json({ error: 'Стикер не найден' });
 
     try {
-      const filePath = await saveStickerImage(req.file.buffer, 'sticker');
+      const filePath = await saveStickerImage(req.file.buffer, 'sticker', { preserveAnimation: true });
       db.prepare('UPDATE sticker_items SET file_path = ? WHERE id = ?').run(filePath, itemId);
       unlinkStickerFile(item.file_path);
 
@@ -366,12 +343,11 @@ router.put('/admin/:packId/items/reorder', verifySuperAdmin, (req, res) => {
 router.delete('/admin/items/:itemId', verifySuperAdmin, (req, res) => {
   try {
     const itemId = Number(req.params.itemId);
-    const item = db.prepare('SELECT file_path, animated_path FROM sticker_items WHERE id = ?').get(itemId);
+    const item = db.prepare('SELECT file_path FROM sticker_items WHERE id = ?').get(itemId);
     if (!item) return res.status(404).json({ error: 'Стикер не найден' });
 
     db.prepare('DELETE FROM sticker_items WHERE id = ?').run(itemId);
     unlinkStickerFile(item.file_path);
-    unlinkStickerFile(item.animated_path);
 
     notifyStickersChanged(req);
     res.json(adminPacks());

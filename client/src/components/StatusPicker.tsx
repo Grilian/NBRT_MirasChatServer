@@ -1,11 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import api from '../api/client';
 import EmojiPicker from './EmojiPicker';
 import {
   STATUS_PRESETS, STATUS_PRESET_ORDER, StatusPreset,
   describeStatus, statusExpiryOn,
 } from '../utils/statusMeta';
-import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
 interface StatusPickerProps {
   statusPreset: string | null;
@@ -46,23 +45,6 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
   const [until, setUntil] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const emojiPopoverRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!emojiOpen) return undefined;
-    const closeOutside = (event: Event) => {
-      if (emojiPopoverRef.current?.contains(event.target as Node)) return;
-      dismissLayerWithoutUnderlayActivation(event, () => setEmojiOpen(false));
-    };
-    window.addEventListener('pointerdown', closeOutside, true);
-    window.addEventListener('mousedown', closeOutside, true);
-    window.addEventListener('touchstart', closeOutside, { capture: true, passive: false });
-    return () => {
-      window.removeEventListener('pointerdown', closeOutside, true);
-      window.removeEventListener('mousedown', closeOutside, true);
-      window.removeEventListener('touchstart', closeOutside, true);
-    };
-  }, [emojiOpen]);
 
   const initialPreset = (statusPreset && STATUS_PRESETS[statusPreset as StatusPreset])
     ? statusPreset as StatusPreset
@@ -188,7 +170,7 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
           </div>
 
           {emojiOpen && (
-            <div className="status-emoji-popover" ref={emojiPopoverRef}>
+            <div className="status-emoji-popover">
               <EmojiPicker
                 embedded
                 onPick={(picked) => {

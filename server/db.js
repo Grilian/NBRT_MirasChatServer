@@ -1047,7 +1047,6 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pack_id INTEGER NOT NULL,
     file_path TEXT NOT NULL,
-    animated_path TEXT,
     emoji TEXT NOT NULL,
     position INTEGER NOT NULL DEFAULT 0,
     retired INTEGER NOT NULL DEFAULT 0,

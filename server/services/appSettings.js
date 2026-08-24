@@ -73,69 +73,25 @@ function setInternetSeenAt(ms) {
   setSetting(INTERNET_SEEN_AT, String(ms));
 }
 
-// Базовый набор реакций хранит shortcodes загруженных картинок. Старые Unicode
-// значения преобразуются по fallback_emoji, чтобы системные эмодзи оставались
-// только резервом на случай отсутствующей или сломанной картинки.
+// Базовый набор реакций — то, что предлагается над контекстным меню
+// сообщения. Хранится строкой через пробел, как и пак смайликов: набор
+// короткий, править его удобнее одним полем, чем таблицей на пять строк.
 const REACTION_EMOJI = 'reaction_emoji';
 const DEFAULT_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-const SHORTCODE = /^:([a-z0-9_]{2,32}):$/;
-
-function reactionCatalog() {
-  const rows = db.prepare(`
-    SELECT i.name, i.fallback_emoji, i.retired, p.enabled
-    FROM emoji_items i
-    JOIN emoji_packs p ON p.id = i.pack_id
-    WHERE i.file_path IS NOT NULL AND i.name IS NOT NULL
-    ORDER BY p.position, i.position, i.id
-  `).all();
-  const allByName = new Map();
-  const enabledByFallback = new Map();
-  for (const row of rows) {
-    allByName.set(row.name, row);
-    if (row.enabled && !row.retired && row.fallback_emoji && !enabledByFallback.has(row.fallback_emoji)) {
-      enabledByFallback.set(row.fallback_emoji, row.name);
-    }
-  }
-  return { allByName, enabledByFallback };
-}
-
-const unique = (values) => [...new Set(values)];
-
-function defaultsForCatalog(catalog) {
-  return unique(DEFAULT_REACTIONS.map((fallback) => {
-    const name = catalog.enabledByFallback.get(fallback);
-    return name ? `:${name}:` : fallback;
-  }));
-}
+const MAX_REACTIONS = 12;
 
 function getReactionEmoji() {
-  const catalog = reactionCatalog();
   const raw = getSetting(REACTION_EMOJI);
-  if (!raw) return defaultsForCatalog(catalog);
-  const list = raw.split(/\s+/).filter(Boolean).map((value) => {
-    const shortcode = SHORTCODE.exec(value);
-    if (shortcode) return catalog.allByName.has(shortcode[1]) ? value : null;
-    const name = catalog.enabledByFallback.get(value);
-    return name ? `:${name}:` : value;
-  }).filter(Boolean);
-  return list.length ? unique(list) : defaultsForCatalog(catalog);
+  if (!raw) return [...DEFAULT_REACTIONS];
+  const list = raw.split(/\s+/).filter(Boolean);
+  return list.length ? list : [...DEFAULT_REACTIONS];
 }
 
 function setReactionEmoji(value) {
-  const catalog = reactionCatalog();
-  const source = Array.isArray(value) ? value : String(value || '').split(/\s+/);
-  const list = unique(source.map((raw) => String(raw || '').trim()).filter(Boolean).map((item) => {
-    const shortcode = SHORTCODE.exec(item);
-    if (shortcode) {
-      const row = catalog.allByName.get(shortcode[1]);
-      return row && row.enabled && !row.retired ? item : null;
-    }
-    const name = catalog.enabledByFallback.get(item);
-    return name ? `:${name}:` : null;
-  }).filter(Boolean));
+  const list = String(value || '').split(/\s+/).filter(Boolean).slice(0, MAX_REACTIONS);
   if (!list.length) {
     setSetting(REACTION_EMOJI, null); // пусто — возвращаемся к набору по умолчанию
-    return defaultsForCatalog(catalog);
+    return [...DEFAULT_REACTIONS];
   }
   setSetting(REACTION_EMOJI, list.join(' '));
   return list;

@@ -5,7 +5,6 @@ import { resolveUploadUrl } from '../utils/uploads';
 export interface StickerPackItem {
   id: number;
   file_path: string;
-  animated_path: string | null;
   emoji: string;
 }
 
@@ -30,13 +29,15 @@ let cachedPacks: StickerPack[] | null = null;
 export const invalidateStickerPackCache = () => { cachedPacks = null; };
 
 /**
- * Пользовательский список стикеров. Паки переключаются компактными вкладками
- * с обложками — так же, как категории в EmojiPicker. Название остаётся только
- * в title/aria-label: в узкой мобильной панели текстовые вкладки не помещаются.
+ * Пользовательский список стикеров.
+ *
+ * По требованию у обычного человека НЕТ навигации по пакам: он открывает
+ * вкладку и видит единый список всего, что ему доступно. Паки существуют в
+ * модели данных и в админке, но здесь они только задают порядок — стикеры из
+ * них склеиваются в одну ленту в том же порядке, в каком админ их расставил.
  */
 const StickerPicker: React.FC<StickerPickerProps> = ({ onPick }) => {
   const [packs, setPacks] = useState<StickerPack[]>(cachedPacks || []);
-  const [activePack, setActivePack] = useState(0);
   const [loading, setLoading] = useState(!cachedPacks);
 
   useEffect(() => {
@@ -46,61 +47,29 @@ const StickerPicker: React.FC<StickerPickerProps> = ({ onPick }) => {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (activePack >= packs.length) setActivePack(0);
-  }, [activePack, packs.length]);
-
-  const current = packs[activePack];
-  const stickers = current?.items || [];
+  const stickers = packs.flatMap((pack) => pack.items);
 
   return (
-    <>
-      {packs.length > 1 && (
-        <div className="emoji-tabs sticker-pack-tabs" role="tablist" aria-label="Наборы стикеров">
-          {packs.map((pack, index) => {
-            const cover = pack.cover_path || pack.items[0]?.file_path || null;
-            return (
-              <button
-                key={pack.id}
-                type="button"
-                role="tab"
-                aria-selected={index === activePack}
-                aria-label={pack.name}
-                title={pack.name}
-                className={'emoji-tab sticker-pack-tab' + (index === activePack ? ' is-active' : '')}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setActivePack(index)}
-              >
-                {cover
-                  ? <img src={resolveUploadUrl(cover) || ''} alt="" draggable={false} />
-                  : <span className="sticker-pack-tab-fallback">{pack.items[0]?.emoji || '🙂'}</span>}
-              </button>
-            );
-          })}
-        </div>
+    <div className="sticker-grid">
+      {loading && <div className="emoji-empty">Загрузка…</div>}
+      {!loading && stickers.length === 0 && (
+        <div className="emoji-empty">Стикеры пока не добавлены</div>
       )}
-
-      <div className="sticker-grid">
-        {loading && <div className="emoji-empty">Загрузка…</div>}
-        {!loading && (!current || stickers.length === 0) && (
-          <div className="emoji-empty">Стикеры пока не добавлены</div>
-        )}
-        {stickers.map((sticker) => (
-          <button
-            key={sticker.id}
-            type="button"
-            className="sticker-cell"
-            title={sticker.emoji}
-            // preventDefault по той же причине, что у смайликов: без него фокус
-            // уходит из поля ввода и на телефоне закрывается клавиатура.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onPick(sticker.id)}
-          >
-            <img src={resolveUploadUrl(sticker.file_path) || ''} alt={sticker.emoji} draggable={false} />
-          </button>
-        ))}
-      </div>
-    </>
+      {stickers.map((sticker) => (
+        <button
+          key={sticker.id}
+          type="button"
+          className="sticker-cell"
+          title={sticker.emoji}
+          // preventDefault по той же причине, что у смайликов: без него фокус
+          // уходит из поля ввода и на телефоне закрывается клавиатура.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onPick(sticker.id)}
+        >
+          <img src={resolveUploadUrl(sticker.file_path) || ''} alt={sticker.emoji} draggable={false} />
+        </button>
+      ))}
+    </div>
   );
 };
 

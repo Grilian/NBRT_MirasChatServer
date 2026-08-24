@@ -12,7 +12,6 @@
 
 export interface StickerCatalogEntry {
   filePath: string;
-  animatedPath: string | null;
   /** Эмодзи стикера — он же запасной глиф, если картинки не окажется. */
   emoji: string;
 }
@@ -22,7 +21,6 @@ export type StickerCatalog = Record<number, StickerCatalogEntry>;
 interface StickerCatalogRow {
   id: number;
   file_path: string;
-  animated_path?: string | null;
   emoji?: string | null;
 }
 
@@ -33,7 +31,6 @@ export function buildStickerCatalog(rows: StickerCatalogRow[]): StickerCatalog {
     if (!row || typeof row.id !== 'number' || !row.file_path) continue;
     catalog[row.id] = {
       filePath: row.file_path,
-      animatedPath: row.animated_path || null,
       emoji: row.emoji || '',
     };
   }

@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const sharp = require('sharp');
 
 const dbPath = path.join(os.tmpdir(), `miras-stickers-${process.pid}-${Date.now()}.db`);
 process.env.MIRAS_DB_PATH = dbPath;
@@ -59,9 +60,16 @@ const TINY_PNG = Buffer.from(
   'base64'
 );
 
-function stickerForm(emoji) {
+// Настоящий GIF 1×1 с двумя кадрами. Он нужен именно как вход API: тест
+// проверяет, что сервер не срезает анимацию до первого кадра при нормализации.
+const TINY_ANIMATED_GIF = Buffer.from(
+  '47494638396101000100800000000000ffffff21ff0b4e45545343415045322e30030100000021f904000a0000002c000000000100010000020244010021f904000a0000002c00000000010001000002024c01003b',
+  'hex'
+);
+
+function stickerForm(emoji, file = { buffer: TINY_PNG, type: 'image/png', name: 'sticker.png' }) {
   const form = new FormData();
-  form.append('image', new Blob([TINY_PNG], { type: 'image/png' }), 'sticker.png');
+  form.append('image', new Blob([file.buffer], { type: file.type }), file.name);
   if (emoji !== undefined) form.append('emoji', emoji);
   return form;
 }
@@ -126,6 +134,67 @@ test('каталог отдаёт стикер независимо от enabled
   const entry = catalog.data.find((s) => s.id === itemId);
   assert.ok(entry, 'выключенный пак всё равно отдаёт свои стикеры в каталог');
   assert.equal(entry.emoji, '🎈');
+});
+
+test('анимированный GIF сохраняется одним анимированным WebP в file_path', async () => {
+  const admin = superAdminToken();
+  const packId = (await request('/api/stickers/admin', {
+    token: admin, method: 'POST', body: { name: 'Пак с анимацией' },
+  })).data.find((p) => p.name === 'Пак с анимацией').id;
+
+  const uploaded = await request(`/api/stickers/admin/${packId}/items`, {
+    token: admin,
+    method: 'POST',
+    form: stickerForm('✨', {
+      buffer: TINY_ANIMATED_GIF,
+      type: 'image/gif',
+      name: 'animated.gif',
+    }),
+  });
+
+  assert.equal(uploaded.response.status, 201, JSON.stringify(uploaded.data));
+  const item = uploaded.data.packs
+    .find((pack) => pack.id === packId)
+    .items.find((candidate) => candidate.id === uploaded.data.id);
+  assert.match(item.file_path, /^\/uploads\/stickers\/sticker_[a-f0-9]+\.webp$/);
+  assert.equal(Object.hasOwn(item, 'animated_path'), false, 'у стикера нет второго файла');
+
+  const onDisk = path.join(__dirname, '..', item.file_path.replace(/^\/uploads\//, 'uploads/'));
+  const metadata = await sharp(onDisk, { animated: true }).metadata();
+  assert.equal(metadata.format, 'webp');
+  assert.ok((metadata.pages || 1) > 1, 'после нормализации осталось больше одного кадра');
+
+  const catalog = await request('/api/stickers/catalog', { token: tokenFor(createUser('animated_catalog_user')) });
+  const catalogItem = catalog.data.find((candidate) => candidate.id === uploaded.data.id);
+  assert.equal(catalogItem.file_path, item.file_path);
+  assert.equal(Object.hasOwn(catalogItem, 'animated_path'), false);
+});
+
+test('анимированный WebP тоже сохраняет все кадры в единственном file_path', async () => {
+  const admin = superAdminToken();
+  const packId = (await request('/api/stickers/admin', {
+    token: admin, method: 'POST', body: { name: 'Пак с WebP-анимацией' },
+  })).data.find((p) => p.name === 'Пак с WebP-анимацией').id;
+  const animatedWebp = await sharp(TINY_ANIMATED_GIF, { animated: true }).webp().toBuffer();
+
+  const uploaded = await request(`/api/stickers/admin/${packId}/items`, {
+    token: admin,
+    method: 'POST',
+    form: stickerForm('🌟', {
+      buffer: animatedWebp,
+      type: 'image/webp',
+      name: 'animated.webp',
+    }),
+  });
+
+  assert.equal(uploaded.response.status, 201, JSON.stringify(uploaded.data));
+  const item = uploaded.data.packs
+    .find((pack) => pack.id === packId)
+    .items.find((candidate) => candidate.id === uploaded.data.id);
+  const onDisk = path.join(__dirname, '..', item.file_path.replace(/^\/uploads\//, 'uploads/'));
+  const metadata = await sharp(onDisk, { animated: true }).metadata();
+  assert.ok((metadata.pages || 1) > 1, 'анимированный WebP не должен стать статичным');
+  assert.equal(Object.hasOwn(item, 'animated_path'), false);
 });
 
 test('отправленный стикер несёт sticker_id и sticker_fallback в истории чата', async () => {
@@ -258,36 +327,6 @@ test('порядок стикеров меняется полным списко
     token: admin, method: 'PUT', body: { order: [first, 999999] },
   });
   assert.equal(bogus.response.status, 400);
-});
-
-test('порядок стикерпаков задаёт порядок вкладок в пикере', async () => {
-  const admin = superAdminToken();
-  const firstCreated = await request('/api/stickers/admin', {
-    token: admin, method: 'POST', body: { name: 'Первый переставляемый пак' },
-  });
-  const firstId = firstCreated.data.find((p) => p.name === 'Первый переставляемый пак').id;
-  const secondCreated = await request('/api/stickers/admin', {
-    token: admin, method: 'POST', body: { name: 'Второй переставляемый пак' },
-  });
-  const secondId = secondCreated.data.find((p) => p.name === 'Второй переставляемый пак').id;
-  const order = secondCreated.data.map((p) => p.id);
-  const firstIndex = order.indexOf(firstId);
-  const secondIndex = order.indexOf(secondId);
-  [order[firstIndex], order[secondIndex]] = [order[secondIndex], order[firstIndex]];
-
-  const reordered = await request('/api/stickers/admin/reorder', {
-    token: admin, method: 'PUT', body: { order },
-  });
-  assert.equal(reordered.response.status, 200);
-  assert.ok(
-    reordered.data.findIndex((p) => p.id === secondId) < reordered.data.findIndex((p) => p.id === firstId),
-    'переставленный пак приходит раньше и в админке, и в пользовательском API',
-  );
-
-  const incomplete = await request('/api/stickers/admin/reorder', {
-    token: admin, method: 'PUT', body: { order: [firstId, secondId] },
-  });
-  assert.equal(incomplete.response.status, 400);
 });
 
 test('загрузка без эмодзи отклоняется — он обязателен как метаданные и fallback', async () => {

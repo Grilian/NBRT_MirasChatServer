@@ -3,7 +3,6 @@ import { registerBackInterceptor } from '../utils/backInterceptors';
 import Avatar from './Avatar';
 import { nameFor } from '../utils/user';
 import { formatMoscowDateTime } from '../utils/time';
-import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 
 export interface MessageReaction {
   emoji: string;
@@ -18,7 +17,6 @@ export interface MessageReaction {
 
 interface ReactionDetailsModalProps {
   reactions: MessageReaction[];
-  customEmoji: CustomEmojiMap;
   /** Автор сообщения может снимать чужие реакции — только под своим. */
   canRemoveOthers: boolean;
   currentUserId: number;
@@ -27,7 +25,7 @@ interface ReactionDetailsModalProps {
 }
 
 const ReactionDetailsModal: React.FC<ReactionDetailsModalProps> = ({
-  reactions, customEmoji, canRemoveOthers, currentUserId, onClose, onRemove,
+  reactions, canRemoveOthers, currentUserId, onClose, onRemove,
 }) => {
   // Аппаратный Back на Android закрывает это окно, а не экран под ним.
   useEffect(() => registerBackInterceptor(onClose), [onClose]);
@@ -60,9 +58,7 @@ const ReactionDetailsModal: React.FC<ReactionDetailsModalProps> = ({
                 <div className="row-name"><span>{nameFor(reaction.user)}{isMine ? ' (вы)' : ''}</span></div>
                 <div className="row-preview">{formatMoscowDateTime(reaction.created_at)}</div>
               </div>
-              <span className="reaction-row-emoji">
-                {renderTextWithEmoji(reaction.emoji, customEmoji, `reaction-${reaction.user.id}`)}
-              </span>
+              <span className="reaction-row-emoji">{reaction.emoji}</span>
               {removable && (
                 <button
                   type="button"

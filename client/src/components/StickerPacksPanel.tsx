@@ -16,7 +16,6 @@ import { useDragReorder } from '../utils/useDragReorder';
 export interface StickerItem {
   id: number;
   file_path: string;
-  animated_path: string | null;
   emoji: string;
   retired?: boolean;
 }
@@ -201,27 +200,6 @@ export default function StickerPacksPanel() {
     }
   };
 
-  const savePackOrder = async (order: number[]) => {
-    try {
-      const { data } = await superAdminApi.put('/stickers/admin/reorder', { order });
-      apply(data);
-    } catch (err: any) {
-      fail(err, 'Не удалось сохранить порядок наборов');
-      void load();
-    }
-  };
-
-  const {
-    order: packOrder,
-    dragId: draggedPackId,
-    containerRef: packListRef,
-    tileHandlers: packDragHandlers,
-  } = useDragReorder({
-    items: packs,
-    onReorder: savePackOrder,
-    dataAttribute: 'data-sticker-pack-id',
-  });
-
   const openPack = packs.find((p) => p.id === openPackId) || null;
 
   // --- Уровень 1: список наборов ---
@@ -230,29 +208,17 @@ export default function StickerPacksPanel() {
       <div className="sa-card">
         <h2>Стикерпаки</h2>
         <p className="sa-hint">
-          Каждый набор — отдельная вкладка с обложкой в панели стикеров.
-          Порядок вкладок меняется перетаскиванием за ручку слева.
+          Наборы существуют для администратора. Обычный пользователь видит
+          единый список стикеров без навигации по наборам — порядок, заданный
+          здесь, задаёт порядок и там.
         </p>
         {error && <div className="sa-error">{error}</div>}
 
-        <div className="sa-sticker-packs" ref={packListRef}>
-          {packOrder.map((pack) => {
+        <div className="sa-sticker-packs">
+          {packs.map((pack) => {
             const isArchive = pack.name === ARCHIVE_PACK_NAME;
             return (
-              <div
-                key={pack.id}
-                data-sticker-pack-id={pack.id}
-                className={'sa-sticker-pack-card' + (draggedPackId === pack.id ? ' is-dragging' : '')}
-              >
-                <button
-                  type="button"
-                  className="sa-pack-drag-handle"
-                  aria-label={`Переместить набор ${pack.name}`}
-                  title="Перетащить набор"
-                  {...packDragHandlers(pack)}
-                >
-                  ⋮⋮
-                </button>
+              <div key={pack.id} className="sa-sticker-pack-card">
                 <button
                   type="button"
                   className="sa-sticker-pack-open"
@@ -394,7 +360,7 @@ export default function StickerPacksPanel() {
         <div className="sa-emoji-pack-add">
           <label className="sa-emoji-custom-add">
             <input
-              type="file" accept="image/*" multiple style={{ display: 'none' }}
+              type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple style={{ display: 'none' }}
               disabled={busy}
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
@@ -405,6 +371,7 @@ export default function StickerPacksPanel() {
             {busy ? 'Загрузка…' : '+ Добавить стикеры'}
           </label>
           <span className="sa-hint">
+            PNG, JPEG, WebP и GIF. Анимация сохраняется автоматически одним файлом.{' '}
             Новым стикерам ставится {DEFAULT_ITEM_EMOJI} — поменяйте эмодзи в плитках.
           </span>
         </div>
@@ -467,7 +434,7 @@ function StickerItemGrid({
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 <input
-                  type="file" accept="image/*" style={{ display: 'none' }}
+                  type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     e.target.value = '';

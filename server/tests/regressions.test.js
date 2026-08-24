@@ -22,16 +22,12 @@ const taskRoutes = require('../routes/tasks');
 const superadminRoutes = require('../routes/superadmin');
 const unreadRoutes = require('../routes/unread');
 const notificationSettingsRoutes = require('../routes/notificationSettings');
-const emojiRoutes = require('../routes/emoji');
 const { isValidBirthDate } = require('../utils/validators');
 const { markRead } = require('../services/readReceipts');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
-const { getReactionEmoji, setReactionEmoji } = require('../services/appSettings');
-const { isValidEmoji } = require('../services/reactions');
 
 const emitted = [];
 const io = {
-  emit: (event, payload) => emitted.push({ room: null, event, payload }),
   to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }),
 };
 
@@ -46,7 +42,6 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/unread', unreadRoutes);
 app.use('/api/notification-settings', notificationSettingsRoutes);
-app.use('/api/emoji', emojiRoutes);
 
 let server;
 let baseUrl;
@@ -62,8 +57,6 @@ function createUser(username, role = null) {
 function tokenFor(id) {
   return jwt.sign({ id, username: `user_${id}`, source: 'local' }, process.env.JWT_SECRET);
 }
-
-const superAdminToken = () => jwt.sign({ id: 1, role: 'superadmin' }, process.env.JWT_SECRET);
 
 async function request(route, { token, method = 'GET', body, headers: extraHeaders = {} } = {}) {
   const headers = { ...extraHeaders };
@@ -288,52 +281,6 @@ test('client message ids are idempotent per sender', () => {
     /UNIQUE constraint failed/,
   );
   assert.doesNotThrow(() => insert.run(otherSenderId, 'msg_queue_test_123456'));
-});
-
-test('reaction settings accept the full uploaded selection without a 12-item limit', () => {
-  db.prepare("DELETE FROM app_settings WHERE key = 'reaction_emoji'").run();
-  const packId = db.prepare(
-    'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, ?, 1, ?)'
-  ).run('Unlimited reactions test', 999, Date.now()).lastInsertRowid;
-  const insert = db.prepare(`
-    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, retired, position)
-    VALUES (?, '', ?, ?, ?, 0, ?)
-  `);
-  const tokens = [];
-  for (let index = 0; index < 15; index += 1) {
-    const name = `reaction_test_${index}`;
-    insert.run(packId, name, `/uploads/emoji/${name}.webp`, index === 0 ? '👍' : '🙂', index);
-    tokens.push(`:${name}:`);
-  }
-
-  assert.equal(getReactionEmoji()[0], ':reaction_test_0:');
-  assert.deepEqual(setReactionEmoji([...tokens, ':missing:']), tokens);
-  assert.equal(isValidEmoji(`:${'a'.repeat(32)}:`), true);
-  assert.equal(isValidEmoji(`:${'a'.repeat(33)}:`), false);
-});
-
-test('порядок паков смайликов сохраняется полным списком', async () => {
-  const admin = superAdminToken();
-  const firstCreated = await request('/api/emoji/admin', {
-    token: admin, method: 'POST', body: { name: 'Первый emoji-пак', emoji: '' },
-  });
-  assert.equal(firstCreated.response.status, 201, JSON.stringify(firstCreated.data));
-  const firstId = firstCreated.data.find((p) => p.name === 'Первый emoji-пак').id;
-  const secondCreated = await request('/api/emoji/admin', {
-    token: admin, method: 'POST', body: { name: 'Второй emoji-пак', emoji: '' },
-  });
-  assert.equal(secondCreated.response.status, 201, JSON.stringify(secondCreated.data));
-  const secondId = secondCreated.data.find((p) => p.name === 'Второй emoji-пак').id;
-  const order = secondCreated.data.map((p) => p.id);
-  const firstIndex = order.indexOf(firstId);
-  const secondIndex = order.indexOf(secondId);
-  [order[firstIndex], order[secondIndex]] = [order[secondIndex], order[firstIndex]];
-
-  const reordered = await request('/api/emoji/admin/reorder', {
-    token: admin, method: 'PUT', body: { order },
-  });
-  assert.equal(reordered.response.status, 200);
-  assert.ok(reordered.data.findIndex((p) => p.id === secondId) < reordered.data.findIndex((p) => p.id === firstId));
 });
 
 test('account deletion clears dependent records and transfers group ownership', () => {
