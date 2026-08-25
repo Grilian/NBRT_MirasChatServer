@@ -26,6 +26,36 @@ function renderWindow() {
 }
 
 describe('ChatWindow context menu', () => {
+  test('renders a custom quick reaction as an image instead of its shortcode', () => {
+    const { container } = render(
+      <ChatWindow
+        chatId="test"
+        messages={[message]}
+        currentUserId={1}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+        reactionEmoji={[':ink_happy:']}
+        customEmoji={{
+          ink_happy: {
+            filePath: '/uploads/emoji/ink_happy.webp',
+            fallback: '🙂',
+          },
+        }}
+        onToggleReaction={() => {}}
+      />,
+    );
+
+    const row = container.querySelector('[data-msg-id="1"]') as HTMLElement;
+    fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+
+    const reaction = container.querySelector('.msg-menu-reaction') as HTMLElement;
+    expect(reaction).toBeInTheDocument();
+    expect(reaction).not.toHaveTextContent(':ink_happy:');
+    expect(reaction.querySelector('img.custom-emoji')).toHaveAttribute(
+      'src', expect.stringContaining('/uploads/emoji/ink_happy.webp'),
+    );
+  });
+
   test('first tap on an image outside the menu only dismisses the menu', () => {
     const { container } = renderWindow();
     const row = container.querySelector('[data-msg-id="1"]') as HTMLElement;

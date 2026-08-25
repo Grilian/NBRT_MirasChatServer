@@ -2513,6 +2513,14 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .reaction-chip.is-mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .reaction-chip .avatar { width: 18px; height: 18px; font-size: 8px; }
 .reaction-chip-emoji { font-size: 14px; }
+.reaction-chip-emoji .custom-emoji {
+  width: 18px; height: 18px; vertical-align: middle; margin: 0;
+}
+.reaction-chip-emoji .custom-emoji-fallback,
+.reaction-chip-emoji .custom-emoji-fallback.is-placeholder {
+  width: 18px; height: 18px; font-size: 13px; line-height: 18px;
+  vertical-align: middle; margin: 0;
+}
 .reaction-chip-remove {
   display: none; border: none; background: none; color: var(--ink-faint);
   cursor: pointer; padding: 0 0 0 2px; line-height: 1;
@@ -2547,12 +2555,28 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   font-size: 26px; line-height: 1; width: 42px; height: 42px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
+.msg-menu-reaction .custom-emoji {
+  width: 30px; height: 30px; vertical-align: middle; margin: 0;
+}
+.msg-menu-reaction .custom-emoji-fallback,
+.msg-menu-reaction .custom-emoji-fallback.is-placeholder {
+  width: 30px; height: 30px; font-size: 23px; line-height: 30px;
+  vertical-align: middle; margin: 0;
+}
 .msg-menu-reaction:hover { background: var(--row-hover); }
 .msg-menu-reaction.is-active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
 .reactions-modal { max-width: 380px; }
 .reaction-row { cursor: default; }
 .reaction-row-emoji { font-size: 20px; flex: none; }
+.reaction-row-emoji .custom-emoji {
+  width: 28px; height: 28px; vertical-align: middle; margin: 0;
+}
+.reaction-row-emoji .custom-emoji-fallback,
+.reaction-row-emoji .custom-emoji-fallback.is-placeholder {
+  width: 28px; height: 28px; font-size: 20px; line-height: 28px;
+  vertical-align: middle; margin: 0;
+}
 .reaction-row-remove { flex: none; }
 
 /* Подтверждение удаления: область действия выбирается здесь, а не в

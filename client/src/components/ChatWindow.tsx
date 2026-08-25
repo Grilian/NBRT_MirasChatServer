@@ -1570,7 +1570,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       className={'msg-menu-reaction' + (isCurrent ? ' is-active' : '')}
                       onClick={() => { setMenuFor(null); onToggleReaction(menuMsg.id, emoji); }}
                     >
-                      {emoji}
+                      {renderTextWithEmoji(emoji, customEmoji, `rm${menuMsg.id}`)}
                     </button>
                   );
                 })}
@@ -1650,6 +1650,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             reactions={msg.reactions || []}
             canRemoveOthers={msg.sender_id === currentUserId}
             currentUserId={currentUserId}
+            customEmoji={customEmoji}
             onClose={() => setReactionsFor(null)}
             onRemove={(userId) => onRemoveReaction?.(msg.id, userId)}
           />
