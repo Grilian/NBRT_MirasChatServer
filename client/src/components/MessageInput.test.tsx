@@ -204,3 +204,59 @@ describe('MessageInput всплывающие панели', () => {
     expect(container.querySelector('.msg-context-menu')).not.toBeInTheDocument();
   });
 });
+
+describe('MessageInput перетаскивание файлов', () => {
+  beforeAll(() => {
+    (URL as any).createObjectURL = jest.fn(() => 'blob:preview');
+    (URL as any).revokeObjectURL = jest.fn();
+  });
+
+  function dropFiles(container: HTMLElement, files: File[]) {
+    const form = container.querySelector('.composer') as HTMLElement;
+    return act(async () => {
+      fireEvent.drop(form, { dataTransfer: { files } });
+    });
+  }
+
+  // Настоящий баг: перетащенный документ молча исчезал — stageFiles
+  // отфильтровывал всё, что не картинка, и drop не давал этому файлу никакого
+  // другого пути. Человек видел, что с картинками перетаскивание работает,
+  // а с «некоторыми расширениями» — нет, без единой подсказки почему.
+  test('перетащенный документ уходит файлом, а не пропадает молча', async () => {
+    const onSendFile = jest.fn(async () => ({ ok: true }));
+    const { container } = render(<MessageInput onSend={noopSend} onSendFile={onSendFile} />);
+
+    const doc = new File([new Uint8Array([1, 2, 3])], 'смета.pdf', { type: 'application/pdf' });
+    await dropFiles(container, [doc]);
+
+    expect(onSendFile).toHaveBeenCalledWith(doc);
+    // Документ не остаётся в поле как прикреплённая картинка.
+    expect(container.querySelector('.composer-attachment')).toBeNull();
+  });
+
+  test('перетащенные картинка и документ одним броском расходятся по своим путям', async () => {
+    const onSendFile = jest.fn(async () => ({ ok: true }));
+    const { container } = render(<MessageInput onSend={noopSend} onSendFile={onSendFile} />);
+
+    const image = new File([new Uint8Array([1, 2, 3])], 'photo.jpg', { type: 'image/jpeg' });
+    const doc = new File([new Uint8Array([1, 2, 3])], 'report.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    await dropFiles(container, [image, doc]);
+
+    // Документ уходит отдельным сообщением сразу же, картинка — по-своему,
+    // через onSendFile не проходит.
+    expect(onSendFile).toHaveBeenCalledTimes(1);
+    expect(onSendFile).toHaveBeenCalledWith(doc);
+  });
+
+  test('перетаскивание в отключённое поле ничего не отправляет', async () => {
+    const onSendFile = jest.fn(async () => ({ ok: true }));
+    const { container } = render(<MessageInput onSend={noopSend} onSendFile={onSendFile} disabled />);
+
+    const doc = new File([new Uint8Array([1, 2, 3])], 'смета.pdf', { type: 'application/pdf' });
+    await dropFiles(container, [doc]);
+
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+});

@@ -784,8 +784,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const handleDrop = (e: React.DragEvent<HTMLFormElement>) => {
     e.preventDefault();
     setDragActive(false);
-    // Бросить можно сразу несколько файлов — берём все.
-    void stageFiles(e.dataTransfer.files);
+    if (disabled) return;
+    const dropped = Array.from(e.dataTransfer.files);
+    // Картинки цепляются к полю с превью и подписью — как при выборе через
+    // «Скрепку → Фото». Раньше сюда попадало вообще всё подряд, а stageFiles
+    // молча отфильтровывал не-картинки: перетащенный документ просто исчезал
+    // без ошибки. Остальные файлы уходят отдельным сообщением сразу же — как
+    // при выборе через «Скрепку → Документ».
+    void stageFiles(dropped.filter((f) => IMAGE_MIME.includes(f.type)));
+    const documents = dropped.filter((f) => !IMAGE_MIME.includes(f.type));
+    if (documents.length) {
+      void (async () => {
+        for (const file of documents) {
+          // eslint-disable-next-line no-await-in-loop
+          await sendPickedFile(file);
+        }
+      })();
+    }
   };
 
   const remaining = MAX_LENGTH - text.length;
