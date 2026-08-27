@@ -198,6 +198,17 @@ const PREVIEW_CHATS: Chat[] = [
   { id: 'self_1', name: 'Избранное', section: 'self', groupLabel: null },
 ];
 
+// Сообщение должно быть «сегодняшним» независимо от даты прогона теста —
+// иначе тест начинает падать сам по себе через день после того, как дата
+// была захардкожена (formatChatListTime показывает часы только для сегодня).
+const todayAt = (hhmmss = '10:00:00') => {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(now.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hhmmss}`;
+};
+
 function renderRoster(overrides: Partial<React.ComponentProps<typeof ChatList>> = {}) {
   render(
     <ChatList
@@ -234,7 +245,7 @@ test('закрепление и время — одна плашка, а не д
   renderRoster({
     favorites: ['chat_1_2'],
     lastMessages: {
-      chat_1_2: { chat_id: 'chat_1_2', text: 'привет', created_at: '2026-08-15 10:00:00' },
+      chat_1_2: { chat_id: 'chat_1_2', text: 'привет', created_at: todayAt() },
     },
   });
 
@@ -250,11 +261,11 @@ test('у своего последнего сообщения в превью т
   renderRoster({
     lastMessages: {
       chat_1_2: {
-        chat_id: 'chat_1_2', text: 'моё', created_at: '2026-08-15 10:00:00',
+        chat_id: 'chat_1_2', text: 'моё', created_at: todayAt(),
         sender_id: 1, status: 'read',
       },
       group_5: {
-        chat_id: 'group_5', text: 'чужое', created_at: '2026-08-15 10:00:00',
+        chat_id: 'group_5', text: 'чужое', created_at: todayAt(),
         sender_id: 2, sender_name: 'Пётр', status: 'read',
       },
     },
@@ -272,7 +283,7 @@ test('картинка в последнем сообщении даёт мин�
   renderRoster({
     lastMessages: {
       chat_1_2: {
-        chat_id: 'chat_1_2', text: '', created_at: '2026-08-15 10:00:00',
+        chat_id: 'chat_1_2', text: '', created_at: todayAt(),
         sender_id: 2, file_path: '/uploads/users/2/images/x.webp',
       },
     },
@@ -283,15 +294,18 @@ test('картинка в последнем сообщении даёт мин�
   expect(row.textContent).toContain('Фотография');
 });
 
-test('счётчик непрочитанных стоит в правой колонке под временем', () => {
+test('счётчик непрочитанных стоит в правой колонке под превью', () => {
   renderRoster({
     unreadCounts: { chat_1_2: 56 },
-    lastMessages: { chat_1_2: { chat_id: 'chat_1_2', text: 'э', created_at: '2026-08-15 10:00:00' } },
+    lastMessages: { chat_1_2: { chat_id: 'chat_1_2', text: 'э', created_at: todayAt() } },
   });
 
-  const side = rowOf('Анна').querySelector('.row-side');
-  expect(side).not.toBeNull();
-  expect(side!.querySelector('.row-unread')!.textContent).toBe('56');
+  // Верхняя строка — только имя и время/закрепление; галочки и unread стоят
+  // рядом с превью снизу, чтобы их появление не растягивало row-top на две
+  // строки (см. комментарий в ChatList.tsx и theme.css у .row-side-bottom).
+  const bottomSide = rowOf('Анна').querySelector('.row-side-bottom');
+  expect(bottomSide).not.toBeNull();
+  expect(bottomSide!.querySelector('.row-unread')!.textContent).toBe('56');
 });
 
 test('отключённые уведомления видно по значку у имени чата', () => {

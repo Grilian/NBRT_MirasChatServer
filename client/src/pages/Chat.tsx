@@ -439,13 +439,42 @@ const Chat: React.FC = () => {
   // открытой вне раздела «Чаты», показывать её мы не станем.
   const conversationOpen = view.section === 'chats' && view.conversation;
   const [directoryOpen, setDirectoryOpen] = useState(false);
-  const [infoModalUserId, setInfoModalUserId] = useState<number | null>(null);
+  // Пользователь, группа и общий чат занимают одну область. Единое состояние
+  // не позволяет оставить группу открытой одновременно с профилем человека.
+  const [infoPanel, setInfoPanel] = useState<
+    | { kind: 'user'; userId: number }
+    | { kind: 'group'; groupId: number }
+    | { kind: 'general' }
+    | null
+  >(null);
+  const infoModalUserId = infoPanel?.kind === 'user' ? infoPanel.userId : null;
+  const groupInfoId = infoPanel?.kind === 'group' ? infoPanel.groupId : null;
+  const generalInfoOpen = infoPanel?.kind === 'general';
+  const setInfoModalUserId = useCallback((userId: number | null) => {
+    setInfoPanel((current) => (
+      userId !== null
+        ? { kind: 'user', userId }
+        : current?.kind === 'user' ? null : current
+    ));
+  }, []);
+  const setGroupInfoId = useCallback((groupId: number | null) => {
+    setInfoPanel((current) => (
+      groupId !== null
+        ? { kind: 'group', groupId }
+        : current?.kind === 'group' ? null : current
+    ));
+  }, []);
+  const setGeneralInfoOpen = useCallback((open: boolean) => {
+    setInfoPanel((current) => (
+      open
+        ? { kind: 'general' }
+        : current?.kind === 'general' ? null : current
+    ));
+  }, []);
   const [chatGroups, setChatGroups] = useState<ChatGroupSummary[]>([]);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
   const [pollSubmitting, setPollSubmitting] = useState(false);
-  const [groupInfoId, setGroupInfoId] = useState<number | null>(null);
-  const [generalInfoOpen, setGeneralInfoOpen] = useState(false);
 
   // Десктопное меню — выезжающая панель поверх текущего раздела. Крупные
   // действия из него открываются компактными окнами, не уводя человека со
@@ -961,7 +990,7 @@ const Chat: React.FC = () => {
     // перепиской, «Настройки» — списком настроек, а не подэкраном профиля, на
     // котором человек был в прошлый раз.
     setView({ section: id, conversation: false, settings: 'settings' });
-  }, [closeKeyboard]);
+  }, [closeKeyboard, setGeneralInfoOpen, setGroupInfoId, setInfoModalUserId]);
 
   // Подписка на сокет живёт столько же, сколько сам сокет, а goToSection
   // пересоздаётся — держим актуальную версию в ref, как и handleSelectChat.
@@ -1021,7 +1050,7 @@ const Chat: React.FC = () => {
       CapApp.minimizeApp();
     });
     return () => { listenerPromise.then((h) => h.remove()).catch(() => {}); };
-  }, [leaveConversation]);
+  }, [leaveConversation, setGeneralInfoOpen, setGroupInfoId, setInfoModalUserId]);
 
   // Пока где-то "печатают", если за TYPING_EXPIRY_MS не пришло ни новое 'typing',
   // ни 'stop_typing' (вкладка закрылась, сеть оборвалась) — гасим индикатор сами,
@@ -2742,7 +2771,7 @@ const Chat: React.FC = () => {
       online: onlineUsers.includes(u.id),
       userId: u.id,
       avatarPath: u.avatarPath,
-      status: describeStatus(u.statusPreset, u.statusCustom),
+      status: describeStatus(u.statusPreset, u.statusCustom, customEmoji),
     }))
   ].sort((a, b) => {
       const rankDiff = groupRank(a) - groupRank(b);
@@ -2815,7 +2844,7 @@ const Chat: React.FC = () => {
       ? {
           name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id),
           avatarPath: user.avatarPath, userId: user.id,
-          status: describeStatus(user.statusPreset, user.statusCustom),
+          status: describeStatus(user.statusPreset, user.statusCustom, customEmoji),
         }
       : null;
   })();
@@ -3005,6 +3034,7 @@ const Chat: React.FC = () => {
       onUpdateComment={(comment) => updateComment(infoModalUser.id, comment)}
       chatId={chatIdFor(currentUserId, infoModalUser.id)}
       currentUserId={currentUserId}
+      customEmoji={customEmoji}
       onOpenMessage={handleOpenMessage}
       onClose={() => setInfoModalUserId(null)}
     />
@@ -3067,6 +3097,7 @@ const Chat: React.FC = () => {
           online={socketConnected}
           statusPreset={currentStatusPreset}
           statusCustom={currentStatusCustom}
+          customEmoji={customEmoji}
           favoritesAvailable={!!selfChatId}
           onClose={() => setAppMenuOpen(false)}
           onOpenProfile={openOwnProfilePreview}
@@ -3174,6 +3205,7 @@ const Chat: React.FC = () => {
             currentUserId={currentUserId}
             existingContactIds={users.map(u => u.id)}
             onlineUserIds={onlineUsers}
+            customEmoji={customEmoji}
             onOpenChat={(user) => { handleStartChat(user); }}
             onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
             onAddContact={handleAddContact}
@@ -3226,7 +3258,8 @@ const Chat: React.FC = () => {
           online={socketConnected}
           currentUserId={currentUserId}
           ownProfilePreview
-          profileStatus={describeStatus(currentStatusPreset, currentStatusCustom)}
+          profileStatus={describeStatus(currentStatusPreset, currentStatusCustom, customEmoji)}
+          customEmoji={customEmoji}
           onEditProfile={openOwnProfileEdit}
           onClose={() => setProfilePreviewOpen(false)}
         />
@@ -3246,6 +3279,7 @@ const Chat: React.FC = () => {
               currentBirthDate={currentBirthDate}
               statusPreset={currentStatusPreset}
               statusCustom={currentStatusCustom}
+              customEmoji={customEmoji}
               onStatusChanged={(preset, custom) => {
                 setCurrentStatusPreset(preset);
                 setCurrentStatusCustom(custom);
@@ -3306,6 +3340,7 @@ const Chat: React.FC = () => {
         <StatusSheet
           statusPreset={currentStatusPreset}
           statusCustom={currentStatusCustom}
+          customEmoji={customEmoji}
           onStatusChanged={(preset, custom) => {
             setCurrentStatusPreset(preset);
             setCurrentStatusCustom(custom);
@@ -3323,6 +3358,7 @@ const Chat: React.FC = () => {
               currentUserId={currentUserId}
               existingContactIds={users.map(u => u.id)}
               onlineUserIds={onlineUsers}
+              customEmoji={customEmoji}
               onOpenChat={(user) => { setPeopleOpen(false); handleStartChat(user); }}
               onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
               onAddContact={handleAddContact}
@@ -3537,7 +3573,7 @@ const Chat: React.FC = () => {
                 // «Сообщение {Имя} {статус}» выбран пользователем и сейчас
                 // проверяется на живых людях — не «чинить» обратно.
                 : activeChatMeta?.status
-                  ? `Сообщение ${activeChatMeta.name} ${activeChatMeta.status.emoji} ${activeChatMeta.status.label}`
+                  ? `Сообщение ${activeChatMeta.name} ${toPlainText(activeChatMeta.status.emoji, customEmoji)} ${activeChatMeta.status.label}`
                   : undefined
             }
             customEmoji={customEmoji}

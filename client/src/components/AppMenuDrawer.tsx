@@ -3,6 +3,7 @@ import Avatar from './Avatar';
 import { APP_NAME, APP_VERSION } from '../version';
 import { applyThemePreference, getThemePreference } from '../utils/theme';
 import { describeStatus } from '../utils/statusMeta';
+import { CustomEmojiMap, renderTextWithEmoji } from '../utils/customEmoji';
 
 interface AppMenuDrawerProps {
   open: boolean;
@@ -11,6 +12,7 @@ interface AppMenuDrawerProps {
   online: boolean;
   statusPreset?: string | null;
   statusCustom?: string | null;
+  customEmoji?: CustomEmojiMap;
   favoritesAvailable: boolean;
   onClose: () => void;
   onOpenProfile: () => void;
@@ -39,11 +41,11 @@ function isDarkNow(): boolean {
 }
 
 const AppMenuDrawer: React.FC<AppMenuDrawerProps> = ({
-  open, username, avatarPath, online, statusPreset, statusCustom, favoritesAvailable,
+  open, username, avatarPath, online, statusPreset, statusCustom, customEmoji = {}, favoritesAvailable,
   onClose, onOpenProfile, onOpenStatus, onOpenChats, onOpenTasks, onCreateGroup, onOpenContacts,
   onOpenFavorites, onOpenSettings,
 }) => {
-  const ownStatus = describeStatus(statusPreset, statusCustom);
+  const ownStatus = describeStatus(statusPreset, statusCustom, customEmoji);
   const [dark, setDark] = useState(isDarkNow);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
   const [soonLabel, setSoonLabel] = useState('');
@@ -96,7 +98,9 @@ const AppMenuDrawer: React.FC<AppMenuDrawerProps> = ({
           <div className="app-menu-profile-text">
             <div className="app-menu-profile-name">{username}</div>
             <div className="app-menu-profile-meta">
-              <span>{ownStatus ? `${ownStatus.emoji} ${ownStatus.label}` : (online ? 'В сети' : 'Не в сети')}</span>
+              <span>{ownStatus
+                ? renderTextWithEmoji(`${ownStatus.emoji} ${ownStatus.label}`, customEmoji, 'menu-status')
+                : (online ? 'В сети' : 'Не в сети')}</span>
             </div>
           </div>
           <button type="button" className="app-menu-close" onClick={onClose} aria-label="Закрыть меню">
@@ -114,7 +118,9 @@ const AppMenuDrawer: React.FC<AppMenuDrawerProps> = ({
               <span className="app-menu-item-icon is-status">{icon('M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M8 12h8', 'M12 8v8')}</span>
               <span className="app-menu-item-body">
                 <span>Статус</span>
-                <small>{ownStatus ? `${ownStatus.emoji} ${ownStatus.label}` : 'Сменить'}</small>
+                <small>{ownStatus
+                  ? renderTextWithEmoji(`${ownStatus.emoji} ${ownStatus.label}`, customEmoji, 'menu-status-action')
+                  : 'Сменить'}</small>
               </span>
             </button>
           </div>

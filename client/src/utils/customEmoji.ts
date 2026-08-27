@@ -33,6 +33,20 @@ export const buildEmojiMap = (
 };
 
 /**
+ * Если для системного эмодзи загружено изображение с таким fallback, в UI
+ * используем его shortcode. Сам Unicode остаётся резервом: когда каталог ещё
+ * не загрузился, подходящего изображения нет или файл сломан, вызывающий код
+ * по-прежнему сможет показать исходный символ.
+ */
+export const preferCustomEmojiToken = (fallback: string, map: CustomEmojiMap): string => {
+  const shortcode = /^:([a-z0-9_]{2,32}):$/.exec(fallback);
+  if (shortcode) return map[shortcode[1]] ? fallback : DEFAULT_EMOJI_FALLBACK;
+
+  const match = Object.entries(map).find(([, item]) => item.fallback === fallback);
+  return match ? `:${match[0]}:` : fallback;
+};
+
+/**
  * Показывать ли анимированные версии. Читается на каждой отрисовке из общей
  * настройки устройства, а не прокидывается пропсом через всю переписку: смайлики
  * рисуются в десятке разных мест (лента, цитаты, превью, реакции), и тащить

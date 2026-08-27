@@ -222,7 +222,7 @@ const ChatList: React.FC<ChatListProps> = ({
   };
   const [mobileSearchCollapsed, setMobileSearchCollapsed] = React.useState(false);
   const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0) + threadUnreadCount;
-  const ownStatus = describeStatus(statusPreset, statusCustom);
+  const ownStatus = describeStatus(statusPreset, statusCustom, customEmoji);
   // Срок показывается вместо подсказки: «до 19:00» полезнее, чем «изменить
   // статус», — человек и так понимает, что по блоку можно нажать.
   const statusUntil = ownStatus && statusExpiresAt
@@ -431,7 +431,9 @@ const ChatList: React.FC<ChatListProps> = ({
           <Avatar name={selfName} avatarPath={selfAvatarPath} size="sm" online />
           <span className="roster-mystatus-body">
             <span className="roster-mystatus-title">
-              {ownStatus ? `${ownStatus.emoji} ${ownStatus.label}` : 'Мой статус'}
+              {ownStatus
+                ? renderTextWithEmoji(`${ownStatus.emoji} ${ownStatus.label}`, customEmoji, 'own-status')
+                : 'Мой статус'}
             </span>
             <span className="roster-mystatus-hint">
               {statusUntil || (ownStatus ? 'Изменить статус' : 'Установить статус')}
@@ -571,7 +573,11 @@ const ChatList: React.FC<ChatListProps> = ({
                       )}
                       {chat.status && (
                         <span className="row-status" title={chat.status.label}>
-                          {chat.status.emoji} {chat.status.label}
+                          {renderTextWithEmoji(
+                            `${chat.status.emoji} ${chat.status.label}`,
+                            customEmoji,
+                            `chat-status-${chat.id}`,
+                          )}
                         </span>
                       )}
                     </div>

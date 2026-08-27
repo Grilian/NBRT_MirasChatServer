@@ -3,6 +3,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import HomeSection from './HomeSection';
+import { instantOf, todayKey } from '../calendar/dates';
 
 jest.mock('../api/client', () => ({
   __esModule: true,
@@ -17,11 +18,11 @@ const TASKS = [
   { id: 3, title: 'Сделано', status: 'done' },
 ];
 
-const at = (hours: number, minutes = 0) => {
-  const date = new Date();
-  date.setHours(hours, minutes, 0, 0);
-  return date.getTime();
-};
+// Компонент считает расписание в московском времени (см. calendar/dates.ts),
+// поэтому фикстуры строим тем же instantOf, а не через локальные часы machины
+// прогона: Date.setHours() берёт часовой пояс раннера, и на машине не в
+// Europe/Moscow «9:00» превращалось бы в другой момент и другую подпись.
+const at = (hours: number, minutes = 0) => instantOf(todayKey(), hours * 60 + minutes);
 
 const EVENTS = {
   events: [

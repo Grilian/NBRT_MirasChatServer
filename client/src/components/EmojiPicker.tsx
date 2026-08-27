@@ -160,7 +160,9 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
             <img className="custom-emoji" src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
           </button>
         ))}
-        {current?.emoji.map((emoji, index) => (
+        {/* Системный набор показываем только как резерв, если в выбранном
+            паке вообще нет загруженных изображений. */}
+        {!current?.custom?.length && current?.emoji.map((emoji, index) => (
           <button
             key={`${emoji}-${index}`}
             type="button"
