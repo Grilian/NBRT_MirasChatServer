@@ -200,6 +200,27 @@ export default function StickerPacksPanel() {
     }
   };
 
+  const savePackOrder = async (order: number[]) => {
+    try {
+      const { data } = await superAdminApi.put('/stickers/admin/reorder', { order });
+      apply(data);
+    } catch (err: any) {
+      fail(err, 'Не удалось сохранить порядок наборов');
+      void load();
+    }
+  };
+
+  const {
+    order: packOrder,
+    dragId: draggedPackId,
+    containerRef: packListRef,
+    tileHandlers: packDragHandlers,
+  } = useDragReorder({
+    items: packs,
+    onReorder: savePackOrder,
+    dataAttribute: 'data-sticker-pack-id',
+  });
+
   const openPack = packs.find((p) => p.id === openPackId) || null;
 
   // --- Уровень 1: список наборов ---
@@ -208,17 +229,29 @@ export default function StickerPacksPanel() {
       <div className="sa-card">
         <h2>Стикерпаки</h2>
         <p className="sa-hint">
-          Наборы существуют для администратора. Обычный пользователь видит
-          единый список стикеров без навигации по наборам — порядок, заданный
-          здесь, задаёт порядок и там.
+          Каждый набор — отдельная вкладка с обложкой в панели стикеров.
+          Порядок вкладок меняется перетаскиванием за ручку слева.
         </p>
         {error && <div className="sa-error">{error}</div>}
 
-        <div className="sa-sticker-packs">
-          {packs.map((pack) => {
+        <div className="sa-sticker-packs" ref={packListRef}>
+          {packOrder.map((pack) => {
             const isArchive = pack.name === ARCHIVE_PACK_NAME;
             return (
-              <div key={pack.id} className="sa-sticker-pack-card">
+              <div
+                key={pack.id}
+                data-sticker-pack-id={pack.id}
+                className={'sa-sticker-pack-card' + (draggedPackId === pack.id ? ' is-dragging' : '')}
+              >
+                <button
+                  type="button"
+                  className="sa-pack-drag-handle"
+                  aria-label={`Переместить набор ${pack.name}`}
+                  title="Перетащить набор"
+                  {...packDragHandlers(pack)}
+                >
+                  ⋮⋮
+                </button>
                 <button
                   type="button"
                   className="sa-sticker-pack-open"

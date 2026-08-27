@@ -224,7 +224,7 @@ const loadedEmojiPaths = new Set<string>();
  * грузится. Дыр не будет и по размеру: `.custom-emoji-fallback` занимает то же
  * место, что и картинка, поэтому подмена не двигает текст.
  */
-const CustomEmojiImage: React.FC<{ filePath: string; fallback: string }> = ({ filePath, fallback }) => {
+export const CustomEmojiImage: React.FC<{ filePath: string; fallback: string }> = ({ filePath, fallback }) => {
   const [state, setState] = React.useState<'loading' | 'ready' | 'broken'>(
     () => (loadedEmojiPaths.has(filePath) ? 'ready' : 'loading')
   );

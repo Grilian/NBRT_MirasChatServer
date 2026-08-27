@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import WebDownloadLinks from './WebDownloadLinks';
 
@@ -21,12 +21,21 @@ beforeEach(() => {
 
 afterEach(() => { jest.restoreAllMocks(); });
 
-test('в веб-версии показывает ссылки на Windows, Android и Astra Linux', async () => {
-  render(<WebDownloadLinks />);
+test('в веб-настройках показывает все три дистрибутива и установку на iPhone', async () => {
+  render(<WebDownloadLinks variant="settings" />);
 
   await waitFor(() => expect(screen.getByRole('link', { name: /Windows/ })).toHaveAttribute(
     'href', expect.stringContaining('MirasChat%20Setup%201.2.3.exe'),
   ));
   expect(screen.getByRole('link', { name: /Android/ })).toHaveAttribute('href', expect.stringContaining('.apk'));
-  expect(screen.getByRole('link', { name: /Astra/ })).toHaveAttribute('href', expect.stringContaining('.deb'));
+  expect(screen.getByRole('link', { name: /Linux/ })).toHaveAttribute('href', expect.stringContaining('.deb'));
+
+  fireEvent.click(screen.getByRole('button', { name: /iPhone/ }));
+  const guide = screen.getByRole('region', { name: /Инструкция установки на iPhone/ });
+  expect(guide).toBeVisible();
+  expect(screen.getByText(/Откройте MirasChat именно в Safari/)).toBeVisible();
+  expect(screen.getByText(/На экран „Домой“/)).toBeVisible();
+
+  fireEvent.click(screen.getByRole('button', { name: /Закрыть инструкцию/ }));
+  expect(guide).not.toBeInTheDocument();
 });

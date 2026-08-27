@@ -144,8 +144,8 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
           <button
             key={`c${item.id}`}
             type="button"
-            className={'emoji-cell' + (selectedCustomEmoji.includes(item.name) ? ' is-selected' : '')}
-            aria-pressed={selectedCustomEmoji.includes(item.name)}
+            className={'emoji-cell' + (selectedCustomEmoji.includes(`:${item.name}:`) ? ' is-selected' : '')}
+            aria-pressed={selectedCustomEmoji.includes(`:${item.name}:`)}
             title={`:${item.name}:`}
             onMouseDown={(e) => e.preventDefault()}
             // В сообщение всё равно уходит код, а не картинка — формат хранения

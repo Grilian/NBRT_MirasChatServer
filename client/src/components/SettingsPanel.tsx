@@ -18,6 +18,7 @@ import { formatMoscowDateTime } from '../utils/time';
 import { MobileUpdateInfo, checkMobileUpdate, mobileVersionName, openMobileUpdate } from '../utils/mobileUpdate';
 import { APP_NAME, APP_VERSION, BUILT_AT } from '../version';
 import AndroidQrModal from './AndroidQrModal';
+import WebDownloadLinks from './WebDownloadLinks';
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
@@ -440,6 +441,20 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <span className="label">Доступна версия {mobileUpdate.versionName}</span>
                 <span className="value is-action">Обновить</span>
               </button>
+            </div>
+          </>
+        )}
+
+        {/* После обновления навигации шапка списка чатов на широком экране
+            скрыта целиком, а вместе с ней случайно исчезли и ссылки на
+            дистрибутивы. В веб-версии держим их в постоянном явном месте —
+            настройках приложения. Electron и Android обновляются своими
+            механизмами и этот блок не получают. */}
+        {!isElectron && !isNativeMobile && (
+          <>
+            <div className="settings-section-title">Приложение</div>
+            <div className="settings-group web-distributions-group">
+              <WebDownloadLinks variant="settings" />
             </div>
           </>
         )}
