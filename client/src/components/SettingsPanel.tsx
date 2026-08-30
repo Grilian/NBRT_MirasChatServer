@@ -20,7 +20,7 @@ import { APP_NAME, APP_VERSION, BUILT_AT } from '../version';
 import AndroidQrModal from './AndroidQrModal';
 import WebDownloadLinks from './WebDownloadLinks';
 
-const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
+const isElectronEnv = () => typeof window !== 'undefined' && !!window.electronAPI;
 
 interface SettingsPanelProps {
   username: string;
@@ -42,6 +42,13 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   username, avatarPath, onClose, onOpenProfile, onDeleteAccount, onLogout, closeMode = 'back'
 }) => {
+  // Раньше это было константой уровня модуля — на практике неотличимо (объект
+  // window.electronAPI ставит preload ещё до старта рендерера, и за время
+  // жизни приложения он не появляется и не исчезает), а для тестов, где
+  // window.electronAPI ставится/убирается перед каждым сценарием, константа
+  // модуля осталась бы навсегда таким, каким увидела его при самом первом
+  // импорте файла.
+  const isElectron = isElectronEnv();
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
@@ -51,6 +58,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [ui, setUi] = useState<UiPrefs>(getUiPrefs);
   const [systemPermission, setSystemPermission] = useState(desktopNotificationPermission());
   const [qrOpen, setQrOpen] = useState(false);
+  const [proxy, setProxy] = useState<ProxyState | null>(null);
+  const [proxyManualHost, setProxyManualHost] = useState('');
+  const [proxyManualPort, setProxyManualPort] = useState('');
+  const [proxySaving, setProxySaving] = useState(false);
 
   // Обои под лентой. Путь держим в localStorage, потому что применяет их не
   // React, а переменные CSS (см. utils/chatWallpaper.ts), и панели нужно лишь
@@ -139,7 +150,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       window.electronAPI!.getAutoLaunch().then(setAutoLaunch);
       window.electronAPI!.getAppVersion().then(setAppVersion);
     }
-  }, []);
+  }, [isElectron]);
 
   // На Android номер версии и проверка обновления берутся из самого пакета
   // и манифеста на сервере — по той же причине, что и в десктопе: строка
@@ -158,11 +169,57 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const unsubscribe = window.electronAPI!.onUpdateState(setUpdate);
     window.electronAPI!.checkForUpdate();
     return unsubscribe;
-  }, []);
+  }, [isElectron]);
 
   const handleAutoLaunchChange = (checked: boolean) => {
     setAutoLaunch(checked); // сразу отражаем в UI, не дожидаясь ответа ОС
     window.electronAPI!.setAutoLaunch(checked).then(setAutoLaunch);
+  };
+
+  // Прокси нужен только там, где до внутреннего сервера не достучаться
+  // напрямую — вне сети конторы, без прописанного в системе прокси. Состояние
+  // и применение живут в main-процессе (см. desktop/src/main.js): панель
+  // здесь только показывает его и просит изменить.
+  useEffect(() => {
+    if (!isElectron) return;
+    const applyState = (state: ProxyState) => {
+      setProxy(state);
+      setProxyManualHost(state.manualHost);
+      setProxyManualPort(state.manualPort);
+    };
+    window.electronAPI!.getProxyState().then(applyState);
+    // Автоопределение по IP (см. main.js) может включить ЦИТ прямо во время
+    // открытых настроек — тогда обновляем панель, не дожидаясь, пока человек
+    // сам зайдёт и выйдет из раздела.
+    return window.electronAPI!.onProxyStateChanged?.(applyState);
+  }, [isElectron]);
+
+  // Пока открыт раздел ЦИТ, доступность адреса перепроверяем сами: человек
+  // мог как раз в этот момент переключиться на нужный Wi-Fi и ждёт, что
+  // бледный текст сейчас же станет обычным, а не после перезахода в настройки.
+  useEffect(() => {
+    if (!isElectron || proxy?.mode !== 'cit') return;
+    const interval = setInterval(() => {
+      window.electronAPI!.checkCitProxy().then((citReachable) => {
+        setProxy((prev) => (prev ? { ...prev, citReachable } : prev));
+      });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isElectron, proxy?.mode]);
+
+  const updateProxy = (patch: Partial<Pick<ProxyState, 'enabled' | 'mode' | 'manualHost' | 'manualPort'>>) => {
+    setProxySaving(true);
+    window.electronAPI!.setProxyState(patch).then((state) => {
+      setProxy(state);
+      setProxyManualHost(state.manualHost);
+      setProxyManualPort(state.manualPort);
+      setProxySaving(false);
+    });
+  };
+
+  const saveProxyManual = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateProxy({ manualHost: proxyManualHost, manualPort: proxyManualPort });
   };
 
   return (
@@ -423,6 +480,91 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <span className="label">Обновление {update.version} встанет при закрытии</span>
                   <span className="value is-action">Перезапустить</span>
                 </button>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Сервер во внутренней сети конторы: без прокси на некоторых сетях
+            (домашний интернет, гостевой Wi-Fi, VPN) чат просто не подключается,
+            и без этой настройки понять почему было неоткуда. */}
+        {isElectron && proxy && (
+          <>
+            <div className="settings-section-title">Прокси</div>
+            <div className="settings-group">
+              <div className="settings-row static">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z" /></svg>
+                <span className="label">Использовать прокси</span>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={proxy.enabled}
+                    disabled={proxySaving}
+                    onChange={(e) => updateProxy({ enabled: e.target.checked })}
+                  />
+                  <span className="switch-track"><span className="switch-thumb" /></span>
+                </label>
+              </div>
+
+              {proxy.enabled && (
+                <>
+                  <div className="settings-inline-control">
+                    <div className="segmented">
+                      <button
+                        type="button"
+                        className={proxy.mode === 'manual' ? 'is-active' : ''}
+                        disabled={proxySaving}
+                        onClick={() => updateProxy({ mode: 'manual' })}
+                      >
+                        Вручную
+                      </button>
+                      <button
+                        type="button"
+                        className={proxy.mode === 'cit' ? 'is-active' : ''}
+                        disabled={proxySaving}
+                        onClick={() => updateProxy({ mode: 'cit' })}
+                      >
+                        ЦИТ
+                      </button>
+                    </div>
+                  </div>
+
+                  {proxy.mode === 'manual' && (
+                    <form className="field proxy-manual-fields" onSubmit={saveProxyManual}>
+                      <label>Адрес и порт</label>
+                      <div className="proxy-manual-inputs">
+                        <input
+                          type="text"
+                          value={proxyManualHost}
+                          onChange={(e) => setProxyManualHost(e.target.value)}
+                          placeholder="proxy.example.ru"
+                        />
+                        <input
+                          type="text"
+                          className="proxy-manual-port"
+                          value={proxyManualPort}
+                          onChange={(e) => setProxyManualPort(e.target.value)}
+                          placeholder="8080"
+                        />
+                      </div>
+                      <button type="submit" className="btn-primary" disabled={proxySaving || !proxyManualHost.trim()}>
+                        Сохранить
+                      </button>
+                    </form>
+                  )}
+
+                  {proxy.mode === 'cit' && (
+                    <div className="field">
+                      <label>Автонастройка ЦИТ</label>
+                      <div className={'field-readonly' + (proxy.citReachable ? '' : ' is-muted')}>
+                        {proxy.citPacUrl}
+                      </div>
+                      {!proxy.citReachable && (
+                        <div className="field-hint">Не настроен — подключите Wi-Fi для настройки</div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </>

@@ -293,6 +293,7 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 /* Поле, которое человек видит, но не меняет: без рамки ввода, чтобы не
    выглядело сломанным полем. */
 .field-readonly { font-size: 14px; color: var(--ink); padding: 9px 0 2px; }
+.field-readonly.is-muted { color: var(--ink-faint); }
 
 .btn-primary {
   width: 100%; border: none; border-radius: var(--radius-md); padding: 12.5px 0; margin-top: 4px;
@@ -2143,6 +2144,12 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .settings-select:disabled { opacity: .5; cursor: default; }
 
 .settings-inline-control { padding: 8px 16px 14px; }
+.proxy-manual-fields { padding: 4px 16px 16px; border-top: 1px solid var(--line); margin: 0; }
+.proxy-manual-inputs { display: flex; gap: 8px; }
+.proxy-manual-inputs input { flex: 1; }
+.proxy-manual-port { max-width: 92px; flex: none !important; }
+.proxy-manual-fields .btn-primary { width: auto; margin-top: 10px; padding: 9px 18px; }
+.settings-group > .field { padding: 4px 16px 16px; border-top: 1px solid var(--line); margin: 0; }
 .settings-note { font-size: 13px; color: var(--ink-muted); padding: 10px 16px; line-height: 1.45; border-top: 1px solid var(--line); }
 .settings-note.is-warning { color: var(--unread); background: color-mix(in srgb, var(--unread) 8%, transparent); }
 .app-version { text-align: center; font-size: 12px; color: var(--ink-faint); padding: 6px 16px 0; font-variant-numeric: tabular-nums; }

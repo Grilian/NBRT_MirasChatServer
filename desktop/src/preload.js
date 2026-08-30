@@ -14,6 +14,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   getAutoLaunch: () => ipcRenderer.invoke('autostart:get'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
+
+  // Настройки прокси: у сервера внутренний адрес, и на части сетей (без
+  // прописанного в ОС прокси) до него не достучаться напрямую — приложение
+  // держит свою настройку в обход системной (см. main.js).
+  getProxyState: () => ipcRenderer.invoke('proxy:get'),
+  setProxyState: (patch) => ipcRenderer.invoke('proxy:set', patch),
+  checkCitProxy: () => ipcRenderer.invoke('proxy:check-cit'),
+  onProxyStateChanged: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('proxy:state-changed', listener);
+    return () => ipcRenderer.removeListener('proxy:state-changed', listener);
+  },
   setUnreadBadge: (count, badgeDataUrl) => ipcRenderer.send('unread:set', count, badgeDataUrl),
   focusWindow: () => ipcRenderer.send('window:focus'),
   /**

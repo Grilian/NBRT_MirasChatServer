@@ -11,6 +11,12 @@ declare global {
       onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
       getAutoLaunch: () => Promise<boolean>;
       setAutoLaunch: (enabled: boolean) => Promise<boolean>;
+      // Настройки прокси: сервер во внутренней сети, и часть сетей требует
+      // явного прокси в обход системного (см. desktop/src/main.js).
+      getProxyState: () => Promise<ProxyState>;
+      setProxyState: (patch: Partial<Pick<ProxyState, 'enabled' | 'mode' | 'manualHost' | 'manualPort'>>) => Promise<ProxyState>;
+      checkCitProxy: () => Promise<boolean>;
+      onProxyStateChanged: (callback: (state: ProxyState) => void) => () => void;
       /** badgeDataUrl — PNG-кружок с числом, рисует рендерер (см. utils/badgeIcon.ts). */
       setUnreadBadge: (count: number, badgeDataUrl?: string) => void;
       focusWindow: () => void;
@@ -38,4 +44,13 @@ declare global {
     | { status: 'downloaded'; version: string }
     | { status: 'scheduled'; version: string; at: number }
     | { status: 'error'; message: string };
+
+  interface ProxyState {
+    enabled: boolean;
+    mode: 'manual' | 'cit';
+    manualHost: string;
+    manualPort: string;
+    citPacUrl: string;
+    citReachable: boolean;
+  }
 }

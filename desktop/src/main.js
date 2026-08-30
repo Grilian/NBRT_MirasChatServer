@@ -1,7 +1,9 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, screen, shell, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen, shell, nativeImage, Notification, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const http = require('http');
 const { releaseVersion } = require('../package.json');
 
 const isDev = !app.isPackaged;
@@ -108,6 +110,113 @@ function saveAppState(patch) {
   }
 }
 
+// ===== Прокси =====
+//
+// Сервер живёт во внутренней сети конторы, и на некоторых сетях (домашний
+// интернет, гостевой Wi-Fi, VPN без прописанного прокси в системе) до него
+// просто не достучаться напрямую — чат перестаёт работать без единой
+// подсказки почему. Electron по умолчанию берёт прокси из системных настроек
+// ОС (mode: 'system'), но у многих машин прокси прописан только в браузере, а
+// не на уровне Windows/Linux — тогда системный режим ничего не находит.
+//
+// Решение — своя настройка на уровне приложения, в обход системной: либо
+// прокси-сервер руками (адрес:порт), либо готовый PAC/WPAD ЦИТ-а, который
+// сам решает по каждому адресу, идти ли через прокси.
+const CIT_PAC_URL = 'http://i.tatar.ru/wpad.dat';
+// Внутренняя сеть ЦИТ — если машина получила такой адрес по DHCP, скорее
+// всего, WPAD там тоже доступен без ручной настройки.
+const CIT_IP_PREFIX = '10.1.';
+const CIT_CHECK_TIMEOUT_MS = 3000;
+// Не мгновенно после старта (сеть могла ещё не подняться), и не слишком
+// редко — ноутбук успевает сменить сеть за время одной рабочей сессии.
+const PROXY_AUTO_CHECK_INTERVAL_MS = 60 * 1000;
+
+function getProxyState() {
+  const saved = (loadAppState().proxy) || {};
+  return {
+    enabled: !!saved.enabled,
+    mode: saved.mode === 'manual' ? 'manual' : 'cit',
+    manualHost: typeof saved.manualHost === 'string' ? saved.manualHost : '',
+    manualPort: typeof saved.manualPort === 'string' ? saved.manualPort : '',
+  };
+}
+
+function buildProxyConfig(state) {
+  if (!state.enabled) return { mode: 'system' };
+  if (state.mode === 'manual') {
+    const host = state.manualHost.trim();
+    if (!host) return { mode: 'system' }; // включили, но ничего не вписали — вести себя как выключенный
+    const port = state.manualPort.trim();
+    // <local> — обращения к localhost/127.0.0.1 (например, к самому себе на
+    // время разработки) прокси не трогает.
+    return { mode: 'fixed_servers', proxyRules: port ? `${host}:${port}` : host, proxyBypassRules: '<local>' };
+  }
+  // ЦИТ — PAC-скрипт сам решает по каждому запросу, нужен ли прокси и какой.
+  return { mode: 'pac_script', pacScript: CIT_PAC_URL };
+}
+
+async function applyProxyState() {
+  const config = buildProxyConfig(getProxyState());
+  const targetSession = mainWindow && !mainWindow.isDestroyed()
+    ? mainWindow.webContents.session
+    : session.defaultSession;
+  try {
+    await targetSession.setProxy(config);
+  } catch (e) {
+    console.error('Не удалось применить настройки прокси:', e.message);
+  }
+}
+
+// Прямой запрос к WPAD-файлу, в обход Node.js настроек окружения и
+// electron-сессии: нужно понять, виден ли ЦИТ вообще с этой сети, а не
+// проверить работу уже применённого прокси (для этого он ещё не применён,
+// когда решаем, показывать ли адрес бледным).
+function checkCitReachable() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    try {
+      const req = http.get(CIT_PAC_URL, { timeout: CIT_CHECK_TIMEOUT_MS }, (res) => {
+        res.resume(); // тело не нужно, важен только сам факт ответа
+        finish(res.statusCode >= 200 && res.statusCode < 400);
+      });
+      req.on('timeout', () => { req.destroy(); finish(false); });
+      req.on('error', () => finish(false));
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+function hasCitNetworkIp() {
+  const interfaces = os.networkInterfaces();
+  return Object.values(interfaces).flat().some(
+    (iface) => iface && iface.family === 'IPv4' && !iface.internal && iface.address.startsWith(CIT_IP_PREFIX)
+  );
+}
+
+// Автовключение — необязательная подсказка, а не решение вместо человека:
+// как только он хоть раз тронул настройку прокси руками (setProxyState с
+// userTouched), автоопределение больше не вмешивается, даже если позже он
+// снова окажется в сети ЦИТ и сам выключит прокси.
+async function maybeAutoEnableCitProxy() {
+  const saved = loadAppState().proxy || {};
+  if (saved.userTouched) return;
+  if (saved.enabled && saved.mode === 'cit') return; // уже применено — незачем трогать снова
+  if (!hasCitNetworkIp()) return;
+
+  saveAppState({ proxy: { ...saved, enabled: true, mode: 'cit' } });
+  await applyProxyState();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const citReachable = await checkCitReachable();
+    mainWindow.webContents.send('proxy:state-changed', { ...getProxyState(), citPacUrl: CIT_PAC_URL, citReachable });
+  }
+}
+
 // Мессенджер без автозагрузки бесполезен: пропущенные сообщения человек
 // увидит, только когда сам вспомнит открыть приложение. Поэтому после
 // установки включаем её сами — раньше переключатель в настройках стоял
@@ -152,6 +261,11 @@ function createWindow() {
   });
 
   mainWindow.loadFile(RENDERER_INDEX);
+
+  // До того, как рендерер успеет сделать хоть один запрос: применённые здесь
+  // настройки прокси действуют на всю сессию окна, независимо от момента
+  // навигации.
+  applyProxyState();
 
   mainWindow.once('ready-to-show', () => {
     if (state.isMaximized) mainWindow.maximize();
@@ -339,6 +453,11 @@ if (!gotLock) {
     createAppMenu();
     createWindow();
     createTray();
+
+    // Сеть на старте могла ещё не подняться — небольшая задержка перед первой
+    // проверкой, дальше просто по интервалу.
+    setTimeout(maybeAutoEnableCitProxy, 5000);
+    setInterval(maybeAutoEnableCitProxy, PROXY_AUTO_CHECK_INTERVAL_MS);
 
     // Первую проверку откладываем: на старте приложение и так занято
     // загрузкой клиента и установкой сокета, а обновление никуда не убежит.
@@ -577,6 +696,32 @@ ipcMain.handle('autostart:set', (event, enabled) => {
   app.setLoginItemSettings({ openAtLogin: !!enabled });
   return app.getLoginItemSettings().openAtLogin;
 });
+
+// Состояние для настроек всегда возвращается вместе со свежей проверкой
+// доступности ЦИТ — панели незачем делать для этого отдельный вызов.
+ipcMain.handle('proxy:get', async () => {
+  const state = getProxyState();
+  const citReachable = await checkCitReachable();
+  return { ...state, citPacUrl: CIT_PAC_URL, citReachable };
+});
+
+ipcMain.handle('proxy:set', async (event, patch) => {
+  const current = getProxyState();
+  const next = {
+    enabled: typeof patch?.enabled === 'boolean' ? patch.enabled : current.enabled,
+    mode: patch?.mode === 'manual' ? 'manual' : (patch?.mode === 'cit' ? 'cit' : current.mode),
+    manualHost: typeof patch?.manualHost === 'string' ? patch.manualHost.trim() : current.manualHost,
+    manualPort: typeof patch?.manualPort === 'string' ? patch.manualPort.trim() : current.manualPort,
+  };
+  // Ручное вмешательство человека — отключает автоопределение по IP
+  // насовсем, чтобы оно больше не спорило с его выбором.
+  saveAppState({ proxy: { ...next, userTouched: true } });
+  await applyProxyState();
+  const citReachable = await checkCitReachable();
+  return { ...next, citPacUrl: CIT_PAC_URL, citReachable };
+});
+
+ipcMain.handle('proxy:check-cit', () => checkCitReachable());
 
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
 ipcMain.on('window:maximize-toggle', () => {
