@@ -43,6 +43,11 @@ declare global {
     | { status: 'downloading'; percent: number }
     | { status: 'downloaded'; version: string }
     | { status: 'scheduled'; version: string; at: number }
+    // Linux: electron-updater не умеет ставить .deb/.tar.gz сам, поэтому
+    // готовый пакет только скачивается автоматически, а установка — открытие
+    // системным установщиком, что требует явного клика (см. main.js).
+    | { status: 'linux-downloading'; percent: number }
+    | { status: 'linux-ready'; version: string }
     | { status: 'error'; message: string };
 
   interface ProxyState {

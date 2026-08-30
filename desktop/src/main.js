@@ -4,6 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 const { releaseVersion } = require('../package.json');
 
 const isDev = !app.isPackaged;
@@ -203,7 +205,14 @@ function hasCitNetworkIp() {
 // как только он хоть раз тронул настройку прокси руками (setProxyState с
 // userTouched), автоопределение больше не вмешивается, даже если позже он
 // снова окажется в сети ЦИТ и сам выключит прокси.
+//
+// Только Linux: на Windows прокси нужен эпизодически и обычно уже прописан
+// в системе (браузер/групповые политики), а на Astra/Linux своей настройки
+// прокси в системе исторически нет вовсе — отсюда и просьба автоматизировать
+// именно эту платформу. На Windows автоопределение не трогаем: там прокси
+// по умолчанию должен оставаться выключенным независимо от IP.
 async function maybeAutoEnableCitProxy() {
+  if (process.platform !== 'linux') return;
   const saved = loadAppState().proxy || {};
   if (saved.userTouched) return;
   if (saved.enabled && saved.mode === 'cit') return; // уже применено — незачем трогать снова
@@ -542,6 +551,14 @@ autoUpdater.on('error', (e) => {
 
 // В dev-режиме обновляться неоткуда: app-update.yml появляется только в
 // собранном приложении, и autoUpdater валится с ошибкой на старте.
+//
+// electron-updater умеет самообновляться из коробки только на Windows (NSIS)
+// и из AppImage на Linux — а раздаём мы .deb/.tar.gz, так что для Linux этот
+// путь не подходит принципиально. Обновление там сделано отдельным, простым
+// путём чуть ниже (см. «Обновление на Linux»): чтобы попасть на новую
+// версию, не нужно было заново искать сайт и скачивать пакет вручную — тот
+// же экран в настройках, тот же прогресс закачки, разница только в
+// последнем шаге (открыть .deb вместо тихой переустановки).
 const canUpdate = !isDev && process.platform === 'win32';
 // Раньше здесь стояло 4 часа: проверка на фоне честно работала, но за это
 // время человек, тестирующий свежую сборку, ни разу её не застанет и решит,
@@ -552,24 +569,33 @@ const canUpdate = !isDev && process.platform === 'win32';
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 function checkForUpdates() {
-  if (!canUpdate) return;
+  if (canUpdate) {
+    // Расписание админ мог передвинуть, пока скачанное обновление ждёт своего
+    // часа — перечитываем его на каждой проверке.
+    if (pendingUpdate) {
+      applySchedule().catch((e) => console.error('Расписание обновления не применилось:', e.message));
+    }
 
-  // Расписание админ мог передвинуть, пока скачанное обновление ждёт своего
-  // часа — перечитываем его на каждой проверке.
-  if (pendingUpdate) {
-    applySchedule().catch((e) => console.error('Расписание обновления не применилось:', e.message));
+    // И всё равно спрашиваем сервер. Раньше при скачанном обновлении проверка
+    // пропускалась совсем, и если за время ожидания выходила версия новее,
+    // клиент так и ставил залежавшуюся: с сервера она к тому моменту уже
+    // удалена, а установить старое поверх нового Windows потом не даст.
+    // Найдётся версия новее — electron-updater скачает её и снова пришлёт
+    // update-downloaded, а тот перезапишет pendingUpdate и расписание.
+    autoUpdater.checkForUpdates().catch((e) => console.error('Проверка обновлений не удалась:', e.message));
+    return;
   }
 
-  // И всё равно спрашиваем сервер. Раньше при скачанном обновлении проверка
-  // пропускалась совсем, и если за время ожидания выходила версия новее,
-  // клиент так и ставил залежавшуюся: с сервера она к тому моменту уже
-  // удалена, а установить старое поверх нового Windows потом не даст.
-  // Найдётся версия новее — electron-updater скачает её и снова пришлёт
-  // update-downloaded, а тот перезапишет pendingUpdate и расписание.
-  autoUpdater.checkForUpdates().catch((e) => console.error('Проверка обновлений не удалась:', e.message));
+  if (process.platform === 'linux' && !isDev) {
+    checkLinuxUpdate().catch((e) => console.error('Проверка обновлений для Linux не удалась:', e.message));
+  }
 }
 
 function installUpdate() {
+  if (process.platform === 'linux') {
+    installLinuxUpdate();
+    return;
+  }
   if (!canUpdate) return;
   // Без этого сработает перехват закрытия окна, который прячет приложение
   // в трей, и установщик будет ждать выхода вечно.
@@ -577,6 +603,119 @@ function installUpdate() {
   // Тихо и с автозапуском после установки: экран установщика человеку тут
   // показывать не за чем, а приложение должно вернуться само.
   autoUpdater.quitAndInstall(true, true);
+}
+
+// ===== Обновление на Linux =====
+//
+// .deb и .tar.gz electron-updater самостоятельно поставить не умеет (только
+// AppImage на Linux, только NSIS на Windows), а сама раздача уже настроена
+// через свой манифест linux.json (см. server/services/releases.js — тот же
+// файл, что писала кнопка «Откат» в панели администратора). Поэтому вместо
+// того чтобы городить AppImage или демона с правами root ради тихой
+// переустановки .deb, программа сама скачивает новый пакет и открывает его
+// системным обработчиком — тем же диалогом, который увидел бы человек,
+// дважды кликнув на скачанный .deb в файловом менеджере. Правами root это
+// всё равно управляет ОС, а не наше приложение, но искать сайт и качать
+// заново человеку больше не нужно.
+let linuxUpdateReady = null; // { version, path } — то, что уже скачано и ждёт открытия
+
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  }
+  return 0;
+}
+
+const LINUX_MANIFEST_URL = (() => {
+  try {
+    const publishUrl = require('../package.json').build.publish[0].url;
+    return new URL('linux.json', publishUrl).toString();
+  } catch {
+    return null;
+  }
+})();
+
+async function downloadLinuxUpdate(url, version) {
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok || !response.body) throw new Error(`Не удалось скачать обновление: ${response.status}`);
+
+  const total = Number(response.headers.get('content-length')) || 0;
+  let fileName;
+  try {
+    fileName = decodeURIComponent(new URL(url).pathname.split('/').pop() || '');
+  } catch {
+    fileName = '';
+  }
+  if (!fileName) fileName = `MirasChat_${version}_amd64.deb`;
+  const destPath = path.join(app.getPath('temp'), fileName);
+
+  let received = 0;
+  let lastSentPercent = -1;
+  const nodeStream = Readable.fromWeb(response.body);
+  nodeStream.on('data', (chunk) => {
+    received += chunk.length;
+    if (total <= 0) return;
+    const percent = Math.min(99, Math.round((received / total) * 100));
+    if (percent === lastSentPercent) return;
+    lastSentPercent = percent;
+    sendUpdateState({ status: 'linux-downloading', percent });
+  });
+
+  await pipeline(nodeStream, fs.createWriteStream(destPath));
+  return destPath;
+}
+
+async function checkLinuxUpdate() {
+  if (!LINUX_MANIFEST_URL) return;
+  try {
+    const response = await fetch(LINUX_MANIFEST_URL, {
+      signal: AbortSignal.timeout(SCHEDULE_FETCH_TIMEOUT_MS),
+      cache: 'no-store',
+    });
+    if (!response.ok) return;
+    const manifest = await response.json();
+    if (!manifest.version || !manifest.url) return;
+
+    const current = releaseVersion || app.getVersion();
+    if (compareVersions(manifest.version, current) <= 0) {
+      // Уже актуальны — старое скачанное (если было, например, откатили
+      // версию на сервере уже после закачки) больше показывать незачем.
+      if (linuxUpdateReady) {
+        linuxUpdateReady = null;
+        sendUpdateState({ status: 'idle' });
+      }
+      return;
+    }
+
+    // Этот .deb уже лежит скачанным — заново качать нечего, просто
+    // напоминаем состояние (полезно, если settings открыли заново).
+    if (linuxUpdateReady?.version === manifest.version) {
+      sendUpdateState({ status: 'linux-ready', version: manifest.version });
+      return;
+    }
+
+    sendUpdateState({ status: 'linux-downloading', percent: 0 });
+    const destPath = await downloadLinuxUpdate(manifest.url, manifest.version);
+    linuxUpdateReady = { version: manifest.version, path: destPath };
+    sendUpdateState({ status: 'linux-ready', version: manifest.version });
+  } catch (e) {
+    console.error('Обновление для Linux не удалось скачать:', e.message);
+    sendUpdateState({ status: 'error', message: e.message });
+  }
+}
+
+function installLinuxUpdate() {
+  if (!linuxUpdateReady) return;
+  const { path: filePath } = linuxUpdateReady;
+  // openPath запускает системный обработчик .deb (обычно это GUI-установщик
+  // пакетов вроде GDebi или «Центра приложений») — то же самое действие, что
+  // и двойной клик по скачанному файлу. Пустая строка означает успех;
+  // непустая — путь к файлу или обработчик оказались недоступны.
+  shell.openPath(filePath).then((err) => {
+    if (err) console.error('Не удалось открыть установщик Linux:', err);
+  });
 }
 
 // ===== Расписание установки =====

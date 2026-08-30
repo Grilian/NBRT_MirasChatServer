@@ -481,6 +481,25 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <span className="value is-action">Перезапустить</span>
                 </button>
               )}
+
+              {/* Linux: electron-updater не умеет тихо поставить .deb/.tar.gz,
+                  поэтому пакет только скачивается сам, а установка требует
+                  клика — откроется системный установщик, как при двойном
+                  клике по скачанному .deb. */}
+              {update.status === 'linux-downloading' && (
+                <div className="settings-row static">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                  <span className="label">Загрузка обновления</span>
+                  <span className="value">{update.percent}%</span>
+                </div>
+              )}
+              {update.status === 'linux-ready' && (
+                <button type="button" className="settings-row" onClick={() => window.electronAPI!.installUpdate()}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
+                  <span className="label">Обновление {update.version} скачано</span>
+                  <span className="value is-action">Установить</span>
+                </button>
+              )}
             </div>
           </>
         )}
