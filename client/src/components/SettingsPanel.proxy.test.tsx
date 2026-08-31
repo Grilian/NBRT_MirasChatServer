@@ -26,7 +26,8 @@ const baseProxyState = {
   mode: 'cit' as const,
   manualHost: '',
   manualPort: '',
-  citPacUrl: 'http://i.tatar.ru/wpad.dat',
+  citUsername: '',
+  citPasswordSet: false,
   citReachable: false,
 };
 
@@ -79,7 +80,7 @@ describe('SettingsPanel — прокси', () => {
     mockElectronAPI({ getProxyState: jest.fn(() => Promise.resolve(baseProxyState)) });
     render(<SettingsPanel {...baseProps} />);
 
-    const address = await screen.findByText('http://i.tatar.ru/wpad.dat');
+    const address = await screen.findByText('PAC ЦИТ — i.tatar.ru:8080');
     expect(address).toHaveClass('is-muted');
     expect(screen.getByText('Не настроен — подключите Wi-Fi для настройки')).toBeInTheDocument();
   });
@@ -90,7 +91,7 @@ describe('SettingsPanel — прокси', () => {
     });
     render(<SettingsPanel {...baseProps} />);
 
-    const address = await screen.findByText('http://i.tatar.ru/wpad.dat');
+    const address = await screen.findByText('PAC ЦИТ — i.tatar.ru:8080');
     expect(address).not.toHaveClass('is-muted');
     expect(screen.queryByText('Не настроен — подключите Wi-Fi для настройки')).not.toBeInTheDocument();
   });
@@ -141,5 +142,72 @@ describe('SettingsPanel — прокси', () => {
     await screen.findByText('Использовать прокси');
     expect(screen.queryByText('Вручную')).not.toBeInTheDocument();
     expect(screen.queryByText('ЦИТ')).not.toBeInTheDocument();
+  });
+
+  test('логин и пароль ЦИТ сохраняются вместе одним запросом', async () => {
+    const setProxyState = jest.fn((patch: any) => Promise.resolve({ ...baseProxyState, ...patch }));
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve(baseProxyState)),
+      setProxyState,
+    });
+    const { container } = render(<SettingsPanel {...baseProps} />);
+
+    await screen.findByText('Логин и пароль прокси');
+    const loginInput = container.querySelector('input[placeholder="Логин"]') as HTMLInputElement;
+    const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    expect(loginInput).not.toBeNull();
+    expect(passwordInput).not.toBeNull();
+
+    fireEvent.change(loginInput, { target: { value: 'ivanov' } });
+    fireEvent.change(passwordInput, { target: { value: 'secret123' } });
+    fireEvent.click(screen.getByText('Сохранить', { selector: '.proxy-manual-actions button' }));
+
+    await waitFor(() => expect(setProxyState).toHaveBeenCalledWith({ citUsername: 'ivanov', citPassword: 'secret123' }));
+  });
+
+  test('пустой пароль при сохранении не перезаписывает уже сохранённый', async () => {
+    const setProxyState = jest.fn((patch: any) => Promise.resolve({ ...baseProxyState, citPasswordSet: true, ...patch }));
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve({ ...baseProxyState, citUsername: 'ivanov', citPasswordSet: true })),
+      setProxyState,
+    });
+    const { container } = render(<SettingsPanel {...baseProps} />);
+
+    await screen.findByText('Логин и пароль прокси');
+    // Плейсхолдер подсказывает, что пароль уже есть, а поле остаётся пустым —
+    // подставлять сохранённый секрет обратно в интерфейс нельзя.
+    const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    expect(passwordInput.value).toBe('');
+    expect(passwordInput.placeholder).toContain('сохранён');
+
+    fireEvent.click(screen.getByText('Сохранить', { selector: '.proxy-manual-actions button' }));
+
+    await waitFor(() => expect(setProxyState).toHaveBeenCalledWith({ citUsername: 'ivanov' }));
+    const call = setProxyState.mock.calls[0][0];
+    expect(call).not.toHaveProperty('citPassword');
+  });
+
+  test('кнопка «Убрать пароль» отправляет пустую строку явно', async () => {
+    const setProxyState = jest.fn((patch: any) => Promise.resolve({ ...baseProxyState, citPasswordSet: false, ...patch }));
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve({ ...baseProxyState, citPasswordSet: true })),
+      setProxyState,
+    });
+    render(<SettingsPanel {...baseProps} />);
+
+    const clearBtn = await screen.findByText('Убрать пароль');
+    fireEvent.click(clearBtn);
+
+    await waitFor(() => expect(setProxyState).toHaveBeenCalledWith({ citPassword: '' }));
+  });
+
+  test('без сохранённого пароля кнопки «Убрать пароль» нет', async () => {
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve({ ...baseProxyState, citPasswordSet: false })),
+    });
+    render(<SettingsPanel {...baseProps} />);
+
+    await screen.findByText('Логин и пароль прокси');
+    expect(screen.queryByText('Убрать пароль')).not.toBeInTheDocument();
   });
 });

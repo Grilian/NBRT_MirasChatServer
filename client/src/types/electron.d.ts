@@ -14,7 +14,7 @@ declare global {
       // Настройки прокси: сервер во внутренней сети, и часть сетей требует
       // явного прокси в обход системного (см. desktop/src/main.js).
       getProxyState: () => Promise<ProxyState>;
-      setProxyState: (patch: Partial<Pick<ProxyState, 'enabled' | 'mode' | 'manualHost' | 'manualPort'>>) => Promise<ProxyState>;
+      setProxyState: (patch: Partial<Pick<ProxyState, 'enabled' | 'mode' | 'manualHost' | 'manualPort' | 'citUsername'>> & { citPassword?: string }) => Promise<ProxyState>;
       checkCitProxy: () => Promise<boolean>;
       onProxyStateChanged: (callback: (state: ProxyState) => void) => () => void;
       /** badgeDataUrl — PNG-кружок с числом, рисует рендерер (см. utils/badgeIcon.ts). */
@@ -55,7 +55,10 @@ declare global {
     mode: 'manual' | 'cit';
     manualHost: string;
     manualPort: string;
-    citPacUrl: string;
+    // Логин и пароль от прокси ЦИТ. Сам пароль наружу из main-процесса
+    // никогда не отдаётся — только факт, что он сохранён (см. main.js).
+    citUsername: string;
+    citPasswordSet: boolean;
     citReachable: boolean;
   }
 }

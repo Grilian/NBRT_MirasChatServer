@@ -1,9 +1,9 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, screen, shell, nativeImage, Notification, session } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen, shell, nativeImage, Notification, session, safeStorage } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const http = require('http');
+const net = require('net');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const { releaseVersion } = require('../package.json');
@@ -186,16 +186,115 @@ function setAutoLaunchEnabled(enabled) {
 // не на уровне Windows/Linux — тогда системный режим ничего не находит.
 //
 // Решение — своя настройка на уровне приложения, в обход системной: либо
-// прокси-сервер руками (адрес:порт), либо готовый PAC/WPAD ЦИТ-а, который
-// сам решает по каждому адресу, идти ли через прокси.
-const CIT_PAC_URL = 'http://i.tatar.ru/wpad.dat';
+// прокси-сервер руками (адрес:порт), либо готовый PAC ЦИТ-а, который сам
+// решает по каждому адресу, идти ли через прокси.
+//
+// PAC зашит в приложение целиком (см. CIT_PAC_SCRIPT), а не скачивается на
+// лету с http://i.tatar.ru/wpad.dat: WPAD-сервер отдаёт этот файл только
+// изнутри самой сети ЦИТ, а если внешняя сеть уже сломана — то есть ровно
+// тогда, когда прокси и нужен, — Chromium не может даже загрузить сам PAC,
+// чтобы понять, что делать. Содержимое взято из выгруженного администратором
+// wpad.dat и должно обновляться вручную здесь же, если ЦИТ поменяет правила.
+const CIT_PAC_SCRIPT = `function FindProxyForURL(url, host)
+
+{
+
+
+// variable strings to return
+var proxy_yes = "PROXY i.tatar.ru:8080;";
+var proxy_no = "DIRECT";
+
+
+if (isInNet( host, "85.233.64.0","255.255.240.0" )
+|| isInNet( host, "91.132.96.0","255.255.252.0" )
+|| isInNet( host, "10.0.0.0","255.0.0.0" )
+|| isInNet( host, "127.0.0.0","255.0.0.0" )
+|| isInNet( host, "188.128.26.229","255.255.255.255")
+|| isInNet( host, "95.163.50.11","255.255.255.255")
+|| isInNet( host, "88.210.30.4","255.255.255.255")
+|| isInNet( host, "192.168.0.0","255.255.0.0")
+|| isInNet( host, "172.16.0.0","255.240.0.0" )
+|| isInNet( host, "95.173.158.72","255.255.255.255" )
+|| isInNet( host, "91.215.39.160","255.255.255.255" )) {
+
+return proxy_no;
+
+}
+
+
+if ( shExpMatch( host, "localhost" )
+|| isPlainHostName( host )
+|| dnsDomainIs( host, "eln.fss.ru")
+|| dnsDomainIs( host, "taxi.mintrans.gov.ru")
+|| dnsDomainIs( host, "energy.tcrypt.ru")
+|| dnsDomainIs( host, "cryptoagent.ru")
+|| dnsDomainIs( host, "fin.favr.ru")
+|| dnsDomainIs( host, "ru.public.express")) {
+
+return proxy_no;
+
+}
+
+
+urllower = url.toLowerCase();
+ if((urllower.substring(0,5)=="rtsp:") ||
+   (urllower.substring(0,6)=="rtspt:") ||
+   (urllower.substring(0,6)=="rtspu:") ||
+   (urllower.substring(0,4)=="mms:") ||
+   (urllower.substring(0,5)=="mmst:") ||
+   (urllower.substring(0,5)=="mmsu:"))
+  return proxy_no;
+
+
+
+
+
+
+
+
+
+
+return proxy_yes;
+
+}
+`;
+// Показываем человеку и проверяем доступность именно его — сам PAC-скрипт
+// вычитывать для этого незачем, адрес и так известен заранее.
+const CIT_PROXY_HOST = 'i.tatar.ru';
+const CIT_PROXY_PORT = 8080;
 // Внутренняя сеть ЦИТ — если машина получила такой адрес по DHCP, скорее
-// всего, WPAD там тоже доступен без ручной настройки.
+// всего, прокси там тоже доступен без ручной настройки.
 const CIT_IP_PREFIX = '10.1.';
 const CIT_CHECK_TIMEOUT_MS = 3000;
 // Не мгновенно после старта (сеть могла ещё не подняться), и не слишком
 // редко — ноутбук успевает сменить сеть за время одной рабочей сессии.
 const PROXY_AUTO_CHECK_INTERVAL_MS = 60 * 1000;
+
+// Пароль от прокси ЦИТ хранится в app-state.json, но не как есть: Electron
+// умеет шифровать строки через хранилище секретов самой ОС (Credential
+// Manager на Windows, libsecret на Linux — тот же libsecret1, что уже входит
+// в зависимости .deb). Если хранилища на машине нет (бывает на Linux без
+// поднятого gnome-keyring/kwallet — не редкость на Astra), сохраняем как
+// есть: без этого функция просто не работала бы вовсе, а обычные файловые
+// права на userData-папку — не худшая защита в остальных случаях.
+function encryptSecret(plain) {
+  if (!plain) return null;
+  if (safeStorage.isEncryptionAvailable()) {
+    return { enc: true, value: safeStorage.encryptString(plain).toString('base64') };
+  }
+  return { enc: false, value: plain };
+}
+
+function decryptSecret(stored) {
+  if (!stored || typeof stored.value !== 'string') return '';
+  if (!stored.enc) return stored.value;
+  if (!safeStorage.isEncryptionAvailable()) return ''; // хранилище пропало (сменили машину/профиль) — лучше пусто, чем мусор
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.value, 'base64'));
+  } catch {
+    return '';
+  }
+}
 
 function getProxyState() {
   const saved = (loadAppState().proxy) || {};
@@ -204,6 +303,11 @@ function getProxyState() {
     mode: saved.mode === 'manual' ? 'manual' : 'cit',
     manualHost: typeof saved.manualHost === 'string' ? saved.manualHost : '',
     manualPort: typeof saved.manualPort === 'string' ? saved.manualPort : '',
+    citUsername: typeof saved.citUsername === 'string' ? saved.citUsername : '',
+    // Сам пароль наружу, в рендерер, никогда не отдаём — только факт, что он
+    // сохранён, чтобы поле в интерфейсе могло показать плейсхолдер вместо
+    // пустого места, не раскрывая значение.
+    citPasswordSet: !!saved.citPassword,
   };
 }
 
@@ -217,8 +321,33 @@ function buildProxyConfig(state) {
     // время разработки) прокси не трогает.
     return { mode: 'fixed_servers', proxyRules: port ? `${host}:${port}` : host, proxyBypassRules: '<local>' };
   }
-  // ЦИТ — PAC-скрипт сам решает по каждому запросу, нужен ли прокси и какой.
-  return { mode: 'pac_script', pacScript: CIT_PAC_URL };
+  // ЦИТ — data: URL с PAC-скриптом внутри: Chromium поддерживает эту схему
+  // для pac_script точно так же, как http(s)/file, но без похода в сеть.
+  const pacDataUrl = `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(CIT_PAC_SCRIPT, 'utf8').toString('base64')}`;
+  return { mode: 'pac_script', pacScript: pacDataUrl };
+}
+
+// Логин и пароль от прокси ЦИТ приложение не вводит само в диалоге — оно
+// заранее подставляет их в ответ на HTTP 407, как только Chromium его
+// пришлёт. Событие 'login' общее и для проксей, и для сайтов с Basic-
+// авторизацией — обязательно проверяем isProxy, иначе можно случайно
+// подставить прокси-пароль на любой сайт, спросивший логин.
+function attachProxyAuthHandler(targetSession) {
+  targetSession.removeAllListeners('login'); // applyProxyState() дергается многократно за сессию — слушатели не должны копиться
+  targetSession.on('login', (event, authInfo, callback) => {
+    if (!authInfo.isProxy) { callback(); return; }
+    const saved = (loadAppState().proxy) || {};
+    const state = getProxyState();
+    if (state.mode === 'cit' && state.citUsername) {
+      const password = decryptSecret(saved.citPassword);
+      event.preventDefault();
+      callback(state.citUsername, password);
+      return;
+    }
+    // Данных нет — пусть Chromium обработает сам (в этом окружении это
+    // всё равно означает, что запрос просто не пройдёт с 407).
+    callback();
+  });
 }
 
 async function applyProxyState() {
@@ -228,15 +357,17 @@ async function applyProxyState() {
     : session.defaultSession;
   try {
     await targetSession.setProxy(config);
+    attachProxyAuthHandler(targetSession);
   } catch (e) {
     console.error('Не удалось применить настройки прокси:', e.message);
   }
 }
 
-// Прямой запрос к WPAD-файлу, в обход Node.js настроек окружения и
-// electron-сессии: нужно понять, виден ли ЦИТ вообще с этой сети, а не
-// проверить работу уже применённого прокси (для этого он ещё не применён,
-// когда решаем, показывать ли адрес бледным).
+// Прямая проверка TCP-соединения с самим прокси, в обход electron-сессии:
+// нужно понять, виден ли ЦИТ вообще с этой сети, а не проверить уже
+// применённый прокси (для этого он ещё не применён, когда решаем, показывать
+// ли адрес бледным). PAC теперь зашит в приложении и сети для его получения
+// не требует — проверяем доступность самого прокси-порта, а не файла.
 function checkCitReachable() {
   return new Promise((resolve) => {
     let settled = false;
@@ -246,12 +377,10 @@ function checkCitReachable() {
       resolve(ok);
     };
     try {
-      const req = http.get(CIT_PAC_URL, { timeout: CIT_CHECK_TIMEOUT_MS }, (res) => {
-        res.resume(); // тело не нужно, важен только сам факт ответа
-        finish(res.statusCode >= 200 && res.statusCode < 400);
-      });
-      req.on('timeout', () => { req.destroy(); finish(false); });
-      req.on('error', () => finish(false));
+      const socket = net.createConnection({ host: CIT_PROXY_HOST, port: CIT_PROXY_PORT, timeout: CIT_CHECK_TIMEOUT_MS });
+      socket.once('connect', () => { socket.destroy(); finish(true); });
+      socket.once('timeout', () => { socket.destroy(); finish(false); });
+      socket.once('error', () => finish(false));
     } catch {
       finish(false);
     }
@@ -275,6 +404,10 @@ function hasCitNetworkIp() {
 // прокси в системе исторически нет вовсе — отсюда и просьба автоматизировать
 // именно эту платформу. На Windows автоопределение не трогаем: там прокси
 // по умолчанию должен оставаться выключенным независимо от IP.
+//
+// Логин/пароль автоматика не подставляет — их ЦИТ выдаёт человеку лично,
+// сама программа их знать не может. Прокси включится, но запросы так и
+// останутся заблокированы 407, пока эти данные не впишут в настройках руками.
 async function maybeAutoEnableCitProxy() {
   if (process.platform !== 'linux') return;
   const saved = loadAppState().proxy || {};
@@ -286,7 +419,7 @@ async function maybeAutoEnableCitProxy() {
   await applyProxyState();
   if (mainWindow && !mainWindow.isDestroyed()) {
     const citReachable = await checkCitReachable();
-    mainWindow.webContents.send('proxy:state-changed', { ...getProxyState(), citPacUrl: CIT_PAC_URL, citReachable });
+    mainWindow.webContents.send('proxy:state-changed', { ...getProxyState(), citReachable });
   }
 }
 
@@ -920,23 +1053,30 @@ ipcMain.handle('autostart:set', (event, enabled) => setAutoLaunchEnabled(!!enabl
 ipcMain.handle('proxy:get', async () => {
   const state = getProxyState();
   const citReachable = await checkCitReachable();
-  return { ...state, citPacUrl: CIT_PAC_URL, citReachable };
+  return { ...state, citReachable };
 });
 
 ipcMain.handle('proxy:set', async (event, patch) => {
   const current = getProxyState();
+  const savedProxy = (loadAppState().proxy) || {};
   const next = {
     enabled: typeof patch?.enabled === 'boolean' ? patch.enabled : current.enabled,
     mode: patch?.mode === 'manual' ? 'manual' : (patch?.mode === 'cit' ? 'cit' : current.mode),
     manualHost: typeof patch?.manualHost === 'string' ? patch.manualHost.trim() : current.manualHost,
     manualPort: typeof patch?.manualPort === 'string' ? patch.manualPort.trim() : current.manualPort,
+    citUsername: typeof patch?.citUsername === 'string' ? patch.citUsername.trim() : current.citUsername,
+    // citPassword в patch: undefined — не трогать сохранённый; '' — явно
+    // очистить (нажали «Убрать»); непустая строка — заменить новым. Сам
+    // пароль в состоянии, которое утекает наружу через getProxyState(), не
+    // участвует — только зашифрованный вид остаётся в app-state.json.
+    citPassword: patch?.citPassword === undefined ? savedProxy.citPassword : encryptSecret(patch.citPassword),
   };
   // Ручное вмешательство человека — отключает автоопределение по IP
   // насовсем, чтобы оно больше не спорило с его выбором.
   saveAppState({ proxy: { ...next, userTouched: true } });
   await applyProxyState();
   const citReachable = await checkCitReachable();
-  return { ...next, citPacUrl: CIT_PAC_URL, citReachable };
+  return { ...getProxyState(), citReachable };
 });
 
 ipcMain.handle('proxy:check-cit', () => checkCitReachable());

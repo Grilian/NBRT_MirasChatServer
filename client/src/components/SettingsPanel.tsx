@@ -61,6 +61,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [proxy, setProxy] = useState<ProxyState | null>(null);
   const [proxyManualHost, setProxyManualHost] = useState('');
   const [proxyManualPort, setProxyManualPort] = useState('');
+  const [proxyCitUsername, setProxyCitUsername] = useState('');
+  const [proxyCitPassword, setProxyCitPassword] = useState('');
   const [proxySaving, setProxySaving] = useState(false);
 
   // Обои под лентой. Путь держим в localStorage, потому что применяет их не
@@ -186,6 +188,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setProxy(state);
       setProxyManualHost(state.manualHost);
       setProxyManualPort(state.manualPort);
+      setProxyCitUsername(state.citUsername);
     };
     window.electronAPI!.getProxyState().then(applyState);
     // Автоопределение по IP (см. main.js) может включить ЦИТ прямо во время
@@ -207,12 +210,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return () => clearInterval(interval);
   }, [isElectron, proxy?.mode]);
 
-  const updateProxy = (patch: Partial<Pick<ProxyState, 'enabled' | 'mode' | 'manualHost' | 'manualPort'>>) => {
+  const updateProxy = (patch: Partial<Pick<ProxyState, 'enabled' | 'mode' | 'manualHost' | 'manualPort' | 'citUsername'>> & { citPassword?: string }) => {
     setProxySaving(true);
     window.electronAPI!.setProxyState(patch).then((state) => {
       setProxy(state);
       setProxyManualHost(state.manualHost);
       setProxyManualPort(state.manualPort);
+      setProxyCitUsername(state.citUsername);
+      setProxyCitPassword(''); // поле пароля никогда не подставляем обратно — только факт, что он сохранён
       setProxySaving(false);
     });
   };
@@ -220,6 +225,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const saveProxyManual = (e: React.FormEvent) => {
     e.preventDefault();
     updateProxy({ manualHost: proxyManualHost, manualPort: proxyManualPort });
+  };
+
+  const saveProxyCitCredentials = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Пустое поле пароля = «не менять сохранённый». Явная очистка — кнопкой
+    // «Убрать» ниже, которая шлёт citPassword: '' отдельно.
+    const patch: Partial<Pick<ProxyState, 'citUsername'>> & { citPassword?: string } = { citUsername: proxyCitUsername };
+    if (proxyCitPassword) patch.citPassword = proxyCitPassword;
+    updateProxy(patch);
+  };
+
+  const clearProxyCitPassword = () => {
+    updateProxy({ citPassword: '' });
   };
 
   return (
@@ -573,15 +591,47 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   )}
 
                   {proxy.mode === 'cit' && (
-                    <div className="field">
-                      <label>Автонастройка ЦИТ</label>
-                      <div className={'field-readonly' + (proxy.citReachable ? '' : ' is-muted')}>
-                        {proxy.citPacUrl}
+                    <>
+                      <div className="field">
+                        <label>Автонастройка ЦИТ</label>
+                        <div className={'field-readonly' + (proxy.citReachable ? '' : ' is-muted')}>
+                          PAC ЦИТ — i.tatar.ru:8080
+                        </div>
+                        {!proxy.citReachable && (
+                          <div className="field-hint">Не настроен — подключите Wi-Fi для настройки</div>
+                        )}
                       </div>
-                      {!proxy.citReachable && (
-                        <div className="field-hint">Не настроен — подключите Wi-Fi для настройки</div>
-                      )}
-                    </div>
+
+                      <form className="field proxy-manual-fields" onSubmit={saveProxyCitCredentials}>
+                        <label>Логин и пароль прокси</label>
+                        <div className="proxy-manual-inputs">
+                          <input
+                            type="text"
+                            value={proxyCitUsername}
+                            onChange={(e) => setProxyCitUsername(e.target.value)}
+                            placeholder="Логин"
+                            autoComplete="username"
+                          />
+                          <input
+                            type="password"
+                            value={proxyCitPassword}
+                            onChange={(e) => setProxyCitPassword(e.target.value)}
+                            placeholder={proxy.citPasswordSet ? 'Пароль сохранён — введите новый, чтобы изменить' : 'Пароль'}
+                            autoComplete="current-password"
+                          />
+                        </div>
+                        <div className="proxy-manual-actions">
+                          <button type="submit" className="btn-primary" disabled={proxySaving}>
+                            Сохранить
+                          </button>
+                          {proxy.citPasswordSet && (
+                            <button type="button" className="btn-plain" disabled={proxySaving} onClick={clearProxyCitPassword}>
+                              Убрать пароль
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    </>
                   )}
                 </>
               )}
