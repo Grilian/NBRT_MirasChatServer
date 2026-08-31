@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import ContentPicker from './ContentPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
-import { CustomEmojiMap, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
+import { CustomEmojiMap, getEmojiSuggestions, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
+import { resolveUploadUrl } from '../utils/uploads';
 import { isNativeMobile } from '../utils/mobileNotify';
 import { FILE_MAX_BYTES, FILE_TOO_LARGE_MESSAGE } from '../utils/fileLimits';
 import {
@@ -425,7 +426,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       return;
     }
     // В textarea картинку не показать — туда уходит код, как и раньше.
-    const emoji = typeof picked === 'string' ? picked : `:${picked.name}:`;
+    const emoji = typeof picked === 'string' ? picked : (picked.token || `:${picked.name}:`);
     const el = textareaRef.current;
     setText((prev) => {
       const start = el?.selectionStart ?? prev.length;
@@ -805,6 +806,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const remaining = MAX_LENGTH - text.length;
   const fieldPlaceholder = placeholder || (disabled ? 'Выберите чат…' : 'Написать сообщение…');
+  // Берём только последнее набираемое слово. Структура может содержать русские
+  // или английские keywords; несколько частых русских синонимов есть в клиенте.
+  const suggestionQuery = useMemo(() => {
+    const match = text.match(/(?:^|\s):?([\p{L}]{2,})$/u);
+    return match?.[1] || '';
+  }, [text]);
+  const emojiSuggestions = useMemo(
+    () => (suggestionQuery && !editing ? getEmojiSuggestions(customEmoji, suggestionQuery, 8) : []),
+    [customEmoji, suggestionQuery, editing],
+  );
 
   return (
     <form
@@ -958,6 +969,25 @@ const MessageInput: React.FC<MessageInputProps> = ({
               За раз уйдёт {MAX_IMAGES_PER_SEND}, остальные останутся прикреплёнными
             </span>
           )}
+        </div>
+      )}
+
+      {emojiSuggestions.length > 0 && (
+        <div className="composer-emoji-suggestions" role="listbox" aria-label="Предложения эмодзи">
+          {emojiSuggestions.map((item) => (
+            <button
+              key={item.name}
+              type="button"
+              role="option"
+              aria-selected="false"
+              title={item.label}
+              aria-label={item.label}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => insertEmoji(item)}
+            >
+              <img src={resolveUploadUrl(item.filePath) || ''} alt={item.fallback} draggable={false} />
+            </button>
+          ))}
         </div>
       )}
 

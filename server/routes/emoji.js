@@ -4,9 +4,19 @@ const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const sharp = require('sharp');
+const AdmZip = require('adm-zip');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const verifySuperAdmin = require('../middleware/verifySuperAdmin');
+const {
+  unicodeKeyFromFilename,
+  emojiFromUnicodeKey,
+  ensureLogicalItem,
+  listAssetPacks,
+  syncResolvedAssets,
+  parseStructureFile,
+  applyStructure,
+} = require('../services/emojiCatalog');
 
 const router = express.Router();
 
@@ -23,6 +33,18 @@ const emojiUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => cb(null, EMOJI_ALLOWED_MIME.includes(file.mimetype)),
 });
+
+const bundleUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 512 * 1024 * 1024 },
+});
+
+const structureUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024 },
+});
+
+syncResolvedAssets(db);
 
 // Имя должно надёжно отличаться от обычного текста: в сообщении оно живёт как
 // :name:, и рядом ходят и смайлики-двоеточия, и ссылки вида http://host:8080.
@@ -100,7 +122,7 @@ function archivePackId() {
 // запасом: составные эмодзи (флаги, семьи, модификаторы тона кожи) занимают до
 // десятка кодовых точек, но всё, что длиннее, — это уже не смайлик, а текст.
 const MAX_EMOJI_LENGTH = 32;
-const MAX_ITEMS_PER_PACK = 500;
+const MAX_ITEMS_PER_PACK = 10000;
 
 function packsWithItems({ onlyEnabled, includeRetired = false }) {
   const packs = db.prepare(`
@@ -114,7 +136,8 @@ function packsWithItems({ onlyEnabled, includeRetired = false }) {
   // админа они нужны — оттуда их возвращают или сносят; в панель ВЫБОРА они не
   // попадают никогда.
   const items = db.prepare(
-    `SELECT id, pack_id, emoji, name, file_path, animated_path, fallback_emoji, retired, position
+    `SELECT id, pack_id, emoji, name, file_path, animated_path, fallback_emoji, retired, position,
+            unicode_key, label, keywords
      FROM emoji_items ${includeRetired ? '' : 'WHERE retired = 0'} ORDER BY position, id`
   ).all();
   const byPack = new Map();
@@ -133,6 +156,10 @@ function packsWithItems({ onlyEnabled, includeRetired = false }) {
         // переписка берёт анимированную — если она есть и человек её не выключил.
         animated_path: item.animated_path || null,
         fallback: item.fallback_emoji || '',
+        unicode: item.fallback_emoji || '',
+        unicode_key: item.unicode_key || null,
+        label: item.label || '',
+        keywords: item.keywords || '',
       });
     } else if (item.emoji && !item.retired) {
       bucket.emoji.push(item.emoji);
@@ -147,12 +174,16 @@ function packsWithItems({ onlyEnabled, includeRetired = false }) {
         file_path: item.file_path || null,
         animated_path: item.animated_path || null,
         fallback: item.fallback_emoji || '',
+        unicode: item.fallback_emoji || '',
+        unicode_key: item.unicode_key || null,
+        label: item.label || '',
+        keywords: item.keywords || '',
         retired: !!item.retired,
       });
     }
   }
 
-  return packs.map((pack) => {
+  const result = packs.map((pack) => {
     const bucket = byPack.get(pack.id) || { emoji: [], custom: [], all: [] };
     return {
       id: pack.id,
@@ -168,6 +199,9 @@ function packsWithItems({ onlyEnabled, includeRetired = false }) {
       ...(includeRetired ? { items: bucket.all } : {}),
     };
   });
+  return onlyEnabled
+    ? result.filter((pack) => pack.emoji.length > 0 || pack.custom.length > 0)
+    : result;
 }
 
 // Выдача для панели админа. Отдельной функцией, а не флагом по месту: включать
@@ -221,7 +255,8 @@ router.get('/', verifyToken, (req, res) => {
 router.get('/catalog', verifyToken, (req, res) => {
   try {
     res.json(db.prepare(`
-      SELECT name, file_path, animated_path, fallback_emoji AS fallback
+      SELECT name, file_path, animated_path, fallback_emoji AS fallback,
+             unicode_key, label, keywords
       FROM emoji_items
       WHERE name IS NOT NULL AND file_path IS NOT NULL
     `).all());
@@ -235,6 +270,169 @@ router.get('/catalog', verifyToken, (req, res) => {
 router.get('/admin', verifySuperAdmin, (req, res) => {
   try {
     res.json(adminPacks());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Состояние новой системы ресурсов. Категории (emoji_packs) отвечают только
+// за сортировку, а эти паки — за внешний вид одного и того же Unicode-смайлика.
+router.get('/admin/system', verifySuperAdmin, (req, res) => {
+  try {
+    res.json({
+      assetPacks: listAssetPacks(db),
+      structure: db.prepare(`
+        SELECT COUNT(*) AS item_count, COUNT(DISTINCT group_name) AS group_count
+        FROM emoji_structure
+      `).get(),
+      logicalItems: db.prepare('SELECT COUNT(*) AS count FROM emoji_items WHERE unicode_key IS NOT NULL').get().count,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Импорт официального emoji-test.txt или собственного JSON. Он меняет только
+// категории, порядок, подписи и ключевые слова — картинки не трогает.
+router.post('/admin/structure', verifySuperAdmin, (req, res) => {
+  structureUpload.single('structure')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Не удалось прочитать структуру' });
+    if (!req.file) return res.status(400).json({ error: 'Выберите emoji-test.txt или JSON' });
+    try {
+      const entries = parseStructureFile(req.file.originalname, req.file.buffer);
+      const report = applyStructure(db, entries);
+      notifyEmojiChanged(req);
+      res.json({ report, packs: adminPacks(), assetPacks: listAssetPacks(db) });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+});
+
+// Один ZIP = один визуальный набор. Файл внутри определяется только по имени:
+// U+1F600.webp, u_1f600.png и U+1F1E6-U+1F1E8.webp дают канонические ключи.
+router.post('/admin/assets/import', verifySuperAdmin, (req, res) => {
+  bundleUpload.single('archive')(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Не удалось загрузить архив' });
+    if (!req.file) return res.status(400).json({ error: 'Выберите ZIP-архив набора' });
+
+    const role = String(req.body.role || 'base') === 'animation' ? 'animation' : 'base';
+    const key = String(req.body.key || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 40);
+    const name = String(req.body.name || key || 'Emoji pack').trim().slice(0, 80);
+    if (!key) return res.status(400).json({ error: 'Укажите код набора' });
+
+    let entries;
+    try {
+      entries = new AdmZip(req.file.buffer).getEntries().filter((entry) => !entry.isDirectory);
+    } catch {
+      return res.status(400).json({ error: 'Архив ZIP повреждён или имеет неподдерживаемый формат' });
+    }
+    const images = entries.filter((entry) => /\.(png|jpe?g|webp|gif)$/i.test(entry.entryName));
+    if (!images.length) return res.status(400).json({ error: 'В архиве нет PNG, JPEG, WebP или GIF' });
+    if (images.length > 10000) return res.status(400).json({ error: 'В одном наборе допускается не более 10 000 файлов' });
+
+    try {
+      const existing = db.prepare('SELECT id FROM emoji_asset_packs WHERE key = ?').get(key);
+      let assetPackId = existing?.id;
+      if (assetPackId) {
+        db.prepare('UPDATE emoji_asset_packs SET name = ?, role = ?, enabled = 1 WHERE id = ?')
+          .run(name, role, assetPackId);
+      } else {
+        const next = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM emoji_asset_packs').get().p;
+        const hasActive = db.prepare(
+          'SELECT id FROM emoji_asset_packs WHERE role = ? AND enabled = 1 AND active = 1'
+        ).get(role);
+        assetPackId = db.prepare(`
+          INSERT INTO emoji_asset_packs (key, name, role, enabled, active, position, created_at)
+          VALUES (?, ?, ?, 1, ?, ?, ?)
+        `).run(key, name, role, hasActive ? 0 : 1, next, Date.now()).lastInsertRowid;
+      }
+
+      const findAsset = db.prepare('SELECT file_path FROM emoji_assets WHERE item_id = ? AND asset_pack_id = ?');
+      const saveAsset = db.prepare(`
+        INSERT INTO emoji_assets (item_id, asset_pack_id, file_path, created_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(item_id, asset_pack_id) DO UPDATE SET file_path = excluded.file_path, created_at = excluded.created_at
+      `);
+      let imported = 0;
+      let skipped = 0;
+      const errors = [];
+
+      for (const entry of images) {
+        const unicodeKey = unicodeKeyFromFilename(entry.entryName);
+        if (!unicodeKey) {
+          skipped += 1;
+          if (errors.length < 20) errors.push(`${entry.entryName}: имя не похоже на Unicode-код`);
+          continue;
+        }
+        try {
+          const buffer = entry.getData();
+          if (!buffer.length || buffer.length > 12 * 1024 * 1024) throw new Error('слишком большой файл');
+          const itemId = ensureLogicalItem(db, unicodeKey);
+          const previous = findAsset.get(itemId, assetPackId);
+          const stored = await saveEmojiImage(buffer, `${key}_${unicodeKey.replace(/-/g, '_')}`, {
+            animated: role === 'animation',
+          });
+          saveAsset.run(itemId, assetPackId, stored, Date.now());
+          if (previous?.file_path && previous.file_path !== stored) unlinkEmojiFile(previous.file_path);
+          imported += 1;
+        } catch (entryError) {
+          skipped += 1;
+          if (errors.length < 20) errors.push(`${entry.entryName}: ${entryError.message}`);
+        }
+      }
+
+      syncResolvedAssets(db);
+      notifyEmojiChanged(req);
+      res.json({
+        report: { imported, skipped, total: images.length, errors },
+        packs: adminPacks(),
+        assetPacks: listAssetPacks(db),
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+router.put('/admin/assets/:id', verifySuperAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const pack = db.prepare('SELECT id, role FROM emoji_asset_packs WHERE id = ?').get(id);
+    if (!pack) return res.status(404).json({ error: 'Набор ресурсов не найден' });
+    if (req.body.enabled !== undefined) {
+      db.prepare('UPDATE emoji_asset_packs SET enabled = ? WHERE id = ?').run(req.body.enabled ? 1 : 0, id);
+    }
+    if (req.body.active) {
+      db.transaction(() => {
+        db.prepare('UPDATE emoji_asset_packs SET active = 0 WHERE role = ?').run(pack.role);
+        db.prepare('UPDATE emoji_asset_packs SET active = 1, enabled = 1 WHERE id = ?').run(id);
+      })();
+    }
+    syncResolvedAssets(db);
+    notifyEmojiChanged(req);
+    res.json({ assetPacks: listAssetPacks(db), packs: adminPacks() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Одноразовая миграция старого формата сообщений :u_1f600: → 😀. Она
+// запускается явно из админки и не затрагивает произвольные :name: смайлики.
+router.post('/admin/migrate-unicode-tokens', verifySuperAdmin, (req, res) => {
+  try {
+    const byName = new Map(db.prepare(`
+      SELECT name, fallback_emoji, unicode_key FROM emoji_items
+      WHERE unicode_key IS NOT NULL AND name LIKE 'u\\_%' ESCAPE '\\'
+    `).all().map((item) => [item.name, item.fallback_emoji || emojiFromUnicodeKey(item.unicode_key)]));
+    const rows = db.prepare("SELECT id, text FROM messages WHERE text LIKE '%:u\\_%:%' ESCAPE '\\'").all();
+    const update = db.prepare('UPDATE messages SET text = ? WHERE id = ?');
+    let changed = 0;
+    db.transaction(() => rows.forEach((row) => {
+      const text = String(row.text || '').replace(/:([a-z0-9_]{2,128}):/g, (whole, name) => byName.get(name) || whole);
+      if (text !== row.text) { update.run(text, row.id); changed += 1; }
+    }))();
+    res.json({ changed });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

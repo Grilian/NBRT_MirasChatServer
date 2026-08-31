@@ -201,12 +201,16 @@ const PREVIEW_CHATS: Chat[] = [
 // Сообщение должно быть «сегодняшним» независимо от даты прогона теста —
 // иначе тест начинает падать сам по себе через день после того, как дата
 // была захардкожена (formatChatListTime показывает часы только для сегодня).
-const todayAt = (hhmmss = '10:00:00') => {
-  const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d} ${hhmmss}`;
+// created_at парсится как UTC (см. utils/time.ts), а «сегодня» компонент
+// считает по московскому времени — поэтому «сегодня» здесь тоже берём в
+// Europe/Moscow, а не в часовом поясе машины, где крутится тест: иначе в
+// окне UTC 21:00–24:00 (00:00–03:00 по Москве) тест ловит вчерашний UTC-день
+// вместо сегодняшнего московского и путает «сегодня»/«вчера». Час — 09:00,
+// то есть московский полдень: даже с учётом сдвига на +3 при отображении
+// дата не съезжает на соседние сутки ни в одну сторону.
+const todayAt = (hhmmss = '09:00:00') => {
+  const moscowDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date());
+  return `${moscowDate} ${hhmmss}`;
 };
 
 function renderRoster(overrides: Partial<React.ComponentProps<typeof ChatList>> = {}) {

@@ -8,27 +8,66 @@ export interface CustomEmoji {
   file_path: string;
   /** Базовый юникодный эмодзи — для мест, где картинку не показать. */
   fallback?: string | null;
+  unicode?: string | null;
+  unicode_key?: string | null;
+  label?: string | null;
+  keywords?: string | null;
 }
 
 /** name → чем его показывать. Плоская карта: в тексте пака нет, только :name:. */
-export type CustomEmojiMap = Record<string, { filePath: string; animatedPath?: string | null; fallback: string }>;
+export interface EmojiRenderAsset {
+  filePath: string;
+  animatedPath?: string | null;
+  fallback: string;
+  unicodeKey?: string | null;
+  label?: string;
+  keywords?: string;
+}
+export type CustomEmojiMap = Record<string, EmojiRenderAsset>;
+
+interface UnicodeChoice extends EmojiRenderAsset { name: string; token: string }
+interface TrieNode { children: Map<string, TrieNode>; choice?: UnicodeChoice }
+const unicodeTries = new WeakMap<CustomEmojiMap, TrieNode>();
+const unicodeChoices = new WeakMap<CustomEmojiMap, UnicodeChoice[]>();
 
 // Подставляется, когда базовый эмодзи у смайлика не задан. Одно место на весь
 // клиент — старые записи в БД бэкфиллить не нужно.
 export const DEFAULT_EMOJI_FALLBACK = '🙂';
 
 export const buildEmojiMap = (
-  items: { name: string; file_path: string; animated_path?: string | null; fallback?: string | null }[],
+  items: {
+    name: string; file_path: string; animated_path?: string | null; fallback?: string | null;
+    unicode_key?: string | null; label?: string | null; keywords?: string | null;
+  }[],
 ): CustomEmojiMap => {
   const map: CustomEmojiMap = {};
+  const root: TrieNode = { children: new Map() };
+  const choices: UnicodeChoice[] = [];
   for (const item of items) {
     if (!item?.name || !item.file_path) continue;
-    map[item.name] = {
+    const asset: EmojiRenderAsset = {
       filePath: item.file_path,
       animatedPath: item.animated_path || null,
       fallback: item.fallback || DEFAULT_EMOJI_FALLBACK,
+      unicodeKey: item.unicode_key || null,
+      label: item.label || '',
+      keywords: item.keywords || '',
     };
+    map[item.name] = asset;
+    if (item.unicode_key && item.fallback) {
+      const choice: UnicodeChoice = { ...asset, name: item.name, token: item.fallback };
+      choices.push(choice);
+      let node = root;
+      for (const char of Array.from(item.fallback)) {
+        let child = node.children.get(char);
+        if (!child) { child = { children: new Map() }; node.children.set(char, child); }
+        node = child;
+      }
+      node.choice = choice;
+    }
   }
+  unicodeTries.set(map, root);
+  unicodeChoices.set(map, choices);
   return map;
 };
 
@@ -39,11 +78,11 @@ export const buildEmojiMap = (
  * по-прежнему сможет показать исходный символ.
  */
 export const preferCustomEmojiToken = (fallback: string, map: CustomEmojiMap): string => {
-  const shortcode = /^:([a-z0-9_]{2,32}):$/.exec(fallback);
+  const shortcode = /^:([a-z0-9_]{2,128}):$/.exec(fallback);
   if (shortcode) return map[shortcode[1]] ? fallback : DEFAULT_EMOJI_FALLBACK;
 
   const match = Object.entries(map).find(([, item]) => item.fallback === fallback);
-  return match ? `:${match[0]}:` : fallback;
+  return match ? (match[1].unicodeKey ? fallback : `:${match[0]}:`) : fallback;
 };
 
 /**
@@ -59,24 +98,75 @@ export const isEmojiAnimationEnabled = (): boolean => animationEnabled;
 // Тот же формат, что на сервере (routes/emoji.js): только латиница нижнего
 // регистра, цифры и подчёркивание, от двух символов. Специально узкий, чтобы
 // не цеплять ни смайлики-двоеточия (":D"), ни порты в ссылках ("host:8080").
-const SHORTCODE = /:([a-z0-9_]{2,32}):/g;
+const SHORTCODE = /:([a-z0-9_]{2,128}):/g;
+
+interface EmojiMatch {
+  start: number;
+  end: number;
+  name: string;
+  token: string;
+  item: EmojiRenderAsset;
+}
+
+function unicodeAt(text: string, start: number, map: CustomEmojiMap): EmojiMatch | null {
+  const root = unicodeTries.get(map);
+  if (!root) return null;
+  let node = root;
+  let cursor = start;
+  let longest: { end: number; choice: UnicodeChoice } | null = null;
+  while (cursor < text.length) {
+    const point = text.codePointAt(cursor);
+    if (point === undefined) break;
+    const char = String.fromCodePoint(point);
+    const child = node.children.get(char);
+    if (!child) break;
+    cursor += char.length;
+    node = child;
+    if (node.choice) longest = { end: cursor, choice: node.choice };
+  }
+  return longest ? {
+    start,
+    end: longest.end,
+    name: longest.choice.name,
+    token: longest.choice.token,
+    item: longest.choice,
+  } : null;
+}
+
+function emojiMatches(text: string, map: CustomEmojiMap): EmojiMatch[] {
+  const matches: EmojiMatch[] = [];
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] === ':') {
+      const shortcode = /^:([a-z0-9_]{2,128}):/.exec(text.slice(index));
+      const item = shortcode ? map[shortcode[1]] : null;
+      if (shortcode && item) {
+        matches.push({ start: index, end: index + shortcode[0].length, name: shortcode[1], token: shortcode[0], item });
+        index += shortcode[0].length;
+        continue;
+      }
+    }
+    const unicode = unicodeAt(text, index, map);
+    if (unicode) {
+      matches.push(unicode);
+      index = unicode.end;
+      continue;
+    }
+    const point = text.codePointAt(index);
+    index += point !== undefined && point > 0xffff ? 2 : 1;
+  }
+  return matches;
+}
 
 /**
  * Хвост оборванного кода в конце строки. Обрезка текста по длине не должна
  * оставлять на виду огрызок вида ":cat" — он уже не станет картинкой.
  */
-export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_]{1,32}$/, '');
+export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_]{1,128}$/, '');
 
 /** Есть ли в тексте хоть один ИЗВЕСТНЫЙ код — чтобы зря не резать строку. */
 export const hasCustomEmoji = (text: string, map: CustomEmojiMap): boolean => {
-  if (!text) return false;
-  SHORTCODE.lastIndex = 0;
-  let m = SHORTCODE.exec(text);
-  while (m) {
-    if (map[m[1]]) return true;
-    m = SHORTCODE.exec(text);
-  }
-  return false;
+  return !!text && emojiMatches(text, map).length > 0;
 };
 
 /**
@@ -99,24 +189,15 @@ export function renderTextWithEmoji(
   const nodes: React.ReactNode[] = [];
   let last = 0;
   let index = 0;
-  SHORTCODE.lastIndex = 0;
-
-  let match = SHORTCODE.exec(text);
-  while (match) {
-    const item = map[match[1]];
-    if (item) {
-      if (match.index > last) nodes.push(text.slice(last, match.index));
-      nodes.push(React.createElement(CustomEmojiImage, {
-        key: `${keyPrefix}-${index}`,
-        // Анимированная версия — только в переписке и только если человек её
-        // не выключил; статичная есть всегда и служит запасным вариантом.
-        filePath: (animationEnabled && item.animatedPath) || item.filePath,
-        fallback: item.fallback,
-      }));
-      index += 1;
-      last = match.index + match[0].length;
-    }
-    match = SHORTCODE.exec(text);
+  for (const match of emojiMatches(text, map)) {
+    if (match.start > last) nodes.push(text.slice(last, match.start));
+    nodes.push(React.createElement(CustomEmojiImage, {
+      key: `${keyPrefix}-${index}`,
+      filePath: (animationEnabled && match.item.animatedPath) || match.item.filePath,
+      fallback: match.item.fallback,
+    }));
+    index += 1;
+    last = match.end;
   }
 
   if (last < text.length) nodes.push(text.slice(last));
@@ -197,27 +278,16 @@ export function renderMessageText(
   let last = 0;
   let keyIndex = 0;
   const nextKey = () => keyIndex++;
-  SHORTCODE.lastIndex = 0;
-  let match = SHORTCODE.exec(text);
-
-  while (match) {
-    const item = map[match[1]];
-    if (item) {
-      if (match.index > last) {
-        nodes.push(...renderMessagePlainText(text.slice(last, match.index), keyPrefix, nextKey));
-      }
-      nodes.push(React.createElement(CustomEmojiImage, {
-        key: `${keyPrefix}-emoji-${nextKey()}`,
-        // Основной рендер текста сообщения обязан использовать ту же логику,
-        // что превью/цитаты: при включённой анимации берём animatedPath.
-        // Раньше здесь всегда передавался filePath, поэтому в списке чатов
-        // смайлик двигался, а внутри самой переписки оставался статичным.
-        filePath: (animationEnabled && item.animatedPath) || item.filePath,
-        fallback: item.fallback,
-      }));
-      last = match.index + match[0].length;
+  for (const match of emojiMatches(text, map)) {
+    if (match.start > last) {
+      nodes.push(...renderMessagePlainText(text.slice(last, match.start), keyPrefix, nextKey));
     }
-    match = SHORTCODE.exec(text);
+    nodes.push(React.createElement(CustomEmojiImage, {
+      key: `${keyPrefix}-emoji-${nextKey()}`,
+      filePath: (animationEnabled && match.item.animatedPath) || match.item.filePath,
+      fallback: match.item.fallback,
+    }));
+    last = match.end;
   }
 
   if (last < text.length) nodes.push(...renderMessagePlainText(text.slice(last), keyPrefix, nextKey));
@@ -274,7 +344,7 @@ export const CustomEmojiImage: React.FC<{ filePath: string; fallback: string }> 
  * `contentEditable=false` делает смайлик неделимым: курсор не заходит внутрь,
  * а браузер удаляет его одним движением, а не по символу.
  */
-export function createEmojiNode(name: string, filePath: string, fallback: string): HTMLElement {
+export function createEmojiNode(name: string, filePath: string, fallback: string, token = `:${name}:`): HTMLElement {
   const img = document.createElement('img');
   img.className = 'custom-emoji';
   img.src = resolveUploadUrl(filePath) || '';
@@ -285,12 +355,14 @@ export function createEmojiNode(name: string, filePath: string, fallback: string
   // он может смениться при замене картинки под тем же кодом.
   img.dataset.emojiName = name;
   img.dataset.emojiFallback = fallback;
+  img.dataset.emojiToken = token;
   img.onerror = () => {
     const span = document.createElement('span');
     span.className = 'custom-emoji-fallback';
     span.contentEditable = 'false';
     span.dataset.emojiName = name;
     span.dataset.emojiFallback = fallback;
+    span.dataset.emojiToken = token;
     span.textContent = fallback;
     img.replaceWith(span);
   };
@@ -311,17 +383,10 @@ export function textToFragment(text: string, map: CustomEmojiMap): DocumentFragm
   if (!text) return fragment;
 
   let last = 0;
-  SHORTCODE.lastIndex = 0;
-
-  let match = SHORTCODE.exec(text);
-  while (match) {
-    const item = map[match[1]];
-    if (item) {
-      if (match.index > last) fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
-      fragment.appendChild(createEmojiNode(match[1], item.filePath, item.fallback));
-      last = match.index + match[0].length;
-    }
-    match = SHORTCODE.exec(text);
+  for (const match of emojiMatches(text, map)) {
+    if (match.start > last) fragment.appendChild(document.createTextNode(text.slice(last, match.start)));
+    fragment.appendChild(createEmojiNode(match.name, match.item.filePath, match.item.fallback, match.token));
+    last = match.end;
   }
 
   if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
@@ -342,7 +407,7 @@ export function domToText(root: HTMLElement): string {
       return;
     }
     if (isEmojiNode(node)) {
-      out += `:${node.dataset.emojiName}:`;
+      out += node.dataset.emojiToken || `:${node.dataset.emojiName}:`;
       return;
     }
     if (node.nodeType === Node.ELEMENT_NODE) {
@@ -370,4 +435,53 @@ const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'TR', 'BLOCKQUOTE', 'H1', 'H2', 'H
 export function toPlainText(text: string, map: CustomEmojiMap): string {
   if (!text) return text;
   return text.replace(SHORTCODE, (whole, name) => (map[name] ? map[name].fallback : whole));
+}
+
+const RUSSIAN_ALIASES: Record<string, string> = {
+  '😀': 'улыбка радость весело привет', '😁': 'улыбка зубы радость', '😂': 'смех слёзы смешно',
+  '🤣': 'смех хохот', '😊': 'улыбка мило спасибо', '😍': 'любовь влюблён сердце',
+  '😘': 'поцелуй любовь', '😢': 'грусть слёзы плач', '😭': 'плач очень грустно',
+  '😡': 'злость гнев', '👍': 'да хорошо класс согласен', '👎': 'нет плохо не согласен',
+  '🙏': 'спасибо пожалуйста молитва', '👏': 'аплодисменты молодец', '🎉': 'праздник поздравляю',
+  '❤️': 'любовь сердце', '🔥': 'огонь круто', '✅': 'готово да выполнено', '❌': 'нет ошибка',
+};
+
+export interface EmojiSuggestion {
+  name: string;
+  filePath: string;
+  fallback: string;
+  token: string;
+  label: string;
+}
+
+/** Подсказки по последнему слову. Пустой запрос отдаёт привычные эмодзи. */
+export function getEmojiSuggestions(map: CustomEmojiMap, query: string, limit = 8): EmojiSuggestion[] {
+  const choices = unicodeChoices.get(map) || [];
+  if (!choices.length) return [];
+  const normalized = String(query || '').toLocaleLowerCase('ru').replace(/^:/, '').trim();
+  const common = ['😀', '😂', '👍', '❤️', '😍', '🙏', '🎉', '🔥'];
+  const score = (choice: UnicodeChoice): number => {
+    if (!normalized) {
+      const index = common.indexOf(choice.token);
+      return index < 0 ? -1 : 100 - index;
+    }
+    const haystack = `${choice.label || ''} ${choice.keywords || ''} ${RUSSIAN_ALIASES[choice.token] || ''}`.toLocaleLowerCase('ru');
+    if (haystack === normalized) return 100;
+    if (haystack.split(/\s+/).some((word) => word === normalized)) return 80;
+    if (haystack.split(/\s+/).some((word) => word.startsWith(normalized))) return 60;
+    if (haystack.includes(normalized)) return 30;
+    return -1;
+  };
+  return choices
+    .map((choice) => ({ choice, score: score(choice) }))
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => b.score - a.score || a.choice.token.localeCompare(b.choice.token))
+    .slice(0, limit)
+    .map(({ choice }) => ({
+      name: choice.name,
+      filePath: choice.filePath,
+      fallback: choice.fallback,
+      token: choice.token,
+      label: choice.label || choice.keywords || choice.fallback,
+    }));
 }

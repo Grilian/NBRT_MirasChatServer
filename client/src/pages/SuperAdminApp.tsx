@@ -1262,7 +1262,10 @@ function ReactionsPanel() {
 
   const itemsByToken = new Map<string, EmojiCustomItem>();
   for (const pack of packs) {
-    for (const item of pack.custom || []) itemsByToken.set(`:${item.name}:`, item);
+    for (const item of pack.custom || []) {
+      itemsByToken.set(`:${item.name}:`, item);
+      if (item.unicode_key && item.unicode) itemsByToken.set(item.unicode, item);
+    }
   }
 
   const toggle = (token: string) => {
@@ -1313,7 +1316,7 @@ function ReactionsPanel() {
             selectedCustomEmoji={selected}
             onClose={() => setPickerOpen(false)}
             onPick={(picked) => {
-              if (typeof picked !== 'string') toggle(`:${picked.name}:`);
+              if (typeof picked !== 'string') toggle(picked.token || `:${picked.name}:`);
             }}
           />
         </div>
@@ -1396,6 +1399,10 @@ interface EmojiCustomItem {
   file_path: string;
   animated_path?: string | null;
   fallback: string;
+  unicode?: string | null;
+  unicode_key?: string | null;
+  label?: string;
+  keywords?: string;
 }
 
 /**
@@ -1412,6 +1419,10 @@ interface EmojiItem {
   animated_path: string | null;
   fallback: string;
   retired: boolean;
+  unicode?: string | null;
+  unicode_key?: string | null;
+  label?: string;
+  keywords?: string;
 }
 
 interface EmojiPack {
@@ -1422,6 +1433,22 @@ interface EmojiPack {
   custom?: EmojiCustomItem[];
   // Полный список элементов пака — только в админской выдаче.
   items?: EmojiItem[];
+}
+
+interface EmojiAssetPack {
+  id: number;
+  key: string;
+  name: string;
+  role: 'base' | 'animation';
+  enabled: boolean;
+  active: boolean;
+  item_count: number;
+}
+
+interface EmojiSystemState {
+  assetPacks: EmojiAssetPack[];
+  structure: { item_count: number; group_count: number };
+  logicalItems: number;
 }
 
 // Смайлик, чьё имя занято убранным: загрузка такого файла не проходит, но
@@ -1658,12 +1685,16 @@ function EmojiItemModal({
  */
 function EmojiPacksPanel() {
   const [packs, setPacks] = useState<EmojiPack[]>([]);
+  const [system, setSystem] = useState<EmojiSystemState | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [newName, setNewName] = useState('');
   const [savingId, setSavingId] = useState<number | null>(null);
   const [openPack, setOpenPack] = useState<number | null>(null);
   const [editing, setEditing] = useState<EmojiItem | null>(null);
   const [newEmoji, setNewEmoji] = useState('');
+  const [assetPreset, setAssetPreset] = useState<'apple' | 'animation' | 'google-fonts'>('apple');
+  const [systemBusy, setSystemBusy] = useState('');
   // Файлы из последней загрузки, не прошедшие из-за убранного тёзки. Держим
   // вместе с File: вернуть смайлик мало, ему нужна та самая картинка.
   const [conflicts, setConflicts] = useState<{ packId: number; items: RetiredConflict[] } | null>(null);
@@ -1677,8 +1708,12 @@ function EmojiPacksPanel() {
 
   const load = async () => {
     try {
-      const { data } = await superAdminApi.get('/emoji/admin');
-      apply(data);
+      const [packsResponse, systemResponse] = await Promise.all([
+        superAdminApi.get('/emoji/admin'),
+        superAdminApi.get('/emoji/admin/system'),
+      ]);
+      apply(packsResponse.data);
+      setSystem(systemResponse.data);
       setError('');
     } catch {
       setError('Не удалось загрузить паки');
@@ -1687,6 +1722,78 @@ function EmojiPacksPanel() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, []);
+
+  const importAssetArchive = async (file: File) => {
+    const preset = {
+      apple: { key: 'apple', name: 'Apple', role: 'base' },
+      animation: { key: 'animation', name: 'Telegram Animation', role: 'animation' },
+      'google-fonts': { key: 'google-fonts', name: 'Google Fonts', role: 'base' },
+    }[assetPreset];
+    setSystemBusy('assets');
+    setError('');
+    setNotice(`Загружаем ${preset.name}… Большой архив может обрабатываться несколько минут.`);
+    const form = new FormData();
+    form.append('archive', file);
+    form.append('key', preset.key);
+    form.append('name', preset.name);
+    form.append('role', preset.role);
+    try {
+      const { data } = await superAdminApi.post('/emoji/admin/assets/import', form, { timeout: 30 * 60 * 1000 });
+      apply(data.packs);
+      await load();
+      const report = data.report;
+      setNotice(`Готово: ${report.imported} из ${report.total}. Пропущено: ${report.skipped}.`);
+      if (report.errors?.length) setError(report.errors.join('; '));
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось импортировать набор');
+      setNotice('');
+    } finally {
+      setSystemBusy('');
+    }
+  };
+
+  const importStructure = async (file: File) => {
+    setSystemBusy('structure');
+    setError('');
+    const form = new FormData();
+    form.append('structure', file);
+    try {
+      const { data } = await superAdminApi.post('/emoji/admin/structure', form);
+      apply(data.packs);
+      await load();
+      setNotice(`Структура применена: ${data.report.item_count} эмодзи, ${data.report.group_count} разделов.`);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось применить структуру');
+    } finally {
+      setSystemBusy('');
+    }
+  };
+
+  const activateAssetPack = async (pack: EmojiAssetPack) => {
+    setSystemBusy(`pack-${pack.id}`);
+    try {
+      await superAdminApi.put(`/emoji/admin/assets/${pack.id}`, { active: true });
+      await load();
+      setNotice(`Активный набор: ${pack.name}.`);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось переключить набор');
+    } finally {
+      setSystemBusy('');
+    }
+  };
+
+  const migrateOldUnicodeTokens = async () => {
+    if (!window.confirm('Заменить старые коды :u_...: в сообщениях обычными Unicode-эмодзи?')) return;
+    setSystemBusy('migrate');
+    try {
+      const { data } = await superAdminApi.post('/emoji/admin/migrate-unicode-tokens');
+      setNotice(`Миграция завершена: обновлено сообщений — ${data.changed}.`);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось выполнить миграцию');
+    } finally {
+      setSystemBusy('');
+    }
+  };
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1828,12 +1935,85 @@ function EmojiPacksPanel() {
     <div className="sa-card sa-card--compact">
       <h2>Смайлики</h2>
       <p className="sa-hint">
-        Пак — вкладка в панели смайликов у сотрудников. Смайлик с картинкой уезжает
-        в сообщение кодом, без картинки — обычным символом. Порядок меняется
-        перетаскиванием. Сами паки тоже можно менять местами за ручку слева.
-        Всё остальное — в карточке смайлика по нажатию.
+        Сообщение хранит обычный Unicode. Apple, Telegram Animation и Google Fonts —
+        разные изображения одного смайлика; категории и порядок задаются отдельной структурой.
       </p>
       {error && <p className="form-error">{error}</p>}
+      {notice && <p className="sa-emoji-notice">{notice}</p>}
+
+      <section className="sa-emoji-system">
+        <div className="sa-emoji-system-block">
+          <h3>1. Наборы изображений</h3>
+          <p className="sa-hint">
+            Один ZIP — один набор. Имена внутри: U+1F600.webp или U+1F1E6-U+1F1E8.webp.
+            Все изображения сервер приводит к WebP; анимация сохраняет кадры.
+          </p>
+          <div className="sa-emoji-import-row">
+            <select value={assetPreset} onChange={(e) => setAssetPreset(e.target.value as typeof assetPreset)}>
+              <option value="apple">Apple — основной</option>
+              <option value="animation">Telegram — анимация</option>
+              <option value="google-fonts">Google Fonts — альтернативный</option>
+            </select>
+            <label className="sa-btn-ghost">
+              <input
+                type="file" accept=".zip,application/zip" style={{ display: 'none' }}
+                disabled={!!systemBusy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) void importAssetArchive(file);
+                }}
+              />
+              {systemBusy === 'assets' ? 'Импортируем…' : 'Выбрать ZIP и импортировать'}
+            </label>
+          </div>
+          <div className="sa-emoji-asset-packs">
+            {system?.assetPacks.map((pack) => (
+              <button
+                key={pack.id}
+                type="button"
+                className={pack.active ? 'is-active' : ''}
+                disabled={!!systemBusy || !pack.item_count}
+                onClick={() => activateAssetPack(pack)}
+              >
+                <span>{pack.name}</span>
+                <small>{pack.role === 'animation' ? 'анимация' : 'оформление'} · {pack.item_count}</small>
+                <strong>{pack.active ? 'Используется' : 'Выбрать'}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="sa-emoji-system-block">
+          <h3>2. Структура и сортировка</h3>
+          <p className="sa-hint">
+            Поддерживается официальный emoji-test.txt и JSON с полями code, group,
+            subgroup, name и keywords. Повторное применение перестраивает категории без перезагрузки картинок.
+          </p>
+          <div className="sa-emoji-import-row">
+            <label className="sa-btn-ghost">
+              <input
+                type="file" accept=".txt,.json,text/plain,application/json" style={{ display: 'none' }}
+                disabled={!!systemBusy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) void importStructure(file);
+                }}
+              />
+              {systemBusy === 'structure' ? 'Применяем…' : 'Загрузить и применить структуру'}
+            </label>
+            <span className="sa-hint">
+              Сейчас: {system?.structure.item_count || 0} записей, {system?.structure.group_count || 0} разделов
+            </span>
+          </div>
+          <button type="button" className="sa-btn-quiet" disabled={!!systemBusy} onClick={migrateOldUnicodeTokens}>
+            {systemBusy === 'migrate' ? 'Миграция…' : 'Заменить старые :u_...: в сообщениях'}
+          </button>
+        </div>
+      </section>
+
+      <h3 className="sa-emoji-categories-title">Категории каталога</h3>
 
       <div className="sa-emoji-pack-list" ref={packListRef}>
         {packOrder.map((pack) => {

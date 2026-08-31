@@ -8,6 +8,8 @@ export interface PickedCustomEmoji {
   name: string;
   filePath: string;
   fallback: string;
+  /** Что реально хранится в сообщении: Unicode для системных наборов. */
+  token?: string;
 }
 
 export interface EmojiComposerHandle {
@@ -67,7 +69,7 @@ function restoreRange(box: HTMLDivElement, saved: SavedDomSelection | null): Ran
 // Код, только что дописанный перед курсором. В отличие от общего SHORTCODE
 // якорится на конец строки: превращаем в картинку ровно то, что человек сейчас
 // набрал, а не первый попавшийся код где-то раньше в тексте.
-const TYPED_SHORTCODE = /:([a-z0-9_]{2,32}):$/;
+const TYPED_SHORTCODE = /:([a-z0-9_]{2,128}):$/;
 
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
@@ -191,7 +193,7 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
         insertNode(document.createTextNode(value), focusAfter);
         return;
       }
-      insertNode(createEmojiNode(value.name, value.filePath, value.fallback), focusAfter);
+      insertNode(createEmojiNode(value.name, value.filePath, value.fallback, value.token), focusAfter);
     },
   }), [caretAfter, emitChange, insertNode, saveSelection]);
 

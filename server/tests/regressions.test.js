@@ -6,6 +6,8 @@ const test = require('node:test');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const AdmZip = require('adm-zip');
+const sharp = require('sharp');
 
 const dbPath = path.join(os.tmpdir(), `miras-regressions-${process.pid}-${Date.now()}.db`);
 process.env.MIRAS_DB_PATH = dbPath;
@@ -334,6 +336,33 @@ test('порядок паков смайликов сохраняется пол
   });
   assert.equal(reordered.response.status, 200);
   assert.ok(reordered.data.findIndex((p) => p.id === secondId) < reordered.data.findIndex((p) => p.id === firstId));
+});
+
+test('ZIP-набор связывает составное имя с Unicode и попадает в каталог', async () => {
+  const image = await sharp({
+    create: { width: 12, height: 12, channels: 4, background: { r: 255, g: 180, b: 0, alpha: 1 } },
+  }).png().toBuffer();
+  const archive = new AdmZip();
+  archive.addFile('U+1F1E6-U+1F1E8.png', image);
+  const form = new FormData();
+  form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), 'flags.zip');
+  form.append('key', 'apple-test');
+  form.append('name', 'Apple Test');
+  form.append('role', 'base');
+
+  const imported = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${superAdminToken()}` },
+    body: form,
+  });
+  const payload = await imported.json();
+  assert.equal(imported.status, 200, JSON.stringify(payload));
+  assert.equal(payload.report.imported, 1);
+
+  const item = db.prepare(`
+    SELECT unicode_key, fallback_emoji FROM emoji_items WHERE unicode_key = '1f1e6-1f1e8'
+  `).get();
+  assert.deepEqual(item, { unicode_key: '1f1e6-1f1e8', fallback_emoji: '🇦🇨' });
 });
 
 test('account deletion clears dependent records and transfers group ownership', () => {

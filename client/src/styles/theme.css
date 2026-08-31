@@ -1309,6 +1309,16 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-emoji-conflict-actions .sa-btn-quiet {
   background: var(--paper); color: var(--ink-muted); border-color: var(--line);
 }
+/* Вне .sa-emoji-conflict-actions у .sa-btn-quiet своего оформления не было
+   вовсе — кнопка «Заменить старые :u_...:» в разделе структуры эмодзи
+   рендерилась совсем без стиля браузера по умолчанию. */
+.sa-btn-quiet {
+  padding: 6px 11px; font-size: 12.5px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper); color: var(--ink-muted);
+}
+.sa-btn-quiet:hover { background: var(--paper-sunken); }
+.sa-btn-quiet:disabled { opacity: 0.6; cursor: default; }
 
 /* Пак — строка-аккордеон: их немного, но в каждом сотни картинок, и развёрнутые
    разом они не помещаются никуда. */
@@ -1534,6 +1544,20 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   border-radius: 0; transition: background var(--ease);
 }
 .composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.composer-emoji-suggestions {
+  display: flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 5px 8px; margin: 0 46px 5px 46px; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: color-mix(in srgb, var(--paper-raised) 94%, transparent);
+  box-shadow: var(--shadow-sm, 0 4px 14px rgba(16, 35, 47, .12));
+}
+.composer-emoji-suggestions button {
+  width: 34px; height: 34px; flex: none; padding: 4px; border: none;
+  border-radius: 50%; background: transparent; cursor: pointer;
+  display: grid; place-items: center;
+}
+.composer-emoji-suggestions button:hover { background: var(--row-hover); }
+.composer-emoji-suggestions img { width: 27px; height: 27px; object-fit: contain; }
 .composer-bar {
   flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 2px;
   padding: 3px; background: var(--paper-sunken);
@@ -1963,6 +1987,16 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-pack-drag-handle:active { cursor: grabbing; }
 
 .emoji-tabs { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.emoji-search {
+  display: flex; align-items: center; gap: 7px; margin: 7px 8px 0; padding: 6px 9px;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-faint);
+  background: var(--paper-sunken);
+}
+.emoji-search input {
+  flex: 1; min-width: 0; padding: 0; border: none; outline: none;
+  background: transparent; color: var(--ink); font: inherit; font-size: 13px;
+}
+.emoji-search button { border: none; background: none; color: var(--ink-muted); cursor: pointer; font-size: 17px; line-height: 1; }
 /* Вкладка пака — только значок: с названиями шапка расплывалась по ширине, а
    на телефоне вкладки в неё не помещались. Название живёт в подсказке. */
 .emoji-tab {
@@ -2488,6 +2522,37 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 .sa-btn-ghost:hover { background: var(--paper-sunken); }
 .sa-btn-danger { border: none; background: none; color: var(--unread); font-size: 12.5px; cursor: pointer; padding: 4px 6px; }
 .sa-btn-danger:hover { text-decoration: underline; }
+.sa-emoji-notice {
+  margin: 8px 0; padding: 9px 11px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 10%, var(--paper-sunken)); color: var(--ink);
+  font-size: 13px;
+}
+.sa-emoji-system {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px; margin: 14px 0 18px;
+}
+.sa-emoji-system-block {
+  min-width: 0; padding: 13px; border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--paper-sunken);
+}
+.sa-emoji-system-block h3 { margin: 0 0 6px; font-size: 14px; }
+.sa-emoji-import-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.sa-emoji-import-row select {
+  min-width: 210px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--paper-raised); color: var(--ink);
+}
+.sa-emoji-asset-packs { display: grid; gap: 6px; margin-top: 10px; }
+.sa-emoji-asset-packs > button {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper-raised); color: var(--ink); text-align: left; cursor: pointer;
+}
+.sa-emoji-asset-packs > button.is-active { border-color: var(--accent); }
+.sa-emoji-asset-packs span { font-weight: 600; }
+.sa-emoji-asset-packs small { color: var(--ink-muted); }
+.sa-emoji-asset-packs strong { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--accent); font-size: 12px; }
+.sa-emoji-categories-title { margin: 0 0 9px; font-size: 15px; }
+@media (max-width: 840px) { .sa-emoji-system { grid-template-columns: 1fr; } }
 /* Google Календарь: несколько карточек подряд вместо одной длинной формы —
    настройка приложения, подключение аккаунта, выбор календаря и состояние
    заполняются по очереди, и каждый следующий шаг имеет смысл только после

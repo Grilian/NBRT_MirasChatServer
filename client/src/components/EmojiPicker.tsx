@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api/client';
 import { resolveUploadUrl } from '../utils/uploads';
 import { CustomEmoji, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
@@ -64,6 +64,7 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
 }) => {
   const [packs, setPacks] = useState<EmojiPack[]>(packsOverride || cachedPacks || []);
   const [activePack, setActivePack] = useState(0);
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(!packsOverride && !cachedPacks);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +107,16 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
   }, [onClose, mobilePanel, embedded]);
 
   const current = packs[activePack];
+  const searchResults = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase('ru');
+    if (!query) return null;
+    return packs.flatMap((pack) => pack.custom || []).filter((item) => {
+      const haystack = `${item.label || ''} ${item.keywords || ''} ${item.unicode_key || ''} ${item.fallback || ''}`
+        .toLocaleLowerCase('ru');
+      return haystack.includes(query);
+    });
+  }, [packs, search]);
+  const visibleCustom = searchResults ?? current?.custom ?? [];
 
   const body = (
     <>
@@ -133,19 +144,36 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
         </div>
       )}
 
+      <div className="emoji-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+        </svg>
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Поиск эмодзи…"
+          aria-label="Поиск эмодзи"
+        />
+        {search && <button type="button" onClick={() => setSearch('')} aria-label="Очистить поиск">×</button>}
+      </div>
+
       <div className="emoji-grid">
         {loading && <div className="emoji-empty">Загрузка…</div>}
-        {!loading && (!current || (current.emoji.length === 0 && !current.custom?.length)) && (
-          <div className="emoji-empty">Смайлики пока не добавлены</div>
+        {!loading && (searchResults ? searchResults.length === 0 : (!current || (current.emoji.length === 0 && !current.custom?.length))) && (
+          <div className="emoji-empty">{search ? 'Ничего не найдено' : 'Смайлики пока не добавлены'}</div>
         )}
         {/* Кастомные идут первыми: их добавляли осознанно под этот коллектив,
             а юникодных всегда много и они одинаковы везде. */}
-        {current?.custom?.map((item) => (
+        {visibleCustom.map((item) => {
+          const selectionToken = item.unicode_key
+            ? (item.unicode || item.fallback || DEFAULT_EMOJI_FALLBACK)
+            : `:${item.name}:`;
+          return (
           <button
             key={`c${item.id}`}
             type="button"
-            className={'emoji-cell' + (selectedCustomEmoji.includes(`:${item.name}:`) ? ' is-selected' : '')}
-            aria-pressed={selectedCustomEmoji.includes(`:${item.name}:`)}
+            className={'emoji-cell' + (selectedCustomEmoji.includes(selectionToken) ? ' is-selected' : '')}
+            aria-pressed={selectedCustomEmoji.includes(selectionToken)}
             title={`:${item.name}:`}
             onMouseDown={(e) => e.preventDefault()}
             // В сообщение всё равно уходит код, а не картинка — формат хранения
@@ -155,14 +183,18 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
               name: item.name,
               filePath: item.file_path,
               fallback: item.fallback || DEFAULT_EMOJI_FALLBACK,
+              // Официальные наборы хранят в сообщении сам символ. Произвольные
+              // пользовательские смайлики без unicode_key сохраняют :name:.
+              token: item.unicode_key ? (item.unicode || item.fallback || DEFAULT_EMOJI_FALLBACK) : undefined,
             })}
           >
             <img className="custom-emoji" src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />
           </button>
-        ))}
+          );
+        })}
         {/* Системный набор показываем только как резерв, если в выбранном
             паке вообще нет загруженных изображений. */}
-        {!current?.custom?.length && current?.emoji.map((emoji, index) => (
+        {!search && !current?.custom?.length && current?.emoji.map((emoji, index) => (
           <button
             key={`${emoji}-${index}`}
             type="button"

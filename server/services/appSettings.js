@@ -82,7 +82,7 @@ const SHORTCODE = /^:([a-z0-9_]{2,32}):$/;
 
 function reactionCatalog() {
   const rows = db.prepare(`
-    SELECT i.name, i.fallback_emoji, i.retired, p.enabled
+    SELECT i.name, i.fallback_emoji, i.unicode_key, i.retired, p.enabled
     FROM emoji_items i
     JOIN emoji_packs p ON p.id = i.pack_id
     WHERE i.file_path IS NOT NULL AND i.name IS NOT NULL
@@ -93,7 +93,7 @@ function reactionCatalog() {
   for (const row of rows) {
     allByName.set(row.name, row);
     if (row.enabled && !row.retired && row.fallback_emoji && !enabledByFallback.has(row.fallback_emoji)) {
-      enabledByFallback.set(row.fallback_emoji, row.name);
+      enabledByFallback.set(row.fallback_emoji, row);
     }
   }
   return { allByName, enabledByFallback };
@@ -103,8 +103,8 @@ const unique = (values) => [...new Set(values)];
 
 function defaultsForCatalog(catalog) {
   return unique(DEFAULT_REACTIONS.map((fallback) => {
-    const name = catalog.enabledByFallback.get(fallback);
-    return name ? `:${name}:` : fallback;
+    const row = catalog.enabledByFallback.get(fallback);
+    return row ? (row.unicode_key ? fallback : `:${row.name}:`) : fallback;
   }));
 }
 
@@ -115,8 +115,8 @@ function getReactionEmoji() {
   const list = raw.split(/\s+/).filter(Boolean).map((value) => {
     const shortcode = SHORTCODE.exec(value);
     if (shortcode) return catalog.allByName.has(shortcode[1]) ? value : null;
-    const name = catalog.enabledByFallback.get(value);
-    return name ? `:${name}:` : value;
+    const row = catalog.enabledByFallback.get(value);
+    return row ? (row.unicode_key ? value : `:${row.name}:`) : value;
   }).filter(Boolean);
   return list.length ? unique(list) : defaultsForCatalog(catalog);
 }
@@ -130,8 +130,8 @@ function setReactionEmoji(value) {
       const row = catalog.allByName.get(shortcode[1]);
       return row && row.enabled && !row.retired ? item : null;
     }
-    const name = catalog.enabledByFallback.get(item);
-    return name ? `:${name}:` : null;
+    const row = catalog.enabledByFallback.get(item);
+    return row ? (row.unicode_key ? item : `:${row.name}:`) : null;
   }).filter(Boolean));
   if (!list.length) {
     setSetting(REACTION_EMOJI, null); // пусто — возвращаемся к набору по умолчанию

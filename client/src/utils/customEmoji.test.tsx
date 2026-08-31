@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { renderMessageText } from './customEmoji';
+import { buildEmojiMap, getEmojiSuggestions, renderMessageText } from './customEmoji';
 
 describe('renderMessageText', () => {
   test('makes http and www URLs clickable and keeps sentence punctuation outside', () => {
@@ -29,6 +29,29 @@ describe('renderMessageText', () => {
 
     expect(container.querySelector('img.custom-emoji')).toBeInTheDocument();
     expect(screen.getByRole('link')).toHaveAttribute('href', 'https://example.com');
+  });
+
+  test('рендерит обычный Unicode через активный набор, не меняя текст сообщения', () => {
+    const map = buildEmojiMap([{
+      name: 'u_1f600', file_path: '/uploads/emoji/apple_1f600.webp',
+      animated_path: '/uploads/emoji/telegram_1f600.webp', fallback: '😀',
+      unicode_key: '1f600', label: 'grinning face', keywords: 'улыбка радость',
+    }]);
+    const { container } = render(<div>{renderMessageText('Привет 😀!', map)}</div>);
+
+    expect(container.querySelector('img.custom-emoji')).toHaveAttribute('alt', '😀');
+    expect(getEmojiSuggestions(map, 'улыб', 3)[0]?.token).toBe('😀');
+  });
+
+  test('составная Unicode-последовательность выбирается целиком', () => {
+    const map = buildEmojiMap([{
+      name: 'u_1f1e6_1f1e8', file_path: '/uploads/emoji/flag.webp', fallback: '🇦🇨',
+      unicode_key: '1f1e6-1f1e8', label: 'flag',
+    }]);
+    const { container } = render(<div>{renderMessageText('Флаг 🇦🇨 здесь', map)}</div>);
+
+    expect(container.querySelectorAll('img.custom-emoji')).toHaveLength(1);
+    expect(container.querySelector('img.custom-emoji')).toHaveAttribute('alt', '🇦🇨');
   });
 
   // На слабой связи анимированный webp приезжает заметно позже текста. Пока он

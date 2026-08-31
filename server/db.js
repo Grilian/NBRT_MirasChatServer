@@ -513,6 +513,94 @@ try {
   // Колонка уже есть
 }
 
+// Новая модель каталога: emoji_items — логический Unicode-смайлик, а файлы
+// Apple / Telegram / Google Fonts являются его взаимозаменяемыми вариантами.
+// Старые file_path/animated_path пока остаются как совместимый «срез» активных
+// наборов: это позволяет обновлять сервер отдельно от уже установленных клиентов.
+for (const sql of [
+  `ALTER TABLE emoji_items ADD COLUMN unicode_key TEXT`,
+  `ALTER TABLE emoji_items ADD COLUMN label TEXT`,
+  `ALTER TABLE emoji_items ADD COLUMN keywords TEXT`,
+  `ALTER TABLE emoji_packs ADD COLUMN structure_key TEXT`,
+]) {
+  try { db.exec(sql); } catch (e) { /* колонка уже есть */ }
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS emoji_asset_packs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('base', 'animation')),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS emoji_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
+    asset_pack_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (item_id, asset_pack_id),
+    FOREIGN KEY (item_id) REFERENCES emoji_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (asset_pack_id) REFERENCES emoji_asset_packs(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_emoji_assets_item ON emoji_assets(item_id);
+  CREATE INDEX IF NOT EXISTS idx_emoji_assets_pack ON emoji_assets(asset_pack_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_emoji_items_unicode_key
+    ON emoji_items(unicode_key) WHERE unicode_key IS NOT NULL;
+
+  CREATE TABLE IF NOT EXISTS emoji_structure (
+    unicode_key TEXT PRIMARY KEY,
+    emoji TEXT NOT NULL,
+    group_name TEXT NOT NULL,
+    subgroup_name TEXT,
+    position INTEGER NOT NULL,
+    label TEXT,
+    keywords TEXT
+  );
+`);
+
+const nowForEmojiAssets = Date.now();
+db.prepare(`
+  INSERT OR IGNORE INTO emoji_asset_packs (key, name, role, enabled, active, position, created_at)
+  VALUES ('apple', 'Apple', 'base', 1, 1, 0, ?)
+`).run(nowForEmojiAssets);
+db.prepare(`
+  INSERT OR IGNORE INTO emoji_asset_packs (key, name, role, enabled, active, position, created_at)
+  VALUES ('animation', 'Telegram Animation', 'animation', 1, 1, 1, ?)
+`).run(nowForEmojiAssets);
+
+// Уже загруженные u_... связываем с Unicode без повторной загрузки. Обычные
+// пользовательские :name: остаются как были и не участвуют в смене оформления.
+const keyFromLegacyEmojiName = (name) => {
+  const match = /^u_([0-9a-f_]+)$/i.exec(String(name || ''));
+  if (!match) return null;
+  const parts = match[1].toLowerCase().split('_').filter(Boolean);
+  if (!parts.length || parts.some((part) => !/^[0-9a-f]{2,6}$/.test(part))) return null;
+  return parts.join('-');
+};
+const appleAssetPackId = db.prepare("SELECT id FROM emoji_asset_packs WHERE key = 'apple'").get().id;
+const animationAssetPackId = db.prepare("SELECT id FROM emoji_asset_packs WHERE key = 'animation'").get().id;
+const setLegacyUnicodeKey = db.prepare('UPDATE emoji_items SET unicode_key = ? WHERE id = ? AND unicode_key IS NULL');
+const addLegacyAsset = db.prepare(`
+  INSERT OR IGNORE INTO emoji_assets (item_id, asset_pack_id, file_path, created_at)
+  VALUES (?, ?, ?, ?)
+`);
+for (const item of db.prepare(`
+  SELECT id, name, file_path, animated_path FROM emoji_items
+  WHERE name IS NOT NULL AND (file_path IS NOT NULL OR animated_path IS NOT NULL)
+`).all()) {
+  const key = keyFromLegacyEmojiName(item.name);
+  if (key) setLegacyUnicodeKey.run(key, item.id);
+  if (item.file_path) addLegacyAsset.run(item.id, appleAssetPackId, item.file_path, nowForEmojiAssets);
+  if (item.animated_path) addLegacyAsset.run(item.id, animationAssetPackId, item.animated_path, nowForEmojiAssets);
+}
+
 // Миграция: добавляем колонку status, если БД старая
 try {
   db.exec(`ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'sent'`);
