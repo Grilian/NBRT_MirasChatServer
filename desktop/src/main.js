@@ -112,7 +112,71 @@ function saveAppState(patch) {
   }
 }
 
-// ===== Прокси =====
+// ===== Автозагрузка =====
+//
+// app.setLoginItemSettings()/getLoginItemSettings() в Electron документированы
+// как «Windows и macOS only» — на Linux это тихая заглушка, ничего не делает
+// и не бросает ошибку, поэтому баг было не так просто заметить: переключатель
+// в настройках щёлкается, but Astra и Zorin его просто игнорируют. Свой путь
+// для Linux — обычный .desktop-файл в ~/.config/autostart/, это открытый
+// XDG-стандарт автозапуска, который понимают что GNOME (Zorin), что более
+// старые окружения вроде Fly в Astra (там же исторически MATE), без
+// зависимости от конкретного DE.
+const LINUX_AUTOSTART_DIR = path.join(os.homedir(), '.config', 'autostart');
+const LINUX_AUTOSTART_PATH = path.join(LINUX_AUTOSTART_DIR, 'ru.miras.mirasChat.desktop');
+
+function buildLinuxAutostartEntry() {
+  // process.execPath — реальный путь до уже запущенного бинарника: тот же
+  // самый файл, на который смотрит ярлык из меню приложений, независимо от
+  // того, как именно electron-builder назвал исполняемый файл внутри .deb, и
+  // не ломается, если человек распаковал портативную tar.gz-версию в
+  // произвольную папку.
+  const execPath = process.execPath;
+  const exec = execPath.includes(' ') ? `"${execPath}"` : execPath;
+  return [
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=MirasChat',
+    'Comment=Автозапуск корпоративного мессенджера MirasChat',
+    `Exec=${exec}`,
+    'Terminal=false',
+    'NoDisplay=false',
+    'X-GNOME-Autostart-enabled=true',
+    'StartupNotify=false',
+    '',
+  ].join('\n');
+}
+
+function getAutoLaunchEnabled() {
+  if (process.platform === 'linux') {
+    try {
+      return fs.existsSync(LINUX_AUTOSTART_PATH);
+    } catch {
+      return false;
+    }
+  }
+  return app.getLoginItemSettings().openAtLogin;
+}
+
+function setAutoLaunchEnabled(enabled) {
+  if (process.platform === 'linux') {
+    try {
+      if (enabled) {
+        fs.mkdirSync(LINUX_AUTOSTART_DIR, { recursive: true });
+        fs.writeFileSync(LINUX_AUTOSTART_PATH, buildLinuxAutostartEntry());
+      } else if (fs.existsSync(LINUX_AUTOSTART_PATH)) {
+        fs.unlinkSync(LINUX_AUTOSTART_PATH);
+      }
+    } catch (e) {
+      console.error('Не удалось изменить автозагрузку (Linux):', e.message);
+    }
+    return getAutoLaunchEnabled();
+  }
+  app.setLoginItemSettings({ openAtLogin: !!enabled });
+  return app.getLoginItemSettings().openAtLogin;
+}
+
+
 //
 // Сервер живёт во внутренней сети конторы, и на некоторых сетях (домашний
 // интернет, гостевой Wi-Fi, VPN без прописанного прокси в системе) до него
@@ -238,9 +302,27 @@ function applyDefaultAutoLaunch() {
   // В dev-режиме прописался бы путь до electron.exe из node_modules — мусор
   // в автозагрузке рабочей машины, который потом искать вручную.
   if (isDev) return;
-  if (loadAppState().autoLaunchInitialized) return;
+  const state = loadAppState();
+
+  // Отдельный одноразовый флаг для Linux: до этого фикса переключатель ничего
+  // не делал (Electron документирует setLoginItemSettings как «Windows и
+  // macOS only», на Linux — тихая заглушка), поэтому у всех уже
+  // установленных на Astra/Zorin версий автозагрузка не была настроена
+  // по-настоящему, даже если общий autoLaunchInitialized уже стоит и человек
+  // раньше щёлкал переключатель — сохранять в таком состоянии нечего.
+  if (process.platform === 'linux' && !state.linuxAutoLaunchMigrated) {
+    try {
+      setAutoLaunchEnabled(true);
+    } catch (e) {
+      console.error('Не удалось включить автозагрузку (Linux):', e.message);
+    }
+    saveAppState({ linuxAutoLaunchMigrated: true, autoLaunchInitialized: true });
+    return;
+  }
+
+  if (state.autoLaunchInitialized) return;
   try {
-    app.setLoginItemSettings({ openAtLogin: true });
+    setAutoLaunchEnabled(true);
   } catch (e) {
     console.error('Не удалось включить автозагрузку:', e.message);
   }
@@ -830,11 +912,8 @@ ipcMain.on('update:install', () => installUpdate());
 // технический SemVer, необходимый electron-updater.
 ipcMain.handle('app:version', () => releaseVersion || app.getVersion());
 
-ipcMain.handle('autostart:get', () => app.getLoginItemSettings().openAtLogin);
-ipcMain.handle('autostart:set', (event, enabled) => {
-  app.setLoginItemSettings({ openAtLogin: !!enabled });
-  return app.getLoginItemSettings().openAtLogin;
-});
+ipcMain.handle('autostart:get', () => getAutoLaunchEnabled());
+ipcMain.handle('autostart:set', (event, enabled) => setAutoLaunchEnabled(!!enabled));
 
 // Состояние для настроек всегда возвращается вместе со свежей проверкой
 // доступности ЦИТ — панели незачем делать для этого отдельный вызов.
