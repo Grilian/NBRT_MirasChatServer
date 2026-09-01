@@ -300,7 +300,7 @@ function getProxyState() {
   const saved = (loadAppState().proxy) || {};
   return {
     enabled: !!saved.enabled,
-    mode: saved.mode === 'manual' ? 'manual' : 'cit',
+    mode: ['manual', 'system', 'cit'].includes(saved.mode) ? saved.mode : 'cit',
     manualHost: typeof saved.manualHost === 'string' ? saved.manualHost : '',
     manualPort: typeof saved.manualPort === 'string' ? saved.manualPort : '',
     citUsername: typeof saved.citUsername === 'string' ? saved.citUsername : '',
@@ -308,6 +308,8 @@ function getProxyState() {
     // сохранён, чтобы поле в интерфейсе могло показать плейсхолдер вместо
     // пустого места, не раскрывая значение.
     citPasswordSet: !!saved.citPassword,
+    // Диагностика реального результата авторизации — см. attachProxyAuthHandler.
+    citAuthStatus: citAuthState.lastResult,
   };
 }
 
@@ -321,32 +323,83 @@ function buildProxyConfig(state) {
     // время разработки) прокси не трогает.
     return { mode: 'fixed_servers', proxyRules: port ? `${host}:${port}` : host, proxyBypassRules: '<local>' };
   }
+  if (state.mode === 'system') {
+    // Доверяем прокси, уже настроенному в самой ОС — на Zorin (GNOME) это
+    // «Настройки → Сеть → Прокси сети», на некоторых машинах то же самое
+    // читается из переменных окружения http_proxy/https_proxy. Ровно то,
+    // чем в такой ситуации и так уже пользуется браузер, поэтому это самый
+    // надёжный вариант там, где человек это один раз настроил вручную в ОС.
+    return { mode: 'system' };
+  }
   // ЦИТ — data: URL с PAC-скриптом внутри: Chromium поддерживает эту схему
   // для pac_script точно так же, как http(s)/file, но без похода в сеть.
   const pacDataUrl = `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(CIT_PAC_SCRIPT, 'utf8').toString('base64')}`;
   return { mode: 'pac_script', pacScript: pacDataUrl };
 }
 
-// Логин и пароль от прокси ЦИТ приложение не вводит само в диалоге — оно
-// заранее подставляет их в ответ на HTTP 407, как только Chromium его
-// пришлёт. Событие 'login' общее и для проксей, и для сайтов с Basic-
-// авторизацией — обязательно проверяем isProxy, иначе можно случайно
-// подставить прокси-пароль на любой сайт, спросивший логин.
+// Что реально произошло с последней попыткой логина на прокси — единственный
+// практичный способ отличить «неверный логин/пароль» от «прокси в принципе
+// не отвечает» и от «прокси вообще не спрашивает авторизацию», когда сам
+// Chromium никакого текста ошибки не показывает и разбираться приходится
+// вслепую. lastResult: null (ещё не пробовали) | 'no-credentials' (логин не
+// заполнен) | 'pending' (только что подставили, ждём исхода) | 'rejected'
+// (тот же прокси спросил снова — значит, не принял то, что мы дали).
+let citAuthState = { attempts: 0, lastResult: null, lastChallengeKey: null };
+
+function resetCitAuthState() {
+  citAuthState = { attempts: 0, lastResult: null, lastChallengeKey: null };
+}
+
+// Логин и пароль от корпоративного прокси приложение не вводит само в
+// диалоге — оно заранее подставляет их в ответ на HTTP 407, как только
+// Chromium его пришлёт. Событие 'login' общее и для проксей, и для сайтов с
+// Basic-авторизацией — обязательно проверяем isProxy, иначе можно случайно
+// подставить пароль от прокси на любой сайт, спросивший логин.
+//
+// Раньше подстановка была жёстко привязана к mode === 'cit'. Это неверно:
+// логин и пароль относятся к самому прокси-серверу, а не к тому, каким
+// способом приложение его нашло — тот же govtatar\auto.nbrt нужен и когда
+// прокси найден через встроенный PAC ЦИТ, и когда используется системная
+// настройка ОС (mode 'system'), и в теории даже при ручном адресе, если он
+// указывает на тот же сервер. Подставляем сохранённые данные при любом
+// прокси-запросе логина, если они вообще заполнены — не только в режиме ЦИТ.
 function attachProxyAuthHandler(targetSession) {
   targetSession.removeAllListeners('login'); // applyProxyState() дергается многократно за сессию — слушатели не должны копиться
   targetSession.on('login', (event, authInfo, callback) => {
     if (!authInfo.isProxy) { callback(); return; }
+
     const saved = (loadAppState().proxy) || {};
-    const state = getProxyState();
-    if (state.mode === 'cit' && state.citUsername) {
-      const password = decryptSecret(saved.citPassword);
-      event.preventDefault();
-      callback(state.citUsername, password);
+    const username = typeof saved.citUsername === 'string' ? saved.citUsername.trim() : '';
+    if (!username) {
+      citAuthState = { attempts: 0, lastResult: 'no-credentials', lastChallengeKey: null };
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('proxy:state-changed', getProxyState());
+      }
+      callback(); // нет сохранённых данных — пусть Chromium обработает как умеет
       return;
     }
-    // Данных нет — пусть Chromium обработает сам (в этом окружении это
-    // всё равно означает, что запрос просто не пройдёт с 407).
-    callback();
+
+    // Тот же прокси (host:port и схема авторизации) спросил логин снова
+    // почти сразу после того, как мы его уже подставляли, — единственный
+    // доступный нам признак, что Chromium не принял то, что мы дали.
+    // Правильные данные повторного запроса на той же сессии не вызывают.
+    const challengeKey = `${authInfo.host}:${authInfo.port}:${authInfo.scheme}`;
+    citAuthState = {
+      attempts: citAuthState.attempts + 1,
+      lastResult: citAuthState.lastChallengeKey === challengeKey ? 'rejected' : 'pending',
+      lastChallengeKey: challengeKey,
+    };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('proxy:state-changed', getProxyState());
+    }
+
+    const password = decryptSecret(saved.citPassword);
+    event.preventDefault();
+    // NTLM/Negotiate-прокси (govtatar\auto.nbrt — характерный формат именно
+    // NTLM) сами разбирают "домен\имя" в один параметр username — Chromium
+    // делает это тем же кодом что и для встроенного диалога браузера, так
+    // что здесь ничего специально разделять на домен и логин не нужно.
+    callback(username, password);
   });
 }
 
@@ -1061,7 +1114,7 @@ ipcMain.handle('proxy:set', async (event, patch) => {
   const savedProxy = (loadAppState().proxy) || {};
   const next = {
     enabled: typeof patch?.enabled === 'boolean' ? patch.enabled : current.enabled,
-    mode: patch?.mode === 'manual' ? 'manual' : (patch?.mode === 'cit' ? 'cit' : current.mode),
+    mode: ['manual', 'system', 'cit'].includes(patch?.mode) ? patch.mode : current.mode,
     manualHost: typeof patch?.manualHost === 'string' ? patch.manualHost.trim() : current.manualHost,
     manualPort: typeof patch?.manualPort === 'string' ? patch.manualPort.trim() : current.manualPort,
     citUsername: typeof patch?.citUsername === 'string' ? patch.citUsername.trim() : current.citUsername,
@@ -1071,6 +1124,10 @@ ipcMain.handle('proxy:set', async (event, patch) => {
     // участвует — только зашифрованный вид остаётся в app-state.json.
     citPassword: patch?.citPassword === undefined ? savedProxy.citPassword : encryptSecret(patch.citPassword),
   };
+  // Логин/пароль или сам способ поиска прокси поменялись — прошлый исход
+  // авторизации («отклонил») относится уже к другой попытке, показывать его
+  // дальше означало бы врать про то, что ещё не проверялось.
+  resetCitAuthState();
   // Ручное вмешательство человека — отключает автоопределение по IP
   // насовсем, чтобы оно больше не спорило с его выбором.
   saveAppState({ proxy: { ...next, userTouched: true } });

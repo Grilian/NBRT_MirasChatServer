@@ -29,6 +29,7 @@ const baseProxyState = {
   citUsername: '',
   citPasswordSet: false,
   citReachable: false,
+  citAuthStatus: null as 'no-credentials' | 'pending' | 'rejected' | null,
 };
 
 function mockElectronAPI(overrides: Record<string, any> = {}) {
@@ -140,8 +141,65 @@ describe('SettingsPanel — прокси', () => {
     render(<SettingsPanel {...baseProps} />);
 
     await screen.findByText('Использовать прокси');
+    expect(screen.queryByText('Системный')).not.toBeInTheDocument();
     expect(screen.queryByText('Вручную')).not.toBeInTheDocument();
     expect(screen.queryByText('ЦИТ')).not.toBeInTheDocument();
+  });
+
+  test('режим «Системный» доступен и логин/пароль показываются и для него тоже', async () => {
+    const setProxyState = jest.fn((patch: any) => Promise.resolve({ ...baseProxyState, mode: 'system', ...patch }));
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve({ ...baseProxyState, mode: 'system' })),
+      setProxyState,
+    });
+    render(<SettingsPanel {...baseProps} />);
+
+    await screen.findByText('Системный прокси');
+    expect(screen.getByText('Используются настройки сети из самой ОС')).toBeInTheDocument();
+    // Логин/пароль — общие для «Системный» и «ЦИТ», раз относятся к самому
+    // серверу, а не к способу его поиска.
+    expect(screen.getByText('Логин и пароль прокси')).toBeInTheDocument();
+  });
+
+  test('переключение на «Системный» отправляет mode: system', async () => {
+    const setProxyState = jest.fn((patch: any) => Promise.resolve({ ...baseProxyState, ...patch }));
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve(baseProxyState)),
+      setProxyState,
+    });
+    render(<SettingsPanel {...baseProps} />);
+
+    fireEvent.click(await screen.findByText('Системный'));
+    await waitFor(() => expect(setProxyState).toHaveBeenCalledWith({ mode: 'system' }));
+  });
+
+  test('вручную логин/пароль не показываются — свой сервер без общей авторизации', async () => {
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve({ ...baseProxyState, mode: 'manual' })),
+    });
+    render(<SettingsPanel {...baseProps} />);
+
+    await screen.findByText('Использовать прокси');
+    expect(screen.queryByText('Логин и пароль прокси')).not.toBeInTheDocument();
+  });
+
+  test('прокси отклонил логин — показывается предупреждение', async () => {
+    mockElectronAPI({
+      getProxyState: jest.fn(() => Promise.resolve({
+        ...baseProxyState, citUsername: 'govtatar\\ivanov', citPasswordSet: true, citAuthStatus: 'rejected',
+      })),
+    });
+    render(<SettingsPanel {...baseProps} />);
+
+    expect(await screen.findByText(/Прокси не принял логин или пароль/)).toBeInTheDocument();
+  });
+
+  test('нет предупреждения, пока статус авторизации неизвестен', async () => {
+    mockElectronAPI({ getProxyState: jest.fn(() => Promise.resolve(baseProxyState)) });
+    render(<SettingsPanel {...baseProps} />);
+
+    await screen.findByText('Логин и пароль прокси');
+    expect(screen.queryByText(/Прокси не принял/)).not.toBeInTheDocument();
   });
 
   test('логин и пароль ЦИТ сохраняются вместе одним запросом', async () => {
@@ -153,7 +211,7 @@ describe('SettingsPanel — прокси', () => {
     const { container } = render(<SettingsPanel {...baseProps} />);
 
     await screen.findByText('Логин и пароль прокси');
-    const loginInput = container.querySelector('input[placeholder="Логин"]') as HTMLInputElement;
+    const loginInput = container.querySelector('input[placeholder^="Домен"]') as HTMLInputElement;
     const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement;
     expect(loginInput).not.toBeNull();
     expect(passwordInput).not.toBeNull();

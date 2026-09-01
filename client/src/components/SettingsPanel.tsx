@@ -184,24 +184,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // здесь только показывает его и просит изменить.
   useEffect(() => {
     if (!isElectron) return;
-    const applyState = (state: ProxyState) => {
+    // Начальную загрузку синхронизируем полностью, включая поля ввода. А вот
+    // push из main-процесса (onProxyStateChanged) теперь прилетает не только
+    // при автовключении по IP, но и при каждой попытке логина на прокси —
+    // если в этот момент человек как раз печатает логин или пароль, обычная
+    // синхронизация затёрла бы набранный текст. Поэтому push обновляет
+    // только то, что показывается только для чтения (доступность, статус
+    // авторизации), а поля ввода не трогает.
+    window.electronAPI!.getProxyState().then((state) => {
       setProxy(state);
       setProxyManualHost(state.manualHost);
       setProxyManualPort(state.manualPort);
       setProxyCitUsername(state.citUsername);
-    };
-    window.electronAPI!.getProxyState().then(applyState);
-    // Автоопределение по IP (см. main.js) может включить ЦИТ прямо во время
-    // открытых настроек — тогда обновляем панель, не дожидаясь, пока человек
-    // сам зайдёт и выйдет из раздела.
-    return window.electronAPI!.onProxyStateChanged?.(applyState);
+    });
+    return window.electronAPI!.onProxyStateChanged?.((state) => {
+      setProxy((prev) => (prev ? { ...prev, ...state } : state));
+    });
   }, [isElectron]);
 
-  // Пока открыт раздел ЦИТ, доступность адреса перепроверяем сами: человек
-  // мог как раз в этот момент переключиться на нужный Wi-Fi и ждёт, что
-  // бледный текст сейчас же станет обычным, а не после перезахода в настройки.
+  // Пока открыт раздел с прокси, доступность и статус авторизации
+  // перепроверяем сами: человек мог как раз в этот момент переключиться на
+  // нужный Wi-Fi или прокси мог принять данные после повторной попытки, и
+  // подсказка должна обновиться сама, а не только после перезахода в раздел.
   useEffect(() => {
-    if (!isElectron || proxy?.mode !== 'cit') return;
+    if (!isElectron || (proxy?.mode !== 'cit' && proxy?.mode !== 'system')) return;
     const interval = setInterval(() => {
       window.electronAPI!.checkCitProxy().then((citReachable) => {
         setProxy((prev) => (prev ? { ...prev, citReachable } : prev));
@@ -549,6 +555,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="segmented">
                       <button
                         type="button"
+                        className={proxy.mode === 'system' ? 'is-active' : ''}
+                        disabled={proxySaving}
+                        onClick={() => updateProxy({ mode: 'system' })}
+                      >
+                        Системный
+                      </button>
+                      <button
+                        type="button"
                         className={proxy.mode === 'manual' ? 'is-active' : ''}
                         disabled={proxySaving}
                         onClick={() => updateProxy({ mode: 'manual' })}
@@ -565,6 +579,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {proxy.mode === 'system' && (
+                    <div className="field">
+                      <label>Системный прокси</label>
+                      <div className="field-readonly">
+                        Используются настройки сети из самой ОС
+                      </div>
+                      <div className="field-hint">
+                        То же самое, чем в этой ситуации и так уже пользуется браузер. Подходит,
+                        если прокси уже настроен в сетевых параметрах системы.
+                      </div>
+                    </div>
+                  )}
 
                   {proxy.mode === 'manual' && (
                     <form className="field proxy-manual-fields" onSubmit={saveProxyManual}>
@@ -591,47 +618,64 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   )}
 
                   {proxy.mode === 'cit' && (
-                    <>
-                      <div className="field">
-                        <label>Автонастройка ЦИТ</label>
-                        <div className={'field-readonly' + (proxy.citReachable ? '' : ' is-muted')}>
-                          PAC ЦИТ — i.tatar.ru:8080
-                        </div>
-                        {!proxy.citReachable && (
-                          <div className="field-hint">Не настроен — подключите Wi-Fi для настройки</div>
+                    <div className="field">
+                      <label>Автонастройка ЦИТ</label>
+                      <div className={'field-readonly' + (proxy.citReachable ? '' : ' is-muted')}>
+                        PAC ЦИТ — i.tatar.ru:8080
+                      </div>
+                      {!proxy.citReachable && (
+                        <div className="field-hint">Не настроен — подключите Wi-Fi для настройки</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Логин и пароль относятся к самому прокси-серверу, а не к
+                      способу, которым его нашли — нужны что в «Системном»
+                      режиме (браузер в этой же сети их тоже спрашивает), что
+                      в «ЦИТ». В режиме «Вручную» человек мог указать другой
+                      сервер без авторизации, поэтому там их не показываем. */}
+                  {(proxy.mode === 'cit' || proxy.mode === 'system') && (
+                    <form className="field proxy-manual-fields" onSubmit={saveProxyCitCredentials}>
+                      <label>Логин и пароль прокси</label>
+                      <div className="proxy-manual-inputs">
+                        <input
+                          type="text"
+                          value={proxyCitUsername}
+                          onChange={(e) => setProxyCitUsername(e.target.value)}
+                          placeholder="Домен\логин, напр. govtatar\ivanov"
+                          autoComplete="username"
+                        />
+                        <input
+                          type="password"
+                          value={proxyCitPassword}
+                          onChange={(e) => setProxyCitPassword(e.target.value)}
+                          placeholder={proxy.citPasswordSet ? 'Пароль сохранён — введите новый, чтобы изменить' : 'Пароль'}
+                          autoComplete="current-password"
+                        />
+                      </div>
+                      <div className="proxy-manual-actions">
+                        <button type="submit" className="btn-primary" disabled={proxySaving}>
+                          Сохранить
+                        </button>
+                        {proxy.citPasswordSet && (
+                          <button type="button" className="btn-plain" disabled={proxySaving} onClick={clearProxyCitPassword}>
+                            Убрать пароль
+                          </button>
                         )}
                       </div>
-
-                      <form className="field proxy-manual-fields" onSubmit={saveProxyCitCredentials}>
-                        <label>Логин и пароль прокси</label>
-                        <div className="proxy-manual-inputs">
-                          <input
-                            type="text"
-                            value={proxyCitUsername}
-                            onChange={(e) => setProxyCitUsername(e.target.value)}
-                            placeholder="Логин"
-                            autoComplete="username"
-                          />
-                          <input
-                            type="password"
-                            value={proxyCitPassword}
-                            onChange={(e) => setProxyCitPassword(e.target.value)}
-                            placeholder={proxy.citPasswordSet ? 'Пароль сохранён — введите новый, чтобы изменить' : 'Пароль'}
-                            autoComplete="current-password"
-                          />
+                      {proxy.citAuthStatus === 'rejected' && (
+                        <div className="field-hint is-warning">
+                          Прокси не принял логин или пароль. Проверьте, что домен указан через
+                          обратный слэш перед именем (govtatar\ivanov), и попробуйте снова.
                         </div>
-                        <div className="proxy-manual-actions">
-                          <button type="submit" className="btn-primary" disabled={proxySaving}>
-                            Сохранить
-                          </button>
-                          {proxy.citPasswordSet && (
-                            <button type="button" className="btn-plain" disabled={proxySaving} onClick={clearProxyCitPassword}>
-                              Убрать пароль
-                            </button>
-                          )}
+                      )}
+                      {proxy.citAuthStatus === 'no-credentials' && (
+                        <div className="field-hint">
+                          Прокси запросил авторизацию, а логин и пароль ещё не заполнены —
+                          заполните их выше.
                         </div>
-                      </form>
-                    </>
+                      )}
+                    </form>
                   )}
                 </>
               )}
