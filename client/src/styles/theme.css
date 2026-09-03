@@ -2543,15 +2543,23 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   border-radius: var(--radius-sm); background: var(--paper-raised); color: var(--ink);
 }
 .sa-emoji-asset-packs { display: grid; gap: 6px; margin-top: 10px; }
-.sa-emoji-asset-packs > button {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
+.sa-emoji-asset-pack { display: flex; align-items: stretch; gap: 6px; }
+.sa-emoji-asset-pack-activate {
+  flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
   padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
   background: var(--paper-raised); color: var(--ink); text-align: left; cursor: pointer;
 }
-.sa-emoji-asset-packs > button.is-active { border-color: var(--accent); }
-.sa-emoji-asset-packs span { font-weight: 600; }
-.sa-emoji-asset-packs small { color: var(--ink-muted); }
-.sa-emoji-asset-packs strong { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--accent); font-size: 12px; }
+.sa-emoji-asset-pack.is-active .sa-emoji-asset-pack-activate { border-color: var(--accent); }
+.sa-emoji-asset-pack-activate:disabled { opacity: .5; cursor: default; }
+.sa-emoji-asset-pack span { font-weight: 600; }
+.sa-emoji-asset-pack small { color: var(--ink-muted); }
+.sa-emoji-asset-pack strong { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--accent); font-size: 12px; }
+.sa-emoji-asset-pack-delete {
+  flex: none; width: 34px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper-raised); color: var(--ink-muted); cursor: pointer; font-size: 17px; line-height: 1;
+}
+.sa-emoji-asset-pack-delete:hover { color: var(--unread); border-color: var(--unread); }
+.sa-emoji-asset-pack-delete:disabled { opacity: .5; cursor: default; }
 .sa-emoji-categories-title { margin: 0 0 9px; font-size: 15px; }
 @media (max-width: 840px) { .sa-emoji-system { grid-template-columns: 1fr; } }
 /* Google Календарь: несколько карточек подряд вместо одной длинной формы —

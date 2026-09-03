@@ -601,6 +601,40 @@ for (const item of db.prepare(`
   if (item.animated_path) addLegacyAsset.run(item.id, animationAssetPackId, item.animated_path, nowForEmojiAssets);
 }
 
+// Архив смайликов больше не существует как понятие (удаление пака теперь
+// настоящее — см. routes/emoji.js). У кого он уже успел завестись до этого
+// фикса, разбираем его точно так же, как обычное удаление пака: элементы и
+// картинки с диска долой, старые сообщения с такими кодами покажут текст
+// :name: — тот же компромисс, что и для любого другого удалённого смайлика.
+const legacyArchivePack = db.prepare("SELECT id FROM emoji_packs WHERE name = 'Архив смайликов'").get();
+if (legacyArchivePack) {
+  const archiveFiles = db.prepare(
+    'SELECT file_path, animated_path FROM emoji_items WHERE pack_id = ? AND file_path IS NOT NULL'
+  ).all(legacyArchivePack.id);
+  db.prepare(
+    'DELETE FROM emoji_assets WHERE item_id IN (SELECT id FROM emoji_items WHERE pack_id = ?)'
+  ).run(legacyArchivePack.id);
+  db.prepare('DELETE FROM emoji_items WHERE pack_id = ?').run(legacyArchivePack.id);
+  db.prepare('DELETE FROM emoji_packs WHERE id = ?').run(legacyArchivePack.id);
+  const fsForCleanup = require('fs');
+  archiveFiles.forEach((row) => {
+    [row.file_path, row.animated_path].filter(Boolean).forEach((p) => {
+      const onDisk = path.join(__dirname, String(p).replace(/^\/uploads\//, 'uploads/'));
+      fsForCleanup.unlink(onDisk, () => {});
+    });
+  });
+}
+
+// FK в этой базе движком не проверяются нигде (PRAGMA foreign_keys выключена
+// во всём проекте, см. комментарий у sticker_id ниже) — ON DELETE CASCADE в
+// схеме emoji_assets/emoji_items декоративный. Более ранний вариант пак- и
+// набор-удаления полагался на него и оставлял сиротские строки: элементы без
+// пака, ресурсы без элемента или набора. Идемпотентная подчистка — на уже
+// чистой базе просто ничего не находит.
+db.prepare('DELETE FROM emoji_items WHERE pack_id NOT IN (SELECT id FROM emoji_packs)').run();
+db.prepare('DELETE FROM emoji_assets WHERE item_id NOT IN (SELECT id FROM emoji_items)').run();
+db.prepare('DELETE FROM emoji_assets WHERE asset_pack_id NOT IN (SELECT id FROM emoji_asset_packs)').run();
+
 // Миграция: добавляем колонку status, если БД старая
 try {
   db.exec(`ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'sent'`);

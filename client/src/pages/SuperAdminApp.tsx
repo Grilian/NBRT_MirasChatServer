@@ -1418,7 +1418,6 @@ interface EmojiItem {
   file_path: string | null;
   animated_path: string | null;
   fallback: string;
-  retired: boolean;
   unicode?: string | null;
   unicode_key?: string | null;
   label?: string;
@@ -1451,15 +1450,7 @@ interface EmojiSystemState {
   logicalItems: number;
 }
 
-// Смайлик, чьё имя занято убранным: загрузка такого файла не проходит, но
-// отказ поправимый — тот же смайлик можно вернуть, поставив ему эту картинку.
-interface RetiredConflict {
-  itemId: number;
-  name: string;
-  file: File;
-}
-
-const ARCHIVE_PACK_NAME = 'Архив смайликов';
+const EMOJI_ASSET_ROLE_LABEL = { base: 'Базовое оформление', animation: 'Анимация' } as const;
 
 // Имена файлам дают по коду эмодзи (`u_1f4a2`), поэтому базовый смайл почти
 // всегда выводится из имени. Тот же разбор, что и на сервере (routes/emoji.js).
@@ -1485,10 +1476,9 @@ const fallbackFromName = (name: string): string => {
  * невозможно.
  */
 function EmojiItemModal({
-  item, packs, onClose, onApply, onError,
+  item, onClose, onApply, onError,
 }: {
   item: EmojiItem;
-  packs: EmojiPack[];
   onClose: () => void;
   onApply: (data: EmojiPack[]) => void;
   onError: (message: string) => void;
@@ -1547,13 +1537,6 @@ function EmojiItemModal({
           <h3>{isImage ? `:${item.name}:` : 'Смайлик'}</h3>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">×</button>
         </div>
-
-        {item.retired && (
-          <p className="sa-hint">
-            Смайлик убран из панели выбора — это след прежнего порядка, когда их прятали вместо
-            удаления. Верните его в оборот или удалите насовсем.
-          </p>
-        )}
 
         {isImage ? (
           <>
@@ -1659,17 +1642,6 @@ function EmojiItemModal({
         )}
 
         <div className="sa-emoji-modal-foot">
-          {item.retired && (
-            <button
-              type="button" className="sa-btn-ghost"
-              onClick={() => run('restore', () => superAdminApi.put(`/emoji/admin/custom/${item.id}/restore`, {
-                packId: packs.find((p) => p.items?.some((i) => i.id === item.id) && p.name !== ARCHIVE_PACK_NAME)?.id
-                  ?? packs.find((p) => p.name !== ARCHIVE_PACK_NAME)?.id,
-              }))}
-            >
-              Вернуть в оборот
-            </button>
-          )}
           <button type="button" className="sa-btn-danger" disabled={!!busy} onClick={remove}>
             {busy === 'delete' ? 'Удаляем…' : 'Удалить навсегда'}
           </button>
@@ -1695,9 +1667,6 @@ function EmojiPacksPanel() {
   const [newEmoji, setNewEmoji] = useState('');
   const [assetPreset, setAssetPreset] = useState<'apple' | 'animation' | 'google-fonts'>('apple');
   const [systemBusy, setSystemBusy] = useState('');
-  // Файлы из последней загрузки, не прошедшие из-за убранного тёзки. Держим
-  // вместе с File: вернуть смайлик мало, ему нужна та самая картинка.
-  const [conflicts, setConflicts] = useState<{ packId: number; items: RetiredConflict[] } | null>(null);
 
   const apply = (data: EmojiPack[]) => {
     setPacks(data);
@@ -1782,6 +1751,27 @@ function EmojiPacksPanel() {
     }
   };
 
+  // Раньше удалить загруженный ZIP-набор было нельзя вовсе — только
+  // переключить активный. «Используется»/«Выбрать» на карточке многие читали
+  // как блокировку удаления, хотя это просто индикатор активности.
+  const deleteAssetPack = async (pack: EmojiAssetPack) => {
+    if (!window.confirm(
+      `Удалить набор «${pack.name}»?\n\nВсе ${pack.item_count} картинок этого набора будут стёрты с диска. `
+      + 'Сами смайлики (Unicode-каталог) останутся — просто без этого оформления, если для них не '
+      + 'загружен другой включённый набор той же роли.',
+    )) return;
+    setSystemBusy(`delete-pack-${pack.id}`);
+    try {
+      await superAdminApi.delete(`/emoji/admin/assets/${pack.id}`);
+      await load();
+      setNotice(`Набор «${pack.name}» удалён.`);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось удалить набор');
+    } finally {
+      setSystemBusy('');
+    }
+  };
+
   const migrateOldUnicodeTokens = async () => {
     if (!window.confirm('Заменить старые коды :u_...: в сообщениях обычными Unicode-эмодзи?')) return;
     setSystemBusy('migrate');
@@ -1827,7 +1817,6 @@ function EmojiPacksPanel() {
   const uploadCustom = async (packId: number, files: File[]) => {
     setSavingId(packId);
     const failed: string[] = [];
-    const retired: RetiredConflict[] = [];
     let latest: EmojiPack[] | null = null;
     // Последовательно, а не пачкой: имена проверяются на уникальность в БД, и
     // параллельные загрузки одинаково названных файлов гонялись бы за именем.
@@ -1840,36 +1829,11 @@ function EmojiPacksPanel() {
         const { data } = await superAdminApi.post(`/emoji/admin/${packId}/custom`, form);
         latest = data;
       } catch (err: any) {
-        const data = err.response?.data;
-        if (data?.code === 'name_retired' && data.itemId) {
-          retired.push({ itemId: data.itemId, name, file });
-        } else {
-          failed.push(`${file.name}: ${data?.error || 'ошибка загрузки'}`);
-        }
+        failed.push(`${file.name}: ${err.response?.data?.error || 'ошибка загрузки'}`);
       }
     }
     if (latest) apply(latest);
-    setConflicts(retired.length ? { packId, items: retired } : null);
     setError(failed.length ? `Не загружено (${failed.length}): ${failed.join('; ')}` : '');
-    setSavingId(null);
-  };
-
-  const restoreWithImage = async (packId: number, items: RetiredConflict[]) => {
-    setSavingId(packId);
-    const failed: string[] = [];
-    for (const item of items) {
-      try {
-        await superAdminApi.put(`/emoji/admin/custom/${item.itemId}/restore`, { packId });
-        const form = new FormData();
-        form.append('image', item.file);
-        await superAdminApi.post(`/emoji/admin/custom/${item.itemId}/image`, form);
-      } catch (err: any) {
-        failed.push(`:${item.name}: ${err.response?.data?.error || 'не удалось вернуть'}`);
-      }
-    }
-    await load();
-    setConflicts(null);
-    setError(failed.length ? `Не вернулись (${failed.length}): ${failed.join('; ')}` : '');
     setSavingId(null);
   };
 
@@ -1969,17 +1933,28 @@ function EmojiPacksPanel() {
           </div>
           <div className="sa-emoji-asset-packs">
             {system?.assetPacks.map((pack) => (
-              <button
-                key={pack.id}
-                type="button"
-                className={pack.active ? 'is-active' : ''}
-                disabled={!!systemBusy || !pack.item_count}
-                onClick={() => activateAssetPack(pack)}
-              >
-                <span>{pack.name}</span>
-                <small>{pack.role === 'animation' ? 'анимация' : 'оформление'} · {pack.item_count}</small>
-                <strong>{pack.active ? 'Используется' : 'Выбрать'}</strong>
-              </button>
+              <div key={pack.id} className={'sa-emoji-asset-pack' + (pack.active ? ' is-active' : '')}>
+                <button
+                  type="button"
+                  className="sa-emoji-asset-pack-activate"
+                  disabled={!!systemBusy || !pack.item_count}
+                  onClick={() => activateAssetPack(pack)}
+                >
+                  <span>{pack.name}</span>
+                  <small>{EMOJI_ASSET_ROLE_LABEL[pack.role]} · {pack.item_count}</small>
+                  <strong>{pack.active ? 'Используется' : 'Выбрать'}</strong>
+                </button>
+                <button
+                  type="button"
+                  className="sa-emoji-asset-pack-delete"
+                  title="Удалить набор"
+                  aria-label={`Удалить набор ${pack.name}`}
+                  disabled={!!systemBusy}
+                  onClick={() => deleteAssetPack(pack)}
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -2063,23 +2038,6 @@ function EmojiPacksPanel() {
                   <button type="button" className="sa-btn-danger" onClick={() => removePack(pack)}>Удалить пак</button>
                 </div>
 
-                {conflicts?.packId === pack.id && conflicts.items.length > 0 && (
-                  <div className="sa-emoji-conflict">
-                    <span>
-                      {conflicts.items.length === 1
-                        ? `Смайлик :${conflicts.items[0].name}: убирали раньше.`
-                        : `Убирали раньше: ${conflicts.items.map((i) => `:${i.name}:`).join(' ')}.`}
-                      {' '}Вернуть с новыми картинками?
-                    </span>
-                    <div className="sa-emoji-conflict-actions">
-                      <button type="button" disabled={savingId === pack.id} onClick={() => restoreWithImage(pack.id, conflicts.items)}>
-                        {savingId === pack.id ? 'Возвращаю…' : 'Вернуть'}
-                      </button>
-                      <button type="button" className="sa-btn-quiet" onClick={() => setConflicts(null)}>Не нужно</button>
-                    </div>
-                  </div>
-                )}
-
                 <EmojiItemGrid
                   items={items}
                   onOpen={setEditing}
@@ -2128,7 +2086,6 @@ function EmojiPacksPanel() {
       {editing && (
         <EmojiItemModal
           item={editing}
-          packs={packs}
           onClose={() => setEditing(null)}
           onApply={apply}
           onError={setError}
@@ -2168,7 +2125,7 @@ function EmojiItemGrid({
           key={item.id}
           type="button"
           data-emoji-id={item.id}
-          className={`sa-emoji-tile${dragId === item.id ? ' is-dragging' : ''}${item.retired ? ' is-retired' : ''}`}
+          className={`sa-emoji-tile${dragId === item.id ? ' is-dragging' : ''}`}
           title={item.file_path ? `:${item.name}:` : item.emoji}
           {...tileHandlers(item)}
         >

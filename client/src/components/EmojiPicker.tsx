@@ -117,6 +117,20 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
     });
   }, [packs, search]);
   const visibleCustom = searchResults ?? current?.custom ?? [];
+  // Текстовый резерв показываем не как «всё или ничего» при наличии картинок в
+  // паке, а поштучно: скрываем только те символы, что дублируют уже показанную
+  // картинку (тот же смайлик дважды — так собирает пикер реакций/статуса,
+  // видевший системную копию рядом с загруженным оформлением). Юникодные
+  // элементы новой каталожной системы, для которых картинка попросту ещё не
+  // синхронизирована ни с одним набором оформления, под этот фильтр не
+  // попадают — их символ ничего не дублирует и обязан остаться видимым:
+  // раньше при наличии в паке хотя бы одной картинки эти элементы пропадали
+  // полностью, ни картинкой, ни текстом.
+  const customFallbacks = useMemo(
+    () => new Set((current?.custom || []).map((item) => item.unicode || item.fallback).filter(Boolean)),
+    [current],
+  );
+  const visibleEmoji = (current?.emoji || []).filter((glyph) => !customFallbacks.has(glyph));
 
   const body = (
     <>
@@ -135,9 +149,9 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
                   телефоне вкладки от них не помещались. Название осталось в
                   подсказке и в aria-label — для мыши и для читалки. */}
               <span className="emoji-tab-icon">
-                {pack.emoji[0] || (pack.custom?.[0]
+                {pack.custom?.[0]
                   ? <img className="custom-emoji" src={resolveUploadUrl(pack.custom[0].file_path) || ''} alt="" />
-                  : '🙂')}
+                  : (pack.emoji[0] || '🙂')}
               </span>
             </button>
           ))}
@@ -159,7 +173,7 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
 
       <div className="emoji-grid">
         {loading && <div className="emoji-empty">Загрузка…</div>}
-        {!loading && (searchResults ? searchResults.length === 0 : (!current || (current.emoji.length === 0 && !current.custom?.length))) && (
+        {!loading && (searchResults ? searchResults.length === 0 : (!current || (visibleEmoji.length === 0 && !current.custom?.length))) && (
           <div className="emoji-empty">{search ? 'Ничего не найдено' : 'Смайлики пока не добавлены'}</div>
         )}
         {/* Кастомные идут первыми: их добавляли осознанно под этот коллектив,
@@ -192,9 +206,12 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
           </button>
           );
         })}
-        {/* Системный набор показываем только как резерв, если в выбранном
-            паке вообще нет загруженных изображений. */}
-        {!search && !current?.custom?.length && current?.emoji.map((emoji, index) => (
+        {/* Показываем и то, что осталось от текстового резерва после фильтра
+            дублей выше (см. customFallbacks) — не как запасной вариант «на
+            крайний случай», а как полноправную часть выдачи: у новой
+            каталожной системы это ровно те элементы, для которых картинка
+            ещё не загружена ни в один набор оформления. */}
+        {!search && visibleEmoji.map((emoji, index) => (
           <button
             key={`${emoji}-${index}`}
             type="button"

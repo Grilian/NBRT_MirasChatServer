@@ -80,6 +80,21 @@ async function request(route, { token, method = 'GET', body, headers: extraHeade
   return { response, data };
 }
 
+// Само удаление файла с диска — fire-and-forget (fs.unlink с колбэком, никем не
+// awaited вплоть до самого HTTP-ответа): так устроено в проде специально, чтобы
+// ответ не ждал файловую систему. В тесте это означает, что сразу после ответа
+// сервера файл иногда ещё физически на месте — не баг, а гонка на стороне
+// теста. Ждём столько, сколько разумно для локального диска, а не проверяем
+// синхронно.
+async function waitForFileGone(filePath, timeoutMs = 500) {
+  const started = Date.now();
+  while (fs.existsSync(filePath)) {
+    if (Date.now() - started > timeoutMs) return false;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return true;
+}
+
 // Бейдж чата обязан гаснуть от прочтения самого чата. Ответы веток в его ленту
 // не попадают, значит и в его счётчик идти не могут — иначе он застревает
 // навсегда: снять его нечем, ленту человек уже прочитал целиком.
@@ -363,6 +378,120 @@ test('ZIP-набор связывает составное имя с Unicode и 
     SELECT unicode_key, fallback_emoji FROM emoji_items WHERE unicode_key = '1f1e6-1f1e8'
   `).get();
   assert.deepEqual(item, { unicode_key: '1f1e6-1f1e8', fallback_emoji: '🇦🇨' });
+});
+
+test('удаление пака — настоящее, без архива: файлы с диска и emoji_assets уходят вместе с ним', async () => {
+  const admin = superAdminToken();
+  const created = await request('/api/emoji/admin', {
+    token: admin, method: 'POST', body: { name: 'Пак под снос', emoji: '' },
+  });
+  const packId = created.data.find((p) => p.name === 'Пак под снос').id;
+
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } },
+  }).png().toBuffer();
+  const uploadForm = new FormData();
+  uploadForm.append('image', new Blob([image], { type: 'image/png' }), 'icon.png');
+  uploadForm.append('name', 'doomed_custom');
+  const uploaded = await fetch(`${baseUrl}/api/emoji/admin/${packId}/custom`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${admin}` },
+    body: uploadForm,
+  });
+  assert.equal(uploaded.status, 201);
+  const item = db.prepare('SELECT id, file_path FROM emoji_items WHERE name = ?').get('doomed_custom');
+  assert.ok(item.file_path);
+  const onDisk = path.join(__dirname, '..', item.file_path.replace(/^\/uploads\//, 'uploads/'));
+  assert.ok(fs.existsSync(onDisk), 'файл должен быть на диске сразу после загрузки');
+
+  // Юникодный элемент того же пака — без картинки: раньше на такой опирался
+  // ТОЛЬКО декоративный ON DELETE CASCADE (PRAGMA foreign_keys выключена во
+  // всём проекте), и без явной подчистки он повис бы сиротой после удаления
+  // родительского пака.
+  db.prepare(
+    "INSERT INTO emoji_items (pack_id, emoji, unicode_key, fallback_emoji, position) VALUES (?, '', 'test-orphan-key', '🧪', 999)"
+  ).run(packId);
+  const unicodeItemId = db.prepare('SELECT id FROM emoji_items WHERE unicode_key = ?').get('test-orphan-key').id;
+  db.prepare(
+    'INSERT INTO emoji_assets (item_id, asset_pack_id, file_path, created_at) VALUES (?, 1, ?, ?)'
+  ).run(unicodeItemId, '/uploads/emoji/does-not-matter.webp', Date.now());
+
+  const removed = await request(`/api/emoji/admin/${packId}`, { token: admin, method: 'DELETE' });
+  assert.equal(removed.response.status, 200, JSON.stringify(removed.data));
+  assert.equal(removed.data.find((p) => p.id === packId), undefined, 'пак должен исчезнуть из списка');
+  assert.equal(db.prepare('SELECT COUNT(*) AS c FROM emoji_items WHERE pack_id = ?').get(packId).c, 0);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS c FROM emoji_assets WHERE item_id = ?').get(unicodeItemId).c, 0,
+    'emoji_assets юникодного элемента не должны пережить удаление пака сиротой',
+  );
+  assert.ok(await waitForFileGone(onDisk), 'файл картинки должен быть удалён с диска, а не архивирован');
+
+  // И никакого архива не появилось — вся суть фикса.
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM emoji_packs WHERE name = 'Архив смайликов'").get().c, 0);
+});
+
+test('удаление набора оформления (ZIP) реально возможно и подчищает файлы с диска', async () => {
+  const admin = superAdminToken();
+  const image = await sharp({
+    create: { width: 10, height: 10, channels: 4, background: { r: 9, g: 8, b: 7, alpha: 1 } },
+  }).png().toBuffer();
+  const archive = new AdmZip();
+  archive.addFile('U+1F600.png', image);
+  const form = new FormData();
+  form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), 'set.zip');
+  form.append('key', 'deletable-set');
+  form.append('name', 'Набор под снос');
+  form.append('role', 'base');
+  const imported = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${admin}` },
+    body: form,
+  });
+  assert.equal(imported.status, 200);
+
+  const assetPackId = db.prepare("SELECT id FROM emoji_asset_packs WHERE key = 'deletable-set'").get().id;
+  const asset = db.prepare('SELECT file_path FROM emoji_assets WHERE asset_pack_id = ?').get(assetPackId);
+  const onDisk = path.join(__dirname, '..', asset.file_path.replace(/^\/uploads\//, 'uploads/'));
+  assert.ok(fs.existsSync(onDisk));
+
+  const removed = await request(`/api/emoji/admin/assets/${assetPackId}`, { token: admin, method: 'DELETE' });
+  assert.equal(removed.response.status, 200, JSON.stringify(removed.data));
+  assert.equal(
+    removed.data.assetPacks.find((p) => p.id === assetPackId), undefined,
+    'удалённый набор не должен возвращаться в списке',
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS c FROM emoji_assets WHERE asset_pack_id = ?').get(assetPackId).c, 0);
+  assert.ok(await waitForFileGone(onDisk), 'файл набора должен быть удалён с диска');
+
+  // Повторное удаление того же id — уже не существует, честная 404, а не тихий успех.
+  const again = await request(`/api/emoji/admin/assets/${assetPackId}`, { token: admin, method: 'DELETE' });
+  assert.equal(again.response.status, 404);
+});
+
+test('юникодный элемент без картинки виден как символ, даже если рядом в паке уже есть элементы с картинками', async () => {
+  const packId = db.prepare(
+    'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, ?, 1, ?)'
+  ).run('Смешанный пак', 998, Date.now()).lastInsertRowid;
+  // С картинкой — как обычный custom-элемент новой системы.
+  db.prepare(`
+    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, unicode_key, position)
+    VALUES (?, '', 'u_mixed_test_a', '/uploads/emoji/u_mixed_test_a.webp', '😀', 'mixed-test-key-a', 0)
+  `).run(packId);
+  // Без картинки — структура импортирована, но конкретный набор оформления
+  // для этого ключа ещё не загружен. Раньше такой элемент не показывался НИ
+  // картинкой, ни текстом: код смотрел на item.emoji (у новой системы это
+  // всегда '' — сам символ лежит в fallback_emoji), и элемент просто исчезал.
+  db.prepare(`
+    INSERT INTO emoji_items (pack_id, emoji, fallback_emoji, unicode_key, position)
+    VALUES (?, '', '😬', 'mixed-test-key-b', 1)
+  `).run(packId);
+
+  const list = await request('/api/emoji', { token: tokenFor(createUser('emoji_public_viewer')) });
+  const pack = list.data.find((p) => p.id === packId || p.name === 'Смешанный пак');
+  assert.ok(pack, 'пак должен присутствовать в публичной выдаче');
+  assert.equal(pack.custom.length, 1, 'элемент с картинкой идёт отдельным списком custom');
+  assert.equal(pack.custom[0].unicode_key, 'mixed-test-key-a');
+  assert.deepEqual(pack.emoji, ['😬'], 'элемент без картинки обязан быть виден как сам символ');
 });
 
 test('account deletion clears dependent records and transfers group ownership', () => {
