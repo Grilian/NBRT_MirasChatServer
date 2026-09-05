@@ -1660,11 +1660,9 @@ function EmojiPacksPanel() {
   const [system, setSystem] = useState<EmojiSystemState | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [newName, setNewName] = useState('');
   const [savingId, setSavingId] = useState<number | null>(null);
   const [openPack, setOpenPack] = useState<number | null>(null);
   const [editing, setEditing] = useState<EmojiItem | null>(null);
-  const [newEmoji, setNewEmoji] = useState('');
   const [assetPreset, setAssetPreset] = useState<'apple' | 'animation' | 'google-fonts'>('apple');
   const [systemBusy, setSystemBusy] = useState('');
 
@@ -1785,20 +1783,6 @@ function EmojiPacksPanel() {
     }
   };
 
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const name = newName.trim();
-    if (!name) return;
-    try {
-      const { data } = await superAdminApi.post('/emoji/admin', { name, emoji: '' });
-      apply(data);
-      setNewName('');
-      setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Не удалось создать пак');
-    }
-  };
-
   const update = async (id: number, patch: Record<string, unknown>) => {
     setSavingId(id);
     try {
@@ -1807,47 +1791,6 @@ function EmojiPacksPanel() {
       setError('');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Не удалось сохранить');
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  // Загрузка набором: имя выводится из имени файла, без вопроса на каждый —
-  // набор из полусотни картинок иначе превращается в полсотни диалогов.
-  const uploadCustom = async (packId: number, files: File[]) => {
-    setSavingId(packId);
-    const failed: string[] = [];
-    let latest: EmojiPack[] | null = null;
-    // Последовательно, а не пачкой: имена проверяются на уникальность в БД, и
-    // параллельные загрузки одинаково названных файлов гонялись бы за именем.
-    for (const file of files) {
-      const name = file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 32);
-      const form = new FormData();
-      form.append('image', file);
-      form.append('name', name);
-      try {
-        const { data } = await superAdminApi.post(`/emoji/admin/${packId}/custom`, form);
-        latest = data;
-      } catch (err: any) {
-        failed.push(`${file.name}: ${err.response?.data?.error || 'ошибка загрузки'}`);
-      }
-    }
-    if (latest) apply(latest);
-    setError(failed.length ? `Не загружено (${failed.length}): ${failed.join('; ')}` : '');
-    setSavingId(null);
-  };
-
-  const addUnicode = async (packId: number) => {
-    const emoji = newEmoji.trim();
-    if (!emoji) return;
-    setSavingId(packId);
-    try {
-      const { data } = await superAdminApi.post(`/emoji/admin/${packId}/unicode`, { emoji });
-      apply(data);
-      setNewEmoji('');
-      setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Не удалось добавить');
     } finally {
       setSavingId(null);
     }
@@ -1988,7 +1931,13 @@ function EmojiPacksPanel() {
         </div>
       </section>
 
-      <h3 className="sa-emoji-categories-title">Категории каталога</h3>
+      <h3 className="sa-emoji-categories-title">Ручные паки (устаревшие)</h3>
+      <p className="sa-hint">
+        Старый способ добавления смайликов — вручную, по одному, с придуманным именем.
+        Новые смайлики через него больше не добавляются: всё новое — только через Unicode-каталог
+        и наборы оформления выше. Здесь можно только посмотреть, что осталось с прежних времён,
+        и убрать ненужное.
+      </p>
 
       <div className="sa-emoji-pack-list" ref={packListRef}>
         {packOrder.map((pack) => {
@@ -2021,7 +1970,10 @@ function EmojiPacksPanel() {
                 <span className="sa-hint">{items.length}</span>
               </button>
               <label className="switch" title={pack.enabled ? 'Показывается' : 'Скрыт'}>
-                <input type="checkbox" checked={pack.enabled} onChange={(e) => update(pack.id, { enabled: e.target.checked })} />
+                <input
+                  type="checkbox" checked={pack.enabled} disabled={savingId === pack.id}
+                  onChange={(e) => update(pack.id, { enabled: e.target.checked })}
+                />
                 <span className="switch-track"><span className="switch-thumb" /></span>
               </label>
             </div>
@@ -2033,6 +1985,7 @@ function EmojiPacksPanel() {
                     className="sa-emoji-pack-name"
                     defaultValue={pack.name}
                     aria-label="Название пака"
+                    disabled={savingId === pack.id}
                     onBlur={(e) => { if (e.target.value.trim() && e.target.value !== pack.name) update(pack.id, { name: e.target.value }); }}
                   />
                   <button type="button" className="sa-btn-danger" onClick={() => removePack(pack)}>Удалить пак</button>
@@ -2043,45 +1996,12 @@ function EmojiPacksPanel() {
                   onOpen={setEditing}
                   onReorder={(order) => saveOrder(pack.id, order)}
                 />
-
-                <div className="sa-emoji-pack-add">
-                  <label className="sa-emoji-custom-add">
-                    <input
-                      type="file" accept="image/*" multiple style={{ display: 'none' }}
-                      disabled={savingId === pack.id}
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        e.target.value = '';
-                        if (files.length) uploadCustom(pack.id, files);
-                      }}
-                    />
-                    {savingId === pack.id ? 'Загрузка…' : '+ Картинками'}
-                  </label>
-                  <div className="sa-emoji-unicode-add">
-                    <input
-                      value={newEmoji}
-                      placeholder="😀"
-                      maxLength={32}
-                      aria-label="Системный смайлик"
-                      onChange={(e) => setNewEmoji(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addUnicode(pack.id); } }}
-                    />
-                    <button type="button" className="sa-btn-ghost" disabled={!newEmoji.trim()} onClick={() => addUnicode(pack.id)}>
-                      + Символом
-                    </button>
-                  </div>
-                </div>
               </div>
             )}
           </div>
         );
       })}
       </div>
-
-      <form onSubmit={create} className="sa-inline-form">
-        <input type="text" placeholder="Новый пак…" value={newName} onChange={(e) => setNewName(e.target.value)} />
-        <button type="submit" className="btn-primary">Добавить</button>
-      </form>
 
       {editing && (
         <EmojiItemModal

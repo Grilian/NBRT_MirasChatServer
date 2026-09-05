@@ -494,6 +494,70 @@ test('юникодный элемент без картинки виден ка�
   assert.deepEqual(pack.emoji, ['😬'], 'элемент без картинки обязан быть виден как сам символ');
 });
 
+test('элемент с картинками из двух наборов несёт variants — для попапа выбора пака в композере', async () => {
+  const admin = superAdminToken();
+  const appleImage = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 1 } },
+  }).png().toBuffer();
+  const googleImage = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 40, g: 50, b: 60, alpha: 1 } },
+  }).png().toBuffer();
+
+  // Тот же самый ключ (1f973 — 🥳) загружается в оба базовых набора: тот, что
+  // уже сидирован при старте (apple, id=1), и новый (google-fonts).
+  const appleArchive = new AdmZip();
+  appleArchive.addFile('U+1F973.png', appleImage);
+  const appleForm = new FormData();
+  appleForm.append('archive', new Blob([appleArchive.toBuffer()], { type: 'application/zip' }), 'apple.zip');
+  appleForm.append('key', 'apple');
+  appleForm.append('name', 'Apple');
+  appleForm.append('role', 'base');
+  const appleImport = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: appleForm,
+  });
+  assert.equal(appleImport.status, 200);
+
+  const googleArchive = new AdmZip();
+  googleArchive.addFile('U+1F973.png', googleImage);
+  const googleForm = new FormData();
+  googleForm.append('archive', new Blob([googleArchive.toBuffer()], { type: 'application/zip' }), 'google.zip');
+  googleForm.append('key', 'google-fonts');
+  googleForm.append('name', 'Google Fonts');
+  googleForm.append('role', 'base');
+  const googleImport = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: googleForm,
+  });
+  assert.equal(googleImport.status, 200);
+
+  const list = await request('/api/emoji', { token: tokenFor(createUser('emoji_variants_viewer')) });
+  const item = list.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f973');
+  assert.ok(item, 'элемент 🥳 должен присутствовать в выдаче');
+  assert.ok(Array.isArray(item.variants), 'у элемента с двумя оформлениями обязан быть список variants');
+  assert.equal(item.variants.length, 2);
+  assert.deepEqual(
+    item.variants.map((v) => v.packKey).sort(),
+    ['apple', 'google-fonts'],
+  );
+
+  // А для одного набора — apple, вообще без конкурентов — поля variants нет
+  // вовсе: выбирать не из чего, и раздувать выдачу нечем.
+  const single = db.prepare(`
+    INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES ('Одиночный', 997, 1, ?)
+  `).run(Date.now()).lastInsertRowid;
+  const soloItemId = db.prepare(`
+    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, unicode_key, position)
+    VALUES (?, '', 'u_solo_test', '/uploads/emoji/u_solo_test.webp', '🧊', 'solo-test-key', 0)
+  `).run(single).lastInsertRowid;
+  db.prepare(
+    'INSERT INTO emoji_assets (item_id, asset_pack_id, file_path, created_at) VALUES (?, 1, ?, ?)'
+  ).run(soloItemId, '/uploads/emoji/u_solo_test.webp', Date.now());
+
+  const list2 = await request('/api/emoji', { token: tokenFor(createUser('emoji_variants_viewer_2')) });
+  const soloItem = list2.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === 'solo-test-key');
+  assert.ok(soloItem);
+  assert.equal(soloItem.variants, undefined, 'у элемента с единственным оформлением variants быть не должно');
+});
+
 test('account deletion clears dependent records and transfers group ownership', () => {
   const deletedId = createUser('deleted_user');
   const survivorId = createUser('surviving_user');

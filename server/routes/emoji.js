@@ -112,6 +112,30 @@ const usageCount = (name) => {
 const MAX_EMOJI_LENGTH = 32;
 const MAX_ITEMS_PER_PACK = 10000;
 
+// Все живые (включённые) оформления одного юникодного элемента — не только
+// активное. Нужно для попапа выбора пака в композере: человек печатает 😃,
+// видит поверх поля Apple (активный) и, если для этого же ключа загружен ещё
+// и Google Fonts, может явно выбрать его вместо автоматического. Единым
+// запросом на всю выдачу, а не по одному на элемент — иначе на паке из тысяч
+// смайликов это N+1 в чистом виде.
+function variantsByItem(db) {
+  const rows = db.prepare(`
+    SELECT ea.item_id, eap.key AS pack_key, eap.name AS pack_name, eap.role, ea.file_path
+    FROM emoji_assets ea
+    JOIN emoji_asset_packs eap ON eap.id = ea.asset_pack_id
+    WHERE eap.enabled = 1
+    ORDER BY eap.role, eap.position, eap.id
+  `).all();
+  const map = new Map();
+  for (const row of rows) {
+    if (!map.has(row.item_id)) map.set(row.item_id, []);
+    map.get(row.item_id).push({
+      packKey: row.pack_key, packName: row.pack_name, role: row.role, filePath: row.file_path,
+    });
+  }
+  return map;
+}
+
 function packsWithItems({ onlyEnabled, includeRaw = false }) {
   const packs = db.prepare(`
     SELECT id, name, position, enabled FROM emoji_packs
@@ -124,6 +148,10 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
             unicode_key, label, keywords
      FROM emoji_items ORDER BY position, id`
   ).all();
+  // Считается один раз на всю выдачу и только когда реально нужно: у выдачи
+  // для панели админа (includeRaw) варианты ни к чему — наборы оформления там
+  // уже видны отдельным разделом.
+  const variants = onlyEnabled ? variantsByItem(db) : null;
   const byPack = new Map();
   for (const item of items) {
     if (!byPack.has(item.pack_id)) byPack.set(item.pack_id, { emoji: [], custom: [], all: [] });
@@ -135,6 +163,11 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
     // ОДИН список: ни картинкой, ни текстом, — просто исчезал из выдачи.
     const isImage = !!(item.file_path && item.name);
     if (isImage) {
+      // Список выбора для попапа — только когда реально есть из чего выбирать
+      // (2+ живых оформления у одного и того же юникодного ключа). Для обычных
+      // картиночных смайликов без unicode_key (старые ручные загрузки) вариантов
+      // не бывает вовсе — там всегда одна картинка на одно имя.
+      const itemVariants = item.unicode_key ? variants?.get(item.id) : null;
       bucket.custom.push({
         id: item.id,
         name: item.name,
@@ -148,6 +181,7 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
         unicode_key: item.unicode_key || null,
         label: item.label || '',
         keywords: item.keywords || '',
+        ...(itemVariants && itemVariants.length > 1 ? { variants: itemVariants } : {}),
       });
     } else {
       const glyph = item.emoji || item.fallback_emoji;
@@ -249,14 +283,25 @@ router.get('/', verifyToken, (req, res) => {
 // нельзя: выключение пака или уборка смайлика тогда переводили бы всю старую
 // переписку обратно в текст :name:. Поэтому здесь всё картиночное, что когда-
 // либо существовало, независимо от enabled пака и retired элемента.
+//
+// variants — по той же причине, что и в packsWithItems: явный выбор пака,
+// сделанный при отправке (:e~<ключ>~<пак>:), должен доходить до всех, кто
+// читает переписку, а не только до автора. Без этого поля сообщение с таким
+// кодом рендерилось бы как попало — ни один получатель не смог бы понять,
+// какую конкретно картинку выбрал отправитель.
 router.get('/catalog', verifyToken, (req, res) => {
   try {
-    res.json(db.prepare(`
-      SELECT name, file_path, animated_path, fallback_emoji AS fallback,
+    const items = db.prepare(`
+      SELECT id, name, file_path, animated_path, fallback_emoji AS fallback,
              unicode_key, label, keywords
       FROM emoji_items
       WHERE name IS NOT NULL AND file_path IS NOT NULL
-    `).all());
+    `).all();
+    const variants = variantsByItem(db);
+    res.json(items.map(({ id, ...item }) => {
+      const itemVariants = item.unicode_key ? variants.get(id) : null;
+      return itemVariants && itemVariants.length > 1 ? { ...item, variants: itemVariants } : item;
+    }));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -69,7 +69,7 @@ function restoreRange(box: HTMLDivElement, saved: SavedDomSelection | null): Ran
 // Код, только что дописанный перед курсором. В отличие от общего SHORTCODE
 // якорится на конец строки: превращаем в картинку ровно то, что человек сейчас
 // набрал, а не первый попавшийся код где-то раньше в тексте.
-const TYPED_SHORTCODE = /:([a-z0-9_]{2,128}):$/;
+const TYPED_SHORTCODE = /:([a-z0-9_~-]{2,128}):$/;
 
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
