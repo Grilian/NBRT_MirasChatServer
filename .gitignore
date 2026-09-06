@@ -156,3 +156,9 @@ server/fcm-service-account.json
 release/
 mobile/release/
 desktop/release/
+
+# Архивы наборов оформления смайликов (Apple, Google Fonts, Telegram и т.п.).
+# Их загружают в панель супер-админа вручную; это исходники весом в сотни
+# мегабайт, в репозитории им не место — как и собранным .exe/.apk.
+.emojis/
+*.zip
