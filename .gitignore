@@ -162,3 +162,10 @@ desktop/release/
 # мегабайт, в репозитории им не место — как и собранным .exe/.apk.
 .emojis/
 *.zip
+
+# Lock-файлы пока не в репозитории: снимать их надо с ПРОДОВЫХ версий
+# (там проверенное рабочее состояние), а не с машины разработчика —
+# см. «Незакрытые вопросы» в CLAUDE.md.
+server/package-lock.json
+client/package-lock.json
+mobile/package-lock.json
