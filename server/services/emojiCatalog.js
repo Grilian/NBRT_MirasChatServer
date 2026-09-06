@@ -169,13 +169,17 @@ function syncResolvedAssets(db) {
     // Если в выбранном оформлении конкретного смайлика нет, берём его из
     // следующего включённого base-пака. Поэтому неполный Google Fonts можно
     // безопасно наложить на полный Apple, не получая дыр в каталоге.
+    // `a.enabled = 1` — выключенная ВЕРСИЯ конкретного смайлика пропускается,
+    // и он опускается на следующий включённый набор. Без этого выключение
+    // Apple-версии у одного смайлика означало бы не «покажи другим набором», а
+    // «смайлик пропал» — при том что картинки других наборов лежат рядом.
     db.prepare(`
       UPDATE emoji_items
       SET file_path = (
         SELECT a.file_path
         FROM emoji_assets a
         JOIN emoji_asset_packs p ON p.id = a.asset_pack_id
-        WHERE a.item_id = emoji_items.id AND p.role = 'base' AND p.enabled = 1
+        WHERE a.item_id = emoji_items.id AND p.role = 'base' AND p.enabled = 1 AND a.enabled = 1
         ORDER BY p.active DESC, p.position, p.id
         LIMIT 1
       ),
@@ -183,7 +187,7 @@ function syncResolvedAssets(db) {
         SELECT a.file_path
         FROM emoji_assets a
         JOIN emoji_asset_packs p ON p.id = a.asset_pack_id
-        WHERE a.item_id = emoji_items.id AND p.role = 'animation' AND p.enabled = 1
+        WHERE a.item_id = emoji_items.id AND p.role = 'animation' AND p.enabled = 1 AND a.enabled = 1
         ORDER BY p.active DESC, p.position, p.id
         LIMIT 1
       )

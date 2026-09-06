@@ -565,6 +565,16 @@ db.exec(`
   );
 `);
 
+// Включение отдельной ВЕРСИИ у отдельного смайлика. Раньше вкл/выкл было
+// только на целом наборе (emoji_asset_packs.enabled) — то есть «убрать Apple
+// у одного смайлика, оставив у остальных» было невозможно в принципе. Нужно
+// для панели правки: у каждой версии в строке своя галочка.
+try {
+  db.exec('ALTER TABLE emoji_assets ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
+} catch (e) {
+  // Колонка уже есть
+}
+
 const nowForEmojiAssets = Date.now();
 db.prepare(`
   INSERT OR IGNORE INTO emoji_asset_packs (key, name, role, enabled, active, position, created_at)

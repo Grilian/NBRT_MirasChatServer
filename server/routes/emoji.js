@@ -135,7 +135,7 @@ function variantsByItem(db) {
     SELECT ea.item_id, eap.key AS pack_key, eap.name AS pack_name, eap.role, ea.file_path
     FROM emoji_assets ea
     JOIN emoji_asset_packs eap ON eap.id = ea.asset_pack_id
-    WHERE eap.enabled = 1 AND eap.role = 'base'
+    WHERE eap.enabled = 1 AND eap.role = 'base' AND ea.enabled = 1
     ORDER BY eap.position, eap.id
   `).all();
   const map = new Map();
@@ -155,24 +155,59 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
     ORDER BY position, id
   `).all();
 
+  // `retired` — выключенный админом смайлик. Из панели ВЫБОРА он уходит
+  // (вставить его больше нельзя), но в каталоге отрисовки остаётся: в уже
+  // отправленных сообщениях лежит его символ, и подменять их системным
+  // глифом задним числом мы не должны. Решение пользователя от 06.09.2026.
   const items = db.prepare(
     `SELECT id, pack_id, emoji, name, file_path, animated_path, fallback_emoji, position,
-            unicode_key, label, keywords
-     FROM emoji_items ORDER BY position, id`
+            unicode_key, label, keywords, retired
+     FROM emoji_items
+     ${onlyEnabled ? 'WHERE retired = 0' : ''}
+     ORDER BY position, id`
   ).all();
   // Считается один раз на всю выдачу и только когда реально нужно: у выдачи
   // для панели админа (includeRaw) варианты ни к чему — наборы оформления там
   // уже видны отдельным разделом.
   const variants = onlyEnabled ? variantsByItem(db) : null;
 
-  // Тоновые вариации схлопываются под базовый смайлик — ТОЛЬКО в панели
-  // выбора. В админской выдаче их обязано быть видно поштучно (там правят
-  // каталог), а в /catalog они и подавно остаются: в сообщении лежит именно
-  // тоновый символ. Карта строится заранее, потому что базовый элемент может
-  // встретиться в списке позже своей вариации.
+  // Для панели правки — ВСЕ версии каждого смайлика, включая выключенные и
+  // из выключенных наборов: именно там ими и управляют. В пользовательскую
+  // выдачу это не попадает никогда (там есть variants, и только живые).
+  const assetsByItem = new Map();
+  if (includeRaw) {
+    const rows = db.prepare(`
+      SELECT ea.item_id, ea.file_path, ea.enabled,
+             eap.id AS pack_id, eap.key AS pack_key, eap.name AS pack_name,
+             eap.role, eap.enabled AS pack_enabled, eap.active AS pack_active
+      FROM emoji_assets ea
+      JOIN emoji_asset_packs eap ON eap.id = ea.asset_pack_id
+      ORDER BY eap.role DESC, eap.position, eap.id
+    `).all();
+    for (const row of rows) {
+      if (!assetsByItem.has(row.item_id)) assetsByItem.set(row.item_id, []);
+      assetsByItem.get(row.item_id).push({
+        pack_id: row.pack_id,
+        pack_key: row.pack_key,
+        pack_name: row.pack_name,
+        role: row.role,
+        file_path: row.file_path,
+        enabled: !!row.enabled,
+        pack_enabled: !!row.pack_enabled,
+        pack_active: !!row.pack_active,
+      });
+    }
+  }
+
+  // Тоновые вариации схлопываются под базовый смайлик и в панели выбора, и в
+  // панели админа: список из 3770 строк с пятью ячейками картинок в каждой —
+  // это ровно та простыня, от которой уходим. В `/catalog` они по-прежнему
+  // лежат россыпью: в сообщении хранится именно тоновый символ.
+  // Карта строится заранее — базовый элемент может встретиться в списке позже
+  // своей вариации.
   const toneOwner = new Map();
   const tonesByOwner = new Map();
-  if (onlyEnabled) {
+  {
     // Сопоставление идёт по КАНОНИЧЕСКОМУ ключу (без тонов и без fe0f) — см.
     // emojiCanonicalKey: иначе смайлики, у которых база несёт селектор
     // начертания, свою базу не находят (🏋️ = 1f3cb-fe0f против 🏋🏻 = 1f3cb-1f3fb).
@@ -204,6 +239,9 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
         toneOwner.set(item.id, owner.id);
       }
       tonesByOwner.set(owner.id, list.map((item) => ({
+        // id нужен админской панели: выключение и удаление адресуются строке,
+        // а не символу. Пользовательской выдаче он безвреден.
+        id: item.id,
         unicode_key: item.unicode_key,
         unicode: item.fallback_emoji || '',
         file_path: item.file_path,
@@ -267,6 +305,13 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
         unicode_key: item.unicode_key || null,
         label: item.label || '',
         keywords: item.keywords || '',
+        // Выключён админом: из панели выбора ушёл, в переписке остался.
+        retired: !!item.retired,
+        // Все версии этого смайлика — по ним и рисуется строка правки.
+        assets: assetsByItem.get(item.id) || [],
+        // Тона следуют за базовым: своей кнопки у них нет, но показать их
+        // в строке нужно, и удаление адресуется каждому по id.
+        ...(tonesByOwner.has(item.id) ? { tones: tonesByOwner.get(item.id) } : {}),
       });
     }
   }
@@ -503,6 +548,104 @@ router.post('/admin/assets/import', verifySuperAdmin, (req, res) => {
   });
 });
 
+// Порядок наборов оформления. Это НЕ косметика: позиция решает, откуда взять
+// картинку, если в активном наборе её нет (см. syncResolvedAssets — сначала
+// активный, потом по позиции). До сих пор порядок задавался только тем, в
+// какой очерёдности наборы загружали, и поменять его было нечем.
+router.put('/admin/assets/reorder', verifySuperAdmin, (req, res) => {
+  try {
+    const order = Array.isArray(req.body.order) ? req.body.order.map(Number) : [];
+    const existing = db.prepare('SELECT id FROM emoji_asset_packs ORDER BY position, id').all().map((r) => r.id);
+    const unique = new Set(order);
+    if (order.length !== existing.length || unique.size !== order.length || order.some((id) => !existing.includes(id))) {
+      return res.status(400).json({ error: 'Список не совпадает с наборами оформления' });
+    }
+    const setPosition = db.prepare('UPDATE emoji_asset_packs SET position = ? WHERE id = ?');
+    db.transaction(() => order.forEach((id, index) => setPosition.run(index, id)))();
+
+    syncResolvedAssets(db);
+    notifyEmojiChanged(req);
+    res.json({ assetPacks: listAssetPacks(db), packs: adminPacks() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Включение/выключение ОДНОЙ версии у ОДНОГО смайлика. Выключенная версия
+// пропускается при подборе картинки, и смайлик опускается на следующий
+// включённый набор — а не пропадает.
+router.put('/admin/assets/:packId/items/:itemId', verifySuperAdmin, (req, res) => {
+  try {
+    const packId = Number(req.params.packId);
+    const itemId = Number(req.params.itemId);
+    const asset = db.prepare(
+      'SELECT id FROM emoji_assets WHERE asset_pack_id = ? AND item_id = ?'
+    ).get(packId, itemId);
+    if (!asset) return res.status(404).json({ error: 'У этого смайлика нет версии из такого набора' });
+
+    db.prepare('UPDATE emoji_assets SET enabled = ? WHERE id = ?').run(req.body.enabled ? 1 : 0, asset.id);
+    syncResolvedAssets(db);
+    notifyEmojiChanged(req);
+    res.json(adminPacks());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Выключение смайлика целиком — для юридических и цензурных задач. Из панели
+// выбора он уходит, в уже отправленных сообщениях остаётся картинкой: текст
+// сообщения не меняется, а подменять архив задним числом мы не должны.
+// Тона следуют за базовым: выключил 👍 — ушли и все пять его вариаций.
+router.put('/admin/custom/:itemId/enabled', verifySuperAdmin, (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const item = db.prepare('SELECT id, unicode_key FROM emoji_items WHERE id = ?').get(itemId);
+    if (!item) return res.status(404).json({ error: 'Смайлик не найден' });
+
+    const retired = req.body.enabled ? 0 : 1;
+    const ids = [item.id];
+    if (item.unicode_key) {
+      const canonical = emojiCanonicalKey(item.unicode_key);
+      if (canonical) {
+        for (const row of db.prepare('SELECT id, unicode_key FROM emoji_items WHERE unicode_key IS NOT NULL').all()) {
+          if (row.id !== item.id && emojiCanonicalKey(row.unicode_key) === canonical) ids.push(row.id);
+        }
+      }
+    }
+    const update = db.prepare('UPDATE emoji_items SET retired = ? WHERE id = ?');
+    db.transaction(() => ids.forEach((id) => update.run(retired, id)))();
+
+    notifyEmojiChanged(req);
+    res.json({ packs: adminPacks(), changed: ids.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Пачкой — цензурные правки приходят списком, а не по одному смайлику.
+router.put('/admin/custom/enabled-bulk', verifySuperAdmin, (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Пустой список' });
+    const retired = req.body.enabled ? 0 : 1;
+
+    // Каждый выбранный тянет за собой свои тона — правило то же, что поштучно.
+    const all = db.prepare('SELECT id, unicode_key FROM emoji_items WHERE unicode_key IS NOT NULL').all();
+    const canonicals = new Set();
+    for (const row of all) if (ids.includes(row.id)) canonicals.add(emojiCanonicalKey(row.unicode_key));
+    const target = new Set(ids);
+    for (const row of all) if (canonicals.has(emojiCanonicalKey(row.unicode_key))) target.add(row.id);
+
+    const update = db.prepare('UPDATE emoji_items SET retired = ? WHERE id = ?');
+    db.transaction(() => [...target].forEach((id) => update.run(retired, id)))();
+
+    notifyEmojiChanged(req);
+    res.json({ packs: adminPacks(), changed: target.size });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.put('/admin/assets/:id', verifySuperAdmin, (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -630,7 +773,7 @@ router.put('/admin/reorder', verifySuperAdmin, (req, res) => {
 router.put('/admin/:id', verifySuperAdmin, (req, res) => {
   try {
     const id = Number(req.params.id);
-    const pack = db.prepare('SELECT id FROM emoji_packs WHERE id = ?').get(id);
+    const pack = db.prepare('SELECT id, structure_key FROM emoji_packs WHERE id = ?').get(id);
     if (!pack) return res.status(404).json({ error: 'Пак не найден' });
 
     if (req.body.name !== undefined) {
@@ -652,7 +795,17 @@ router.put('/admin/:id', verifySuperAdmin, (req, res) => {
 
     // Список смайликов заменяется целиком, а не патчится по одному: править
     // набор строкой в поле проще, чем гонять отдельные запросы на каждый знак.
+    //
+    // Но НЕ у авто-категории. Категории из загруженной структуры (structure_key)
+    // наполняет импорт, и `replaceItems` снёс бы оттуда все элементы без
+    // картинки — то есть логические Unicode-смайлики, у которых оформление
+    // ещё не синхронизировалось. Рукотворные паки правятся как раньше.
     if (req.body.emoji !== undefined) {
+      if (pack.structure_key) {
+        return res.status(400).json({
+          error: 'Это категория из загруженной структуры — её состав задаёт импорт, а не список вручную',
+        });
+      }
       replaceItems(id, parseEmojiList(req.body.emoji));
     }
 
@@ -893,8 +1046,20 @@ router.delete('/admin/custom/:itemId', verifySuperAdmin, (req, res) => {
 router.delete('/admin/:id', verifySuperAdmin, (req, res) => {
   try {
     const packId = Number(req.params.id);
-    const pack = db.prepare('SELECT id FROM emoji_packs WHERE id = ?').get(packId);
+    const pack = db.prepare('SELECT id, structure_key, name FROM emoji_packs WHERE id = ?').get(packId);
     if (!pack) return res.status(404).json({ error: 'Пак не найден' });
+
+    // Авто-категорию удалять нельзя. Это не «пак смайликов», а раздел из
+    // загруженной структуры Unicode, и его удаление снесло бы все элементы
+    // раздела ВМЕСТЕ С КАРТИНКАМИ загруженных наборов — при том что карточка
+    // самого набора продолжила бы показывать прежнее число файлов. Спрятать
+    // раздел можно выключением (enabled), это обратимо.
+    if (pack.structure_key) {
+      return res.status(400).json({
+        error: `«${pack.name}» — раздел из загруженной структуры, а не пак. `
+          + 'Удаление снесло бы картинки наборов; чтобы убрать раздел из панели, выключите его.',
+      });
+    }
 
     // Удаление настоящее — 12.08.2026 решено не резервировать имена навсегда
     // (см. комментарий у /admin/custom/:itemId выше). Пак ведёт себя так же:

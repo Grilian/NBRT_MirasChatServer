@@ -705,6 +705,137 @@ test('тоновый набор без базовой версии сворач�
   assert.equal(cards[0].tones.length, 3);
 });
 
+// Импорт архива с одним ключом в указанный набор — ради тестов панели правки.
+async function importOne(admin, { key, name, role, files }) {
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 70, g: 130, b: 180, alpha: 1 } },
+  }).png().toBuffer();
+  const archive = new AdmZip();
+  files.forEach((f) => archive.addFile(f, image));
+  const form = new FormData();
+  form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), `${key}.zip`);
+  form.append('key', key);
+  form.append('name', name);
+  form.append('role', role);
+  const res = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: form,
+  });
+  assert.equal(res.status, 200);
+}
+
+test('выключенный смайлик уходит из панели выбора, но остаётся в каталоге отрисовки', async () => {
+  const admin = superAdminToken();
+  await importOne(admin, { key: 'apple', name: 'Apple', role: 'base', files: ['U+1F4A9.png'] });
+
+  const viewer = tokenFor(createUser('emoji_off_viewer'));
+  const before = await request('/api/emoji', { token: viewer });
+  const item = before.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f4a9');
+  assert.ok(item, 'до выключения смайлик в панели есть');
+
+  const off = await request(`/api/emoji/admin/custom/${item.id}/enabled`, {
+    token: admin, method: 'PUT', body: { enabled: false },
+  });
+  assert.equal(off.response.status, 200);
+
+  const after = await request('/api/emoji', { token: viewer });
+  assert.equal(
+    after.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f4a9'), undefined,
+    'из панели выбора выключенный смайлик обязан пропасть',
+  );
+
+  // А в переписке он остаётся: текст сообщения не меняется, и подменять архив
+  // системным глифом задним числом мы не должны.
+  const catalog = await request('/api/emoji/catalog', { token: viewer });
+  assert.ok(
+    catalog.data.find((c) => c.unicode_key === '1f4a9'),
+    'каталог отрисовки выключение не затрагивает',
+  );
+});
+
+test('выключение базового смайлика уносит и все его тона', async () => {
+  const admin = superAdminToken();
+  await importOne(admin, {
+    key: 'apple', name: 'Apple', role: 'base',
+    files: ['U+270C-U+FE0F.png', 'U+270C-U+1F3FB.png', 'U+270C-U+1F3FF.png'],
+  });
+
+  const viewer = tokenFor(createUser('emoji_tone_off_viewer'));
+  const before = await request('/api/emoji', { token: viewer });
+  const card = before.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '270c-fe0f');
+  assert.ok(card && card.tones.length === 2);
+
+  const off = await request(`/api/emoji/admin/custom/${card.id}/enabled`, {
+    token: admin, method: 'PUT', body: { enabled: false },
+  });
+  assert.equal(off.data.changed, 3, 'выключиться обязаны базовый и оба тона');
+
+  const after = await request('/api/emoji', { token: viewer });
+  const left = after.data.flatMap((p) => p.custom || [])
+    .filter((c) => String(c.unicode_key || '').startsWith('270c'));
+  assert.equal(left.length, 0, 'ни базовый, ни тона не должны остаться в панели');
+});
+
+test('выключенная версия отдаёт смайлик следующему набору, а не прячет его', async () => {
+  const admin = superAdminToken();
+  await importOne(admin, { key: 'apple', name: 'Apple', role: 'base', files: ['U+1F984.png'] });
+  await importOne(admin, { key: 'second', name: 'Второй', role: 'base', files: ['U+1F984.png'] });
+
+  const viewer = tokenFor(createUser('emoji_asset_off_viewer'));
+  const before = await request('/api/emoji', { token: viewer });
+  const item = before.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f984');
+  assert.match(item.file_path, /emoji_apple_/, 'по умолчанию — активный Apple');
+
+  const applePack = db.prepare("SELECT id FROM emoji_asset_packs WHERE key = 'apple'").get();
+  const off = await request(`/api/emoji/admin/assets/${applePack.id}/items/${item.id}`, {
+    token: admin, method: 'PUT', body: { enabled: false },
+  });
+  assert.equal(off.response.status, 200);
+
+  const after = await request('/api/emoji', { token: viewer });
+  const moved = after.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f984');
+  assert.ok(moved, 'смайлик обязан остаться — у него есть другая версия');
+  assert.match(moved.file_path, /emoji_second_/, 'и показаться следующим включённым набором');
+});
+
+test('порядок наборов оформления задаётся списком и решает, откуда брать картинку', async () => {
+  const admin = superAdminToken();
+  const packs = db.prepare('SELECT id FROM emoji_asset_packs ORDER BY position, id').all().map((r) => r.id);
+
+  const bad = await request('/api/emoji/admin/assets/reorder', {
+    token: admin, method: 'PUT', body: { order: packs.slice(1) },
+  });
+  assert.equal(bad.response.status, 400, 'неполный список — отказ');
+
+  const reversed = [...packs].reverse();
+  const ok = await request('/api/emoji/admin/assets/reorder', {
+    token: admin, method: 'PUT', body: { order: reversed },
+  });
+  assert.equal(ok.response.status, 200);
+  assert.deepEqual(
+    db.prepare('SELECT id FROM emoji_asset_packs ORDER BY position, id').all().map((r) => r.id),
+    reversed,
+  );
+});
+
+test('раздел из загруженной структуры удалить нельзя — это снесло бы картинки наборов', async () => {
+  const admin = superAdminToken();
+  const packId = db.prepare(`
+    INSERT INTO emoji_packs (name, position, enabled, created_at, structure_key)
+    VALUES ('Раздел из структуры', 996, 1, ?, 'unicode:test-guard')
+  `).run(Date.now()).lastInsertRowid;
+
+  const removed = await request(`/api/emoji/admin/${packId}`, { token: admin, method: 'DELETE' });
+  assert.equal(removed.response.status, 400);
+  assert.match(removed.data.error, /структуры/);
+  assert.ok(db.prepare('SELECT id FROM emoji_packs WHERE id = ?').get(packId), 'раздел остался на месте');
+
+  // И состав такого раздела нельзя переписать строкой смайликов.
+  const replaced = await request(`/api/emoji/admin/${packId}`, {
+    token: admin, method: 'PUT', body: { emoji: '😀 😁' },
+  });
+  assert.equal(replaced.response.status, 400);
+});
+
 test('сами модификаторы тона — самостоятельные смайлики, а не чьи-то вариации', async () => {
   const admin = superAdminToken();
   const image = await sharp({
