@@ -619,7 +619,7 @@ if (legacyArchivePack) {
   const fsForCleanup = require('fs');
   archiveFiles.forEach((row) => {
     [row.file_path, row.animated_path].filter(Boolean).forEach((p) => {
-      const onDisk = path.join(__dirname, String(p).replace(/^\/uploads\//, 'uploads/'));
+      const onDisk = path.join(process.env.MIRAS_UPLOADS_DIR || path.join(__dirname, 'uploads'), String(p).replace(/^\/uploads\//, ''));
       fsForCleanup.unlink(onDisk, () => {});
     });
   });

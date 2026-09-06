@@ -8,6 +8,9 @@ const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 
 const dbPath = path.join(os.tmpdir(), `miras-stickers-${process.pid}-${Date.now()}.db`);
+// Свой каталог загрузок обязателен: без него тест пишет в боевой server/uploads
+// и запускает там миграцию личных папок поверх настоящих файлов при временной БД.
+process.env.MIRAS_UPLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'miras-stickers-uploads-'));
 process.env.MIRAS_DB_PATH = dbPath;
 process.env.JWT_SECRET = 'stickers-test-secret';
 process.env.SUPERADMIN_USERNAME = `sticker_admin_${process.pid}`;
@@ -159,7 +162,7 @@ test('анимированный GIF сохраняется одним аним�
   assert.match(item.file_path, /^\/uploads\/stickers\/sticker_[a-f0-9]+\.webp$/);
   assert.equal(Object.hasOwn(item, 'animated_path'), false, 'у стикера нет второго файла');
 
-  const onDisk = path.join(__dirname, '..', item.file_path.replace(/^\/uploads\//, 'uploads/'));
+  const onDisk = path.join(process.env.MIRAS_UPLOADS_DIR, item.file_path.replace(/^\/uploads\//, ''));
   const metadata = await sharp(onDisk, { animated: true }).metadata();
   assert.equal(metadata.format, 'webp');
   assert.ok((metadata.pages || 1) > 1, 'после нормализации осталось больше одного кадра');
@@ -191,7 +194,7 @@ test('анимированный WebP тоже сохраняет все кад�
   const item = uploaded.data.packs
     .find((pack) => pack.id === packId)
     .items.find((candidate) => candidate.id === uploaded.data.id);
-  const onDisk = path.join(__dirname, '..', item.file_path.replace(/^\/uploads\//, 'uploads/'));
+  const onDisk = path.join(process.env.MIRAS_UPLOADS_DIR, item.file_path.replace(/^\/uploads\//, ''));
   const metadata = await sharp(onDisk, { animated: true }).metadata();
   assert.ok((metadata.pages || 1) > 1, 'анимированный WebP не должен стать статичным');
   assert.equal(Object.hasOwn(item, 'animated_path'), false);

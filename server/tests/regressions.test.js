@@ -10,6 +10,9 @@ const AdmZip = require('adm-zip');
 const sharp = require('sharp');
 
 const dbPath = path.join(os.tmpdir(), `miras-regressions-${process.pid}-${Date.now()}.db`);
+// Свой каталог загрузок обязателен: без него тест пишет в боевой server/uploads
+// и запускает там миграцию личных папок поверх настоящих файлов при временной БД.
+process.env.MIRAS_UPLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'miras-regressions-uploads-'));
 process.env.MIRAS_DB_PATH = dbPath;
 process.env.JWT_SECRET = 'regression-test-secret';
 process.env.SUPERADMIN_USERNAME = `test_admin_${process.pid}`;
@@ -401,7 +404,7 @@ test('удаление пака — настоящее, без архива: ф�
   assert.equal(uploaded.status, 201);
   const item = db.prepare('SELECT id, file_path FROM emoji_items WHERE name = ?').get('doomed_custom');
   assert.ok(item.file_path);
-  const onDisk = path.join(__dirname, '..', item.file_path.replace(/^\/uploads\//, 'uploads/'));
+  const onDisk = path.join(process.env.MIRAS_UPLOADS_DIR, item.file_path.replace(/^\/uploads\//, ''));
   assert.ok(fs.existsSync(onDisk), 'файл должен быть на диске сразу после загрузки');
 
   // Юникодный элемент того же пака — без картинки: раньше на такой опирался
@@ -451,7 +454,7 @@ test('удаление набора оформления (ZIP) реально в
 
   const assetPackId = db.prepare("SELECT id FROM emoji_asset_packs WHERE key = 'deletable-set'").get().id;
   const asset = db.prepare('SELECT file_path FROM emoji_assets WHERE asset_pack_id = ?').get(assetPackId);
-  const onDisk = path.join(__dirname, '..', asset.file_path.replace(/^\/uploads\//, 'uploads/'));
+  const onDisk = path.join(process.env.MIRAS_UPLOADS_DIR, asset.file_path.replace(/^\/uploads\//, ''));
   assert.ok(fs.existsSync(onDisk));
 
   const removed = await request(`/api/emoji/admin/assets/${assetPackId}`, { token: admin, method: 'DELETE' });

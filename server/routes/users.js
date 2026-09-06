@@ -15,7 +15,7 @@ const { getSelfChatName, getReactionEmoji } = require('../services/appSettings')
 const userStorage = require('../services/userStorage');
 const router = express.Router();
 
-const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
+const AVATARS_DIR = path.join(userStorage.UPLOADS_DIR, 'avatars');
 fs.mkdirSync(AVATARS_DIR, { recursive: true });
 
 const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
@@ -38,7 +38,7 @@ const avatarUpload = multer({
 // всегда выше своей ширины, и сюда несут вертикальные снимки с телефона.
 // Качество ниже аватарного: это фон за текстом, разницы не видно, а место
 // экономит заметно — при сотне сотрудников счёт идёт на гигабайты.
-const BACKGROUNDS_DIR = path.join(__dirname, '..', 'uploads', 'backgrounds');
+const BACKGROUNDS_DIR = path.join(userStorage.UPLOADS_DIR, 'backgrounds');
 fs.mkdirSync(BACKGROUNDS_DIR, { recursive: true });
 
 const BACKGROUND_MAX_WIDTH = 1080;

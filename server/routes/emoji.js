@@ -20,7 +20,10 @@ const {
 
 const router = express.Router();
 
-const EMOJI_DIR = path.join(__dirname, '..', 'uploads', 'emoji');
+// Корень загрузок берётся из userStorage — там он настраивается переменной
+// MIRAS_UPLOADS_DIR ради тестов. Свой путь тут значил бы, что прогон тестов
+// пишет картинки смайликов в боевой uploads мимо временного каталога.
+const EMOJI_DIR = path.join(require('../services/userStorage').UPLOADS_DIR, 'emoji');
 fs.mkdirSync(EMOJI_DIR, { recursive: true });
 
 // Смайлик показывается размером со строку текста — большего разрешения он не
@@ -94,7 +97,7 @@ async function saveEmojiImage(buffer, name, { animated }) {
 // лежит относительно каталога сервера.
 const unlinkEmojiFile = (filePath) => {
   if (!filePath) return;
-  const onDisk = path.join(__dirname, '..', String(filePath).replace(/^\/uploads\//, 'uploads/'));
+  const onDisk = path.join(require('../services/userStorage').UPLOADS_DIR, String(filePath).replace(/^\/uploads\//, ''));
   fs.unlink(onDisk, () => {});
 };
 

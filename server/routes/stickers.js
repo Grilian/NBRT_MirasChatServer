@@ -15,7 +15,10 @@ const router = express.Router();
 // глобально уникальное имя, ни разбор шорткодов, ни отдельная "уборка вместо
 // удаления" ради занятого имени — имени просто нет.
 
-const STICKER_DIR = path.join(__dirname, '..', 'uploads', 'stickers');
+// Корень загрузок берётся из userStorage — там он настраивается переменной
+// MIRAS_UPLOADS_DIR ради тестов. Свой путь тут значил бы, что прогон тестов
+// пишет стикеры в боевой uploads мимо временного каталога.
+const STICKER_DIR = path.join(require('../services/userStorage').UPLOADS_DIR, 'stickers');
 fs.mkdirSync(STICKER_DIR, { recursive: true });
 
 // Стикер крупнее смайлика — это самостоятельная картинка в ленте, а не значок
@@ -48,7 +51,7 @@ async function saveStickerImage(buffer, prefix, { preserveAnimation = false } = 
 
 const unlinkStickerFile = (filePath) => {
   if (!filePath) return;
-  const onDisk = path.join(__dirname, '..', String(filePath).replace(/^\/uploads\//, 'uploads/'));
+  const onDisk = path.join(require('../services/userStorage').UPLOADS_DIR, String(filePath).replace(/^\/uploads\//, ''));
   fs.unlink(onDisk, () => {});
 };
 

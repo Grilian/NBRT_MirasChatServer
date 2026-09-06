@@ -8,6 +8,9 @@ const jwt = require('jsonwebtoken');
 
 const dbPath = path.join(os.tmpdir(), `miras-attachments-${process.pid}-${Date.now()}.db`);
 const updatesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'miras-updates-'));
+// Свой каталог загрузок обязателен: без него тест пишет в боевой server/uploads
+// и запускает там миграцию личных папок поверх настоящих файлов при временной БД.
+process.env.MIRAS_UPLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'miras-attachments-uploads-'));
 process.env.MIRAS_DB_PATH = dbPath;
 process.env.MIRAS_UPDATES_DIR = updatesDir;
 process.env.JWT_SECRET = 'attachments-test-secret';

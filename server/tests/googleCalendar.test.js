@@ -5,6 +5,9 @@ const path = require('node:path');
 const test = require('node:test');
 
 const dbPath = path.join(os.tmpdir(), `miras-google-calendar-${process.pid}-${Date.now()}.db`);
+// Свой каталог загрузок обязателен: без него тест пишет в боевой server/uploads
+// и запускает там миграцию личных папок поверх настоящих файлов при временной БД.
+process.env.MIRAS_UPLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'miras-gcal-uploads-'));
 process.env.MIRAS_DB_PATH = dbPath;
 process.env.SUPERADMIN_USERNAME = `google_admin_${process.pid}`;
 process.env.SUPERADMIN_PASSWORD = 'google-test-password';

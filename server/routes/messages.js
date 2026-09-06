@@ -61,7 +61,7 @@ function isAnnouncementChat(chatId) {
   return !!(group && group.announcements_only);
 }
 
-const CHAT_IMAGES_DIR = path.join(__dirname, '..', 'uploads', 'chat-images');
+const CHAT_IMAGES_DIR = path.join(userStorage.UPLOADS_DIR, 'chat-images');
 fs.mkdirSync(CHAT_IMAGES_DIR, { recursive: true });
 
 const CHAT_IMAGE_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -104,7 +104,7 @@ function isValidChatImagePath(filePath) {
 // иначе это уже не тот файл, который отправляли. Поэтому и путь другой, и
 // расширение сохраняется, и MIME берётся тот, что прислал клиент (для показа
 // значка, не для доверия).
-const CHAT_FILES_DIR = path.join(__dirname, '..', 'uploads', 'chat-files');
+const CHAT_FILES_DIR = path.join(userStorage.UPLOADS_DIR, 'chat-files');
 fs.mkdirSync(CHAT_FILES_DIR, { recursive: true });
 
 /**

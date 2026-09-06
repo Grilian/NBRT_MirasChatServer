@@ -208,7 +208,7 @@ app.use('/api/notification-settings', notificationSettingsRoutes);
 // `msg_<id>_<время>_<случайное>.webp`, смайлик — `emoji_<имя>_<случайное>.webp`
 // (замена картинки под тем же кодом пишет НОВЫЙ файл и удаляет прежний).
 // Заводя загрузку с предсказуемым именем, это правило придётся пересмотреть.
-app.use('/api/uploads', express.static(path.join(__dirname, 'uploads'), {
+app.use('/api/uploads', express.static(require('./services/userStorage').UPLOADS_DIR, {
   maxAge: '365d',
   immutable: true,
 }));
