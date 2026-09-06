@@ -11,7 +11,8 @@ const verifySuperAdmin = require('../middleware/verifySuperAdmin');
 const {
   unicodeKeyFromFilename,
   emojiFromUnicodeKey,
-  skinToneBaseKey,
+  emojiCanonicalKey,
+  hasSkinTone,
   skinToneIndex,
   ensureLogicalItem,
   listAssetPacks,
@@ -172,27 +173,45 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
   const toneOwner = new Map();
   const tonesByOwner = new Map();
   if (onlyEnabled) {
-    const byKey = new Map();
-    for (const item of items) if (item.unicode_key) byKey.set(item.unicode_key, item);
+    // Сопоставление идёт по КАНОНИЧЕСКОМУ ключу (без тонов и без fe0f) — см.
+    // emojiCanonicalKey: иначе смайлики, у которых база несёт селектор
+    // начертания, свою базу не находят (🏋️ = 1f3cb-fe0f против 🏋🏻 = 1f3cb-1f3fb).
+    const baseByCanonical = new Map();
     for (const item of items) {
-      if (!item.unicode_key || !item.file_path) continue;
-      const baseKey = skinToneBaseKey(item.unicode_key);
-      // Вариация без базовой версии в каталоге остаётся отдельной карточкой:
-      // спрятать её значило бы потерять смайлик совсем.
-      const owner = baseKey ? byKey.get(baseKey) : null;
-      if (!owner || owner.id === item.id) continue;
-      toneOwner.set(item.id, owner.id);
-      if (!tonesByOwner.has(owner.id)) tonesByOwner.set(owner.id, []);
-      tonesByOwner.get(owner.id).push({
+      if (!item.unicode_key || hasSkinTone(item.unicode_key)) continue;
+      const canonical = emojiCanonicalKey(item.unicode_key);
+      if (canonical && !baseByCanonical.has(canonical)) baseByCanonical.set(canonical, item);
+    }
+
+    // Часть тоновых наборов не имеет базовой версии ВООБЩЕ: «держатся за
+    // руки» без тонов кодируется одним символом (👬 = 1f46c), а с тонами —
+    // ZWJ-последовательностью, и её незатонированной формы в каталоге нет.
+    // Прятать такие вариации нельзя, показывать двадцатью карточками — тоже:
+    // представителем становится первая из группы, остальные уходят внутрь.
+    const groups = new Map();
+    for (const item of items) {
+      if (!item.unicode_key || !item.file_path || !hasSkinTone(item.unicode_key)) continue;
+      const canonical = emojiCanonicalKey(item.unicode_key);
+      if (!canonical) continue; // сами модификаторы 🏻🏼🏽🏾🏿 — самостоятельные смайлики
+      if (!groups.has(canonical)) groups.set(canonical, []);
+      groups.get(canonical).push(item);
+    }
+
+    for (const [canonical, list] of groups) {
+      const owner = baseByCanonical.get(canonical) || list[0];
+      for (const item of list) {
+        if (item.id === owner.id) continue;
+        toneOwner.set(item.id, owner.id);
+      }
+      tonesByOwner.set(owner.id, list.map((item) => ({
         unicode_key: item.unicode_key,
         unicode: item.fallback_emoji || '',
         file_path: item.file_path,
         animated_path: item.animated_path || null,
         fallback: item.fallback_emoji || '',
         toneIndex: skinToneIndex(item.unicode_key),
-      });
+      })).sort((a, b) => a.toneIndex - b.toneIndex));
     }
-    for (const list of tonesByOwner.values()) list.sort((a, b) => a.toneIndex - b.toneIndex);
   }
 
   const byPack = new Map();

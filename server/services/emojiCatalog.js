@@ -56,18 +56,31 @@ const internalNameFromUnicodeKey = (key) => `u_${key.replace(/-/g, '_')}`;
 const SKIN_TONE_KEYS = new Set(['1f3fb', '1f3fc', '1f3fd', '1f3fe', '1f3ff']);
 
 /**
- * Ключ того же смайлика без тона кожи — то есть его «базовая» версия.
- * `null`, если тона нет вовсе: в панели ВЫБОРА тоновые вариации не должны
- * лежать отдельными карточками рядом с базовой (их ровно половина каталога —
- * 1869 из 3770, а в разделе «Люди и тело» 1864 из 2251). В каталоге ОТРИСОВКИ
- * они, разумеется, остаются: в отправленном сообщении лежит именно тоновый
- * символ, и показать его нужно им же, а не базовым.
+ * Канонический вид ключа: без тонов кожи И БЕЗ СЕЛЕКТОРА НАЧЕРТАНИЯ `fe0f`.
+ * По нему тоновые вариации находят свою базовую версию.
+ *
+ * Выбрасывать `fe0f` обязательно, и это не мелочь. Unicode убирает селектор,
+ * как только к смайлику применён тон кожи: 🏋️ кодируется `1f3cb-fe0f`, а
+ * 🏋🏻 — уже `1f3cb-1f3fb`, без него. Пока сравнение шло по «ключу минус тон»,
+ * такие смайлики свою базу не находили и оставались отдельными карточками —
+ * отсюда и «часть объединилась, часть нет»: 👍 (`1f44d`, селектора нет вовсе)
+ * группировался, а 🏋️ ☝️ 🕵️ 💁 и им подобные — нет. На проде это 210 таких
+ * вариаций, из них 45 отличались ровно одним `fe0f` в конце и 165 — тем же
+ * `fe0f` внутри ZWJ-последовательности (🏋🏻‍♀️ против 🏋️‍♀️).
+ *
+ * Пустая строка означает, что от ключа ничего не осталось, — это сами
+ * модификаторы тона (🏻🏼🏽🏾🏿). Они самостоятельные смайлики и ничьими
+ * вариациями не являются.
  */
-const skinToneBaseKey = (unicodeKey) => {
-  const parts = String(unicodeKey || '').split('-');
-  const withoutTone = parts.filter((part) => !SKIN_TONE_KEYS.has(part));
-  return withoutTone.length && withoutTone.length !== parts.length ? withoutTone.join('-') : null;
-};
+const emojiCanonicalKey = (unicodeKey) => String(unicodeKey || '')
+  .split('-')
+  .filter((part) => !SKIN_TONE_KEYS.has(part) && part !== 'fe0f')
+  .join('-');
+
+/** Есть ли в ключе хоть один модификатор тона. */
+const hasSkinTone = (unicodeKey) => String(unicodeKey || '')
+  .split('-')
+  .some((part) => SKIN_TONE_KEYS.has(part));
 
 /** Порядок тонов — как в Unicode, от светлого к тёмному. */
 const skinToneIndex = (unicodeKey) => {
@@ -281,7 +294,8 @@ module.exports = {
   unicodeKeyFromFilename,
   emojiFromUnicodeKey,
   internalNameFromUnicodeKey,
-  skinToneBaseKey,
+  emojiCanonicalKey,
+  hasSkinTone,
   skinToneIndex,
   ensureLogicalItem,
   listAssetPacks,

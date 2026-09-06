@@ -634,6 +634,100 @@ test('тона кожи схлопываются под базовый смай�
   assert.equal(toned.length, 6, 'каталог отрисовки схлопывать тона не имеет права');
 });
 
+test('селектор начертания fe0f не мешает найти базовую версию', async () => {
+  const admin = superAdminToken();
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 30, g: 90, b: 140, alpha: 1 } },
+  }).png().toBuffer();
+
+  // Ровно тот случай, из-за которого «часть объединилась, часть нет»: Unicode
+  // выбрасывает fe0f, как только применён тон кожи. 🏋️ это `1f3cb-fe0f`, а
+  // 🏋🏻 — уже `1f3cb-1f3fb`. Сравнение «ключ минус тон» базу не находило.
+  const archive = new AdmZip();
+  archive.addFile('U+1F3CB-U+FE0F.png', image);
+  archive.addFile('U+1F3CB-U+1F3FB.png', image);
+  archive.addFile('U+1F3CB-U+1F3FF.png', image);
+  // И тот же fe0f ВНУТРИ ZWJ-последовательности: 🏋️‍♀️ против 🏋🏻‍♀️.
+  archive.addFile('U+1F3CB-U+FE0F-U+200D-U+2640-U+FE0F.png', image);
+  archive.addFile('U+1F3CB-U+1F3FB-U+200D-U+2640-U+FE0F.png', image);
+
+  const form = new FormData();
+  form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), 'fe0f.zip');
+  form.append('key', 'apple');
+  form.append('name', 'Apple');
+  form.append('role', 'base');
+  assert.equal((await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: form,
+  })).status, 200);
+
+  const picker = await request('/api/emoji', { token: tokenFor(createUser('emoji_fe0f_viewer')) });
+  const cards = picker.data.flatMap((p) => p.custom || [])
+    .filter((c) => String(c.unicode_key || '').startsWith('1f3cb'));
+
+  assert.equal(cards.length, 2, 'должны остаться две карточки: 🏋️ и 🏋️‍♀️, а не пять');
+  const plain = cards.find((c) => c.unicode_key === '1f3cb-fe0f');
+  const woman = cards.find((c) => c.unicode_key === '1f3cb-fe0f-200d-2640-fe0f');
+  assert.ok(plain && woman, 'базовыми обязаны стать версии С селектором начертания');
+  assert.equal(plain.tones.length, 2);
+  assert.equal(woman.tones.length, 1);
+});
+
+test('тоновый набор без базовой версии сворачивается под первую вариацию, а не рассыпается', async () => {
+  const admin = superAdminToken();
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 120, g: 60, b: 90, alpha: 1 } },
+  }).png().toBuffer();
+
+  // «Держатся за руки» без тонов кодируется ОДНИМ символом (👬 = 1f46c), а с
+  // тонами — ZWJ-последовательностью, незатонированной формы которой в
+  // каталоге нет вовсе. Прятать такие нельзя, а двадцать карточек подряд —
+  // ровно та простыня, от которой уходим.
+  const archive = new AdmZip();
+  archive.addFile('U+1F468-U+1F3FB-U+200D-U+1F91D-U+200D-U+1F468-U+1F3FC.png', image);
+  archive.addFile('U+1F468-U+1F3FC-U+200D-U+1F91D-U+200D-U+1F468-U+1F3FD.png', image);
+  archive.addFile('U+1F468-U+1F3FD-U+200D-U+1F91D-U+200D-U+1F468-U+1F3FE.png', image);
+
+  const form = new FormData();
+  form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), 'pairs.zip');
+  form.append('key', 'apple');
+  form.append('name', 'Apple');
+  form.append('role', 'base');
+  assert.equal((await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: form,
+  })).status, 200);
+
+  const picker = await request('/api/emoji', { token: tokenFor(createUser('emoji_pairs_viewer')) });
+  const cards = picker.data.flatMap((p) => p.custom || [])
+    .filter((c) => String(c.unicode_key || '').includes('1f91d'));
+
+  assert.equal(cards.length, 1, 'вся группа обязана свернуться в одну карточку');
+  // Представитель сам остаётся среди тонов — в попапе он подсвечен как текущий.
+  assert.equal(cards[0].tones.length, 3);
+});
+
+test('сами модификаторы тона — самостоятельные смайлики, а не чьи-то вариации', async () => {
+  const admin = superAdminToken();
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 200, g: 200, b: 200, alpha: 1 } },
+  }).png().toBuffer();
+
+  const archive = new AdmZip();
+  archive.addFile('U+1F3FB.png', image);
+  const form = new FormData();
+  form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), 'mods.zip');
+  form.append('key', 'apple');
+  form.append('name', 'Apple');
+  form.append('role', 'base');
+  assert.equal((await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: form,
+  })).status, 200);
+
+  const picker = await request('/api/emoji', { token: tokenFor(createUser('emoji_mod_viewer')) });
+  const mod = picker.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f3fb');
+  assert.ok(mod, '🏻 обязан остаться отдельной карточкой — прятать его не под что');
+  assert.equal(mod.tones, undefined);
+});
+
 test('account deletion clears dependent records and transfers group ownership', () => {
   const deletedId = createUser('deleted_user');
   const survivorId = createUser('surviving_user');
