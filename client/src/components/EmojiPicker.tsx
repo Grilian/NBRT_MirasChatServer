@@ -200,6 +200,8 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
               // Официальные наборы хранят в сообщении сам символ. Произвольные
               // пользовательские смайлики без unicode_key сохраняют :name:.
               token: item.unicode_key ? (item.unicode || item.fallback || DEFAULT_EMOJI_FALLBACK) : undefined,
+              unicodeKey: item.unicode_key,
+              variants: item.variants,
             })}
           >
             <img className="custom-emoji" src={resolveUploadUrl(item.file_path) || ''} alt={`:${item.name}:`} />

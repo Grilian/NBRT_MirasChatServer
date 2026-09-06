@@ -32,6 +32,8 @@ export interface EmojiRenderAsset {
   unicodeKey?: string | null;
   label?: string;
   keywords?: string;
+  /** Другие живые оформления того же unicode_key — для попапа выбора пака. */
+  variants?: EmojiVariant[];
 }
 export type CustomEmojiMap = Record<string, EmojiRenderAsset>;
 
@@ -69,6 +71,7 @@ export const buildEmojiMap = (
       unicodeKey: item.unicode_key || null,
       label: item.label || '',
       keywords: item.keywords || '',
+      variants: item.variants,
     };
     map[item.name] = asset;
     if (item.unicode_key) defaults.set(item.unicode_key, asset);
@@ -514,6 +517,8 @@ export interface EmojiSuggestion {
   fallback: string;
   token: string;
   label: string;
+  unicodeKey?: string | null;
+  variants?: EmojiVariant[];
 }
 
 /** Подсказки по последнему слову. Пустой запрос отдаёт привычные эмодзи. */
@@ -545,5 +550,7 @@ export function getEmojiSuggestions(map: CustomEmojiMap, query: string, limit = 
       fallback: choice.fallback,
       token: choice.token,
       label: choice.label || choice.keywords || choice.fallback,
+      unicodeKey: choice.unicodeKey,
+      variants: choice.variants,
     }));
 }

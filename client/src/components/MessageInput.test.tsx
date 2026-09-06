@@ -3,6 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import MessageInput from './MessageInput';
 import ChatWindow from './ChatWindow';
+import { buildEmojiMap } from '../utils/customEmoji';
 
 // Фокус ставится внутри requestAnimationFrame (композер в этот момент ещё
 // меняет высоту под появившуюся панель), поэтому в тестах кадр прогоняем руками.
@@ -258,5 +259,91 @@ describe('MessageInput перетаскивание файлов', () => {
     await dropFiles(container, [doc]);
 
     expect(onSendFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('MessageInput попап выбора пака оформления', () => {
+  const customEmoji = buildEmojiMap([{
+    name: 'u_1f973',
+    file_path: '/uploads/emoji/apple_1f973.webp',
+    fallback: '🥳',
+    unicode_key: '1f973',
+    label: 'party',
+    keywords: 'party праздник',
+    variants: [
+      { packKey: 'apple', packName: 'Apple', role: 'base', filePath: '/uploads/emoji/apple_1f973.webp' },
+      { packKey: 'google-fonts', packName: 'Google Fonts', role: 'base', filePath: '/uploads/emoji/google_1f973.webp' },
+    ],
+  }]);
+
+  function typeSuggestionWord(field: HTMLElement) {
+    field.focus();
+    field.textContent = 'party';
+    fireEvent.input(field);
+  }
+
+  test('выбор смайлика с двумя живыми наборами открывает попап; выбор в нём подставляет код именно того пака', () => {
+    const { container } = render(<MessageInput onSend={noopSend} customEmoji={customEmoji} />);
+    const field = container.querySelector('.composer-input') as HTMLElement;
+    typeSuggestionWord(field);
+
+    const suggestionButton = container.querySelector('.composer-emoji-suggestions button') as HTMLElement;
+    expect(suggestionButton).not.toBeNull();
+    fireEvent.click(suggestionButton);
+
+    // По умолчанию подставляется активный набор (Apple) без всякого попапа —
+    // выбирать в нём ещё не значит, что человек обязан что-то нажать.
+    // (Подсказка не заменяет набранное слово-триггер — это существующее
+    // поведение самой панели подсказок, к попапу выбора пака отношения не
+    // имеет. textContent картинку не видит вовсе — сверяемся по самому узлу.)
+    let insertedImage = field.querySelector('img.custom-emoji') as HTMLImageElement;
+    expect(field.textContent).toBe('party');
+    expect(insertedImage.src).toContain('apple_1f973.webp');
+    expect(insertedImage.dataset.emojiToken).toBe('🥳');
+
+    const options = container.querySelectorAll('.emoji-variant-option');
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveClass('is-current'); // Apple — то, что уже вставлено
+
+    fireEvent.click(options[1]); // Google Fonts
+    insertedImage = field.querySelector('img.custom-emoji') as HTMLImageElement;
+    expect(insertedImage.src).toContain('google_1f973.webp');
+    expect(insertedImage.dataset.emojiToken).toBe(':e~1f973~google-fonts:');
+    // Явный выбор — не разовое действие «вставил и забыл»: тут же можно
+    // передумать и выбрать другой вариант, попап не закрывается сам.
+    expect(container.querySelector('.emoji-variant-popup')).not.toBeNull();
+    expect(options[1]).toHaveClass('is-current');
+  });
+
+  test('дальнейший набор текста закрывает попап, а уже подставленный код остаётся как есть', () => {
+    const { container } = render(<MessageInput onSend={noopSend} customEmoji={customEmoji} />);
+    const field = container.querySelector('.composer-input') as HTMLElement;
+    typeSuggestionWord(field);
+    fireEvent.click(container.querySelector('.composer-emoji-suggestions button') as HTMLElement);
+    expect(container.querySelector('.emoji-variant-popup')).not.toBeNull();
+
+    field.textContent = '🥳!';
+    fireEvent.input(field);
+
+    expect(container.querySelector('.emoji-variant-popup')).not.toBeInTheDocument();
+  });
+
+  test('смайлик с единственным набором вставляется без попапа', () => {
+    const singlePackEmoji = buildEmojiMap([{
+      name: 'u_1f600', file_path: '/uploads/emoji/apple_1f600.webp', fallback: '😀',
+      unicode_key: '1f600', label: 'smile', keywords: 'smile',
+    }]);
+    const { container } = render(<MessageInput onSend={noopSend} customEmoji={singlePackEmoji} />);
+    const field = container.querySelector('.composer-input') as HTMLElement;
+    field.focus();
+    field.textContent = 'smile';
+    fireEvent.input(field);
+
+    fireEvent.click(container.querySelector('.composer-emoji-suggestions button') as HTMLElement);
+
+    const insertedImage = field.querySelector('img.custom-emoji') as HTMLImageElement;
+    expect(insertedImage).not.toBeNull();
+    expect(insertedImage.dataset.emojiToken).toBe('😀');
+    expect(container.querySelector('.emoji-variant-popup')).not.toBeInTheDocument();
   });
 });

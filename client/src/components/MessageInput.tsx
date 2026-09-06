@@ -2,7 +2,10 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { App as CapApp } from '@capacitor/app';
 import ContentPicker from './ContentPicker';
 import EmojiComposerField, { EmojiComposerHandle, PickedCustomEmoji } from './EmojiComposerField';
-import { CustomEmojiMap, getEmojiSuggestions, renderTextWithEmoji, trimDanglingShortcode } from '../utils/customEmoji';
+import EmojiVariantPopup from './EmojiVariantPopup';
+import {
+  CustomEmojiMap, EmojiVariant, emojiVariantToken, getEmojiSuggestions, renderTextWithEmoji, trimDanglingShortcode,
+} from '../utils/customEmoji';
 import { resolveUploadUrl } from '../utils/uploads';
 import { isNativeMobile } from '../utils/mobileNotify';
 import { FILE_MAX_BYTES, FILE_TOO_LARGE_MESSAGE } from '../utils/fileLimits';
@@ -138,6 +141,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const richRef = useRef<EmojiComposerHandle>(null);
+  // Попап выбора пака оформления — только что вставленный узел, чтобы было,
+  // что подменять, и его текущие координаты, чтобы было, над чем всплывать.
+  const [variantPopup, setVariantPopup] = useState<{
+    node: HTMLElement; unicodeKey: string; variants: EmojiVariant[]; currentFilePath: string; anchorRect: DOMRect;
+  } | null>(null);
+  // handleRichChange закрывает попап на любое дальнейшее изменение текста —
+  // это верно для настоящего набора текста, но сама вставка смайлика и клик
+  // по варианту в попапе тоже меняют текст (через emitChange). Флаг отличает
+  // «это наше собственное программное изменение» от «человек продолжил печатать».
+  const suppressPopupDismissRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Отдельный input под документы: у картинок свой с accept="image/*",
   // и делить их значило бы предлагать в выборе картинок все файлы подряд.
@@ -421,8 +434,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // выбранный посреди набранной фразы, уезжал бы в её хвост.
   const insertEmoji = (picked: string | PickedCustomEmoji) => {
     if (rich) {
-      richRef.current?.insertPicked(picked, { focus: !(isNativeMobile && emojiOpen) });
+      suppressPopupDismissRef.current = true;
+      const node = richRef.current?.insertPicked(picked, { focus: !(isNativeMobile && emojiOpen) });
       onTyping?.();
+      // Попап выбора пака — только когда реально есть из чего выбирать (2+
+      // живых оформления у этого unicode_key) и узел картинки правда вставился
+      // (для обычной текстовой вставки insertPicked возвращает null).
+      if (node && typeof picked !== 'string' && picked.unicodeKey && picked.variants && picked.variants.length > 1) {
+        setVariantPopup({
+          node,
+          unicodeKey: picked.unicodeKey,
+          variants: picked.variants,
+          currentFilePath: picked.filePath,
+          anchorRect: node.getBoundingClientRect(),
+        });
+      } else {
+        setVariantPopup(null);
+      }
       return;
     }
     // В textarea картинку не показать — туда уходит код, как и раньше.
@@ -754,6 +782,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // резать DOM на каждое нажатие ради него незачем. Здесь поле пересобирается
   // целиком из обрезанного текста, чтобы не остался огрызок кода вида ":cat".
   const handleRichChange = (value: string) => {
+    // Дальнейший набор текста — сигнал, что человек уже определился (или
+    // сознательно пропустил выбор): позиция только что вставленного смайлика
+    // в поле могла сдвинуться (перенос строки, рост высоты поля), и держать
+    // попап в старых координатах было бы враньём, а не подсказкой. Но не для
+    // изменений, вызванных нами же самими (вставка смайлика, клик по варианту
+    // в самом попапе) — для них флаг выставлен заранее и гасится здесь же.
+    if (suppressPopupDismissRef.current) {
+      suppressPopupDismissRef.current = false;
+    } else {
+      setVariantPopup(null);
+    }
     if (value.length > MAX_LENGTH) {
       const cut = trimDanglingShortcode(value.slice(0, MAX_LENGTH));
       setText(cut);
@@ -989,6 +1028,24 @@ const MessageInput: React.FC<MessageInputProps> = ({
             </button>
           ))}
         </div>
+      )}
+
+      {variantPopup && (
+        <EmojiVariantPopup
+          variants={variantPopup.variants}
+          currentFilePath={variantPopup.currentFilePath}
+          anchorRect={variantPopup.anchorRect}
+          onDismiss={() => setVariantPopup(null)}
+          onPick={(variant) => {
+            suppressPopupDismissRef.current = true;
+            richRef.current?.applyVariant(
+              variantPopup.node,
+              variant.filePath,
+              `:${emojiVariantToken(variantPopup.unicodeKey, variant.packKey)}:`,
+            );
+            setVariantPopup((prev) => (prev ? { ...prev, currentFilePath: variant.filePath } : prev));
+          }}
+        />
       )}
 
       <div className="composer-row">

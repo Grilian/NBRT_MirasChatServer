@@ -1559,6 +1559,24 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
 }
 .composer-emoji-suggestions button:hover { background: var(--row-hover); }
 .composer-emoji-suggestions img { width: 27px; height: 27px; object-fit: contain; }
+
+/* Всплывает над только что вставленным смайликом (position: fixed, left/top
+   выставляются инлайном по координатам самого узла) — тот же принцип, что и
+   у composer-emoji-suggestions, только позиция не в потоке, а точечная. */
+.emoji-variant-popup {
+  z-index: 40; transform: translate(-50%, calc(-100% - 8px));
+  display: flex; align-items: center; gap: 4px; padding: 5px; max-width: min(80vw, 320px);
+  overflow-x: auto; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--paper-raised); box-shadow: var(--shadow-md, 0 8px 24px rgba(16, 35, 47, .22));
+}
+.emoji-variant-option {
+  width: 38px; height: 38px; flex: none; padding: 3px; border: 2px solid transparent;
+  border-radius: 50%; background: transparent; cursor: pointer; display: grid; place-items: center;
+}
+.emoji-variant-option:hover { background: var(--row-hover); }
+.emoji-variant-option.is-current { border-color: var(--accent); }
+.emoji-variant-option img { width: 28px; height: 28px; object-fit: contain; }
+
 .composer-bar {
   flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 2px;
   padding: 3px; background: var(--paper-sunken);

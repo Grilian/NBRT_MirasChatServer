@@ -1,7 +1,8 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useRef } from 'react';
 import {
-  CustomEmojiMap, createEmojiNode, domToText, isEmojiNode, textToFragment,
+  CustomEmojiMap, createEmojiNode, domToText, EmojiVariant, isEmojiNode, textToFragment,
 } from '../utils/customEmoji';
+import { resolveUploadUrl } from '../utils/uploads';
 
 /** Картиночный смайлик, выбранный в панели: данные уже есть, искать нечего. */
 export interface PickedCustomEmoji {
@@ -10,6 +11,9 @@ export interface PickedCustomEmoji {
   fallback: string;
   /** Что реально хранится в сообщении: Unicode для системных наборов. */
   token?: string;
+  /** Свой unicode_key и другие живые оформления — для попапа выбора пака. */
+  unicodeKey?: string | null;
+  variants?: EmojiVariant[];
 }
 
 export interface EmojiComposerHandle {
@@ -19,7 +23,13 @@ export interface EmojiComposerHandle {
   focus: () => void;
   blur: () => void;
   saveSelection: () => void;
-  insertPicked: (value: string | PickedCustomEmoji, options?: { focus?: boolean }) => void;
+  /** Возвращает вставленный узел картинки — пригодится для попапа выбора пака
+      над только что вставленным смайликом (см. MessageInput.tsx). Для
+      текстовой вставки (простой Unicode без картинки) — null. */
+  insertPicked: (value: string | PickedCustomEmoji, options?: { focus?: boolean }) => HTMLElement | null;
+  /** Меняет уже вставленный узел на другое оформление того же смайлика —
+      выбор в попапе, а не новая вставка (курсор и остальной текст не трогаются). */
+  applyVariant: (node: HTMLElement, filePath: string, token: string) => void;
 }
 
 interface Props {
@@ -191,9 +201,24 @@ const EmojiComposerField = forwardRef<EmojiComposerHandle, Props>(({
       const focusAfter = options?.focus !== false;
       if (typeof value === 'string') {
         insertNode(document.createTextNode(value), focusAfter);
-        return;
+        return null;
       }
-      insertNode(createEmojiNode(value.name, value.filePath, value.fallback, value.token), focusAfter);
+      const node = createEmojiNode(value.name, value.filePath, value.fallback, value.token);
+      insertNode(node, focusAfter);
+      return node;
+    },
+    applyVariant: (node, filePath, token) => {
+      if (!boxRef.current?.contains(node)) return;
+      if (node instanceof HTMLImageElement) {
+        node.src = resolveUploadUrl(filePath) || '';
+        node.dataset.emojiToken = token;
+      } else if (node.dataset && 'emojiToken' in node.dataset) {
+        // Картинка успела не загрузиться и подмениться на span-заглушку
+        // (см. onerror в createEmojiNode) — сам код всё равно меняем, картинку
+        // просто негде показать в этом узле.
+        node.dataset.emojiToken = token;
+      }
+      emitChange();
     },
   }), [caretAfter, emitChange, insertNode, saveSelection]);
 
