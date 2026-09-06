@@ -11,6 +11,8 @@ const verifySuperAdmin = require('../middleware/verifySuperAdmin');
 const {
   unicodeKeyFromFilename,
   emojiFromUnicodeKey,
+  skinToneBaseKey,
+  skinToneIndex,
   ensureLogicalItem,
   listAssetPacks,
   syncResolvedAssets,
@@ -121,13 +123,19 @@ const MAX_ITEMS_PER_PACK = 10000;
 // и Google Fonts, может явно выбрать его вместо автоматического. Единым
 // запросом на всю выдачу, а не по одному на элемент — иначе на паке из тысяч
 // смайликов это N+1 в чистом виде.
+//
+// ТОЛЬКО `role = 'base'`. Анимационный набор (Telegram) — не альтернативное
+// оформление, а анимированная версия того же самого смайлика: Apple и Telegram
+// взаимозаменяемы и должны читаться как ОДИН набор. Пока сюда попадали обе
+// роли, у каждого смайлика с анимацией появлялся выбор из двух «наборов»,
+// хотя выбирать там нечего — и попап открывался там, где не должен был.
 function variantsByItem(db) {
   const rows = db.prepare(`
     SELECT ea.item_id, eap.key AS pack_key, eap.name AS pack_name, eap.role, ea.file_path
     FROM emoji_assets ea
     JOIN emoji_asset_packs eap ON eap.id = ea.asset_pack_id
-    WHERE eap.enabled = 1
-    ORDER BY eap.role, eap.position, eap.id
+    WHERE eap.enabled = 1 AND eap.role = 'base'
+    ORDER BY eap.position, eap.id
   `).all();
   const map = new Map();
   for (const row of rows) {
@@ -155,8 +163,41 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
   // для панели админа (includeRaw) варианты ни к чему — наборы оформления там
   // уже видны отдельным разделом.
   const variants = onlyEnabled ? variantsByItem(db) : null;
+
+  // Тоновые вариации схлопываются под базовый смайлик — ТОЛЬКО в панели
+  // выбора. В админской выдаче их обязано быть видно поштучно (там правят
+  // каталог), а в /catalog они и подавно остаются: в сообщении лежит именно
+  // тоновый символ. Карта строится заранее, потому что базовый элемент может
+  // встретиться в списке позже своей вариации.
+  const toneOwner = new Map();
+  const tonesByOwner = new Map();
+  if (onlyEnabled) {
+    const byKey = new Map();
+    for (const item of items) if (item.unicode_key) byKey.set(item.unicode_key, item);
+    for (const item of items) {
+      if (!item.unicode_key || !item.file_path) continue;
+      const baseKey = skinToneBaseKey(item.unicode_key);
+      // Вариация без базовой версии в каталоге остаётся отдельной карточкой:
+      // спрятать её значило бы потерять смайлик совсем.
+      const owner = baseKey ? byKey.get(baseKey) : null;
+      if (!owner || owner.id === item.id) continue;
+      toneOwner.set(item.id, owner.id);
+      if (!tonesByOwner.has(owner.id)) tonesByOwner.set(owner.id, []);
+      tonesByOwner.get(owner.id).push({
+        unicode_key: item.unicode_key,
+        unicode: item.fallback_emoji || '',
+        file_path: item.file_path,
+        animated_path: item.animated_path || null,
+        fallback: item.fallback_emoji || '',
+        toneIndex: skinToneIndex(item.unicode_key),
+      });
+    }
+    for (const list of tonesByOwner.values()) list.sort((a, b) => a.toneIndex - b.toneIndex);
+  }
+
   const byPack = new Map();
   for (const item of items) {
+    if (toneOwner.has(item.id)) continue;
     if (!byPack.has(item.pack_id)) byPack.set(item.pack_id, { emoji: [], custom: [], all: [] });
     const bucket = byPack.get(item.pack_id);
     // Картиночный элемент узнаётся по file_path, юникодный — по emoji либо
@@ -185,6 +226,9 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
         label: item.label || '',
         keywords: item.keywords || '',
         ...(itemVariants && itemVariants.length > 1 ? { variants: itemVariants } : {}),
+        // Тоны того же смайлика — от светлого к тёмному. Панель показывает
+        // одну карточку, а выбрать конкретный тон можно удержанием.
+        ...(tonesByOwner.has(item.id) ? { tones: tonesByOwner.get(item.id) } : {}),
       });
     } else {
       const glyph = item.emoji || item.fallback_emoji;

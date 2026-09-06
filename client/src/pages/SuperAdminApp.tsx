@@ -1663,7 +1663,21 @@ function EmojiPacksPanel() {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [openPack, setOpenPack] = useState<number | null>(null);
   const [editing, setEditing] = useState<EmojiItem | null>(null);
-  const [assetPreset, setAssetPreset] = useState<'apple' | 'animation' | 'google-fonts'>('apple');
+  // Раньше здесь был зашитый список из трёх наборов, и добавить четвёртый было
+  // нельзя вовсе — хотя сервер принимает любые key/name/role. Теперь цель
+  // импорта — либо существующий набор (докинуть или заменить картинки), либо
+  // новый, заведённый прямо тут.
+  const NEW_ASSET_PACK = '__new__';
+  const [assetTarget, setAssetTarget] = useState<string>('apple');
+  const [newPackName, setNewPackName] = useState('');
+  const [newPackKey, setNewPackKey] = useState('');
+  const [newPackRole, setNewPackRole] = useState<'base' | 'animation'>('base');
+
+  // Код набора уезжает в имена файлов и в код выбора оформления внутри текста
+  // сообщения (:e~<ключ>~<пак>:), поэтому он латиницей и задаётся явно. Из
+  // названия он лишь подставляется, когда название и так латинское.
+  const slugFromName = (value: string) => value.trim().toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
   const [systemBusy, setSystemBusy] = useState('');
 
   const apply = (data: EmojiPack[]) => {
@@ -1691,11 +1705,27 @@ function EmojiPacksPanel() {
   useEffect(() => { load(); }, []);
 
   const importAssetArchive = async (file: File) => {
-    const preset = {
-      apple: { key: 'apple', name: 'Apple', role: 'base' },
-      animation: { key: 'animation', name: 'Telegram Animation', role: 'animation' },
-      'google-fonts': { key: 'google-fonts', name: 'Google Fonts', role: 'base' },
-    }[assetPreset];
+    let preset: { key: string; name: string; role: string };
+    if (assetTarget === NEW_ASSET_PACK) {
+      const key = slugFromName(newPackKey || newPackName);
+      const name = newPackName.trim() || key;
+      if (!key) {
+        setError('Укажите код набора латиницей — он уходит в имена файлов и в текст сообщений');
+        return;
+      }
+      if (system?.assetPacks.some((p) => p.key === key)) {
+        setError(`Набор с кодом «${key}» уже есть — выберите его в списке, чтобы обновить картинки`);
+        return;
+      }
+      preset = { key, name, role: newPackRole };
+    } else {
+      const existing = system?.assetPacks.find((p) => p.key === assetTarget);
+      if (!existing) {
+        setError('Набор не найден — обновите страницу');
+        return;
+      }
+      preset = { key: existing.key, name: existing.name, role: existing.role };
+    }
     setSystemBusy('assets');
     setError('');
     setNotice(`Загружаем ${preset.name}… Большой архив может обрабатываться несколько минут.`);
@@ -1708,6 +1738,11 @@ function EmojiPacksPanel() {
       const { data } = await superAdminApi.post('/emoji/admin/assets/import', form, { timeout: 30 * 60 * 1000 });
       apply(data.packs);
       await load();
+      if (assetTarget === NEW_ASSET_PACK) {
+        setAssetTarget(preset.key);
+        setNewPackName('');
+        setNewPackKey('');
+      }
       const report = data.report;
       setNotice(`Готово: ${report.imported} из ${report.total}. Пропущено: ${report.skipped}.`);
       if (report.errors?.length) setError(report.errors.join('; '));
@@ -1856,11 +1891,40 @@ function EmojiPacksPanel() {
             Все изображения сервер приводит к WebP; анимация сохраняет кадры.
           </p>
           <div className="sa-emoji-import-row">
-            <select value={assetPreset} onChange={(e) => setAssetPreset(e.target.value as typeof assetPreset)}>
-              <option value="apple">Apple — основной</option>
-              <option value="animation">Telegram — анимация</option>
-              <option value="google-fonts">Google Fonts — альтернативный</option>
+            <select value={assetTarget} onChange={(e) => setAssetTarget(e.target.value)}>
+              {system?.assetPacks.map((pack) => (
+                <option key={pack.id} value={pack.key}>
+                  {pack.name} — {EMOJI_ASSET_ROLE_LABEL[pack.role]}
+                </option>
+              ))}
+              <option value={NEW_ASSET_PACK}>＋ Новый набор…</option>
             </select>
+            {assetTarget === NEW_ASSET_PACK && (
+              <div className="sa-emoji-new-pack">
+                <input
+                  type="text"
+                  placeholder="Название (Fluent, Twemoji…)"
+                  value={newPackName}
+                  onChange={(e) => {
+                    setNewPackName(e.target.value);
+                    // Код подставляется, пока его не тронули руками.
+                    if (!newPackKey) return;
+                    if (newPackKey === slugFromName(newPackName)) setNewPackKey(slugFromName(e.target.value));
+                  }}
+                  onBlur={() => { if (!newPackKey) setNewPackKey(slugFromName(newPackName)); }}
+                />
+                <input
+                  type="text"
+                  placeholder="код: fluent"
+                  value={newPackKey}
+                  onChange={(e) => setNewPackKey(e.target.value)}
+                />
+                <select value={newPackRole} onChange={(e) => setNewPackRole(e.target.value as 'base' | 'animation')}>
+                  <option value="base">Оформление</option>
+                  <option value="animation">Анимация</option>
+                </select>
+              </div>
+            )}
             <label className="sa-btn-ghost">
               <input
                 type="file" accept=".zip,application/zip" style={{ display: 'none' }}

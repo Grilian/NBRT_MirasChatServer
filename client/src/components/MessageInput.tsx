@@ -1032,11 +1032,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       {variantPopup && (
         <EmojiVariantPopup
-          variants={variantPopup.variants}
+          options={variantPopup.variants.map((v) => ({
+            key: v.packKey, label: v.packName, filePath: v.filePath,
+          }))}
           currentFilePath={variantPopup.currentFilePath}
           anchorRect={variantPopup.anchorRect}
           onDismiss={() => setVariantPopup(null)}
-          onPick={(variant) => {
+          onPick={(packKey) => {
+            const variant = variantPopup.variants.find((v) => v.packKey === packKey);
+            if (!variant) return;
             suppressPopupDismissRef.current = true;
             richRef.current?.applyVariant(
               variantPopup.node,

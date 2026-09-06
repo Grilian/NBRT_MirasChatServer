@@ -1,16 +1,29 @@
 import React, { useEffect, useRef } from 'react';
-import { EmojiVariant } from '../utils/customEmoji';
 import { resolveUploadUrl } from '../utils/uploads';
 import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
 
+/**
+ * Один пункт всплывающего ряда. Намеренно без привязки к тому, ЧЕМ пункты
+ * отличаются: сейчас попап обслуживает два разных вопроса — «каким набором
+ * показать этот смайлик» (композер) и «какой тон кожи взять» (панель выбора).
+ * Вопросы разные, а ряд картинок с подсветкой текущей — один и тот же, и
+ * вторая копия этих же тридцати строк разъехалась бы с оригиналом на первой
+ * же правке (та же причина, что у общего хука useDragReorder).
+ */
+export interface EmojiPopupOption {
+  key: string;
+  label: string;
+  filePath: string;
+}
+
 interface Props {
-  /** Все живые оформления одного и того же смайлика — базовые паки и анимация вперемешку. */
-  variants: EmojiVariant[];
-  /** Путь картинки, которая уже вставлена по умолчанию — подсвечиваем её как текущую. */
-  currentFilePath: string;
-  /** Верх и середина только что вставленного узла в системе координат окна — попап встаёт над ним. */
+  options: EmojiPopupOption[];
+  /** Путь картинки, которая уже выбрана — подсвечиваем её как текущую. */
+  currentFilePath?: string;
+  /** Прямоугольник якоря в системе координат окна — попап встаёт над ним. */
   anchorRect: DOMRect;
-  onPick: (variant: EmojiVariant) => void;
+  ariaLabel?: string;
+  onPick: (key: string) => void;
   onDismiss: () => void;
 }
 
@@ -28,7 +41,9 @@ interface Props {
  * Escape или следующему действию в поле ввода — сообщение в этом случае
  * уходит с тем оформлением по умолчанию, что подставилось сразу при вставке.
  */
-const EmojiVariantPopup: React.FC<Props> = ({ variants, currentFilePath, anchorRect, onPick, onDismiss }) => {
+const EmojiVariantPopup: React.FC<Props> = ({
+  options, currentFilePath, anchorRect, ariaLabel, onPick, onDismiss,
+}) => {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,19 +71,25 @@ const EmojiVariantPopup: React.FC<Props> = ({ variants, currentFilePath, anchorR
   };
 
   return (
-    <div className="emoji-variant-popup" style={style} ref={ref} role="listbox" aria-label="Выбор оформления смайлика">
-      {variants.map((variant) => (
+    <div
+      className="emoji-variant-popup"
+      style={style}
+      ref={ref}
+      role="listbox"
+      aria-label={ariaLabel || 'Выбор оформления смайлика'}
+    >
+      {options.map((option) => (
         <button
-          key={variant.packKey}
+          key={option.key}
           type="button"
           role="option"
-          aria-selected={variant.filePath === currentFilePath}
-          className={'emoji-variant-option' + (variant.filePath === currentFilePath ? ' is-current' : '')}
-          title={variant.packName}
+          aria-selected={option.filePath === currentFilePath}
+          className={'emoji-variant-option' + (option.filePath === currentFilePath ? ' is-current' : '')}
+          title={option.label}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onPick(variant)}
+          onClick={() => onPick(option.key)}
         >
-          <img src={resolveUploadUrl(variant.filePath) || ''} alt={variant.packName} draggable={false} />
+          <img src={resolveUploadUrl(option.filePath) || ''} alt={option.label} draggable={false} />
         </button>
       ))}
     </div>

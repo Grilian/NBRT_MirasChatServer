@@ -561,6 +561,79 @@ test('элемент с картинками из двух наборов нес
   assert.equal(soloItem.variants, undefined, 'у элемента с единственным оформлением variants быть не должно');
 });
 
+test('анимационный набор не попадает в выбор оформления — он не альтернатива, а та же картинка в движении', async () => {
+  const admin = superAdminToken();
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 90, g: 20, b: 20, alpha: 1 } },
+  }).png().toBuffer();
+
+  // Один и тот же ключ уходит в базовый набор и в анимационный. Пока сюда
+  // попадали обе роли, у смайлика появлялся «выбор» из Apple и Telegram —
+  // хотя выбирать нечего: это одна и та же картинка, просто в движении.
+  for (const [key, name, role] of [['apple', 'Apple', 'base'], ['animation', 'Telegram Animation', 'animation']]) {
+    const archive = new AdmZip();
+    archive.addFile('U+1F60E.png', image);
+    const form = new FormData();
+    form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), `${key}.zip`);
+    form.append('key', key);
+    form.append('name', name);
+    form.append('role', role);
+    const res = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+      method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: form,
+    });
+    assert.equal(res.status, 200);
+  }
+
+  const list = await request('/api/emoji', { token: tokenFor(createUser('emoji_anim_viewer')) });
+  const item = list.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f60e');
+  assert.ok(item, 'элемент 😎 должен быть в выдаче');
+  assert.equal(item.variants, undefined, 'анимация не должна давать второй «вариант оформления»');
+  assert.ok(item.animated_path, 'при этом сама анимация обязана доехать отдельным полем');
+});
+
+test('тона кожи схлопываются под базовый смайлик в панели выбора, но не в каталоге отрисовки', async () => {
+  const admin = superAdminToken();
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 200, g: 160, b: 120, alpha: 1 } },
+  }).png().toBuffer();
+
+  // 👍 и все пять его тонов — ровно тот случай, из-за которого раздел «Люди и
+  // тело» разрастался до 2251 карточки при 387 настоящих смайликах.
+  const archive = new AdmZip();
+  archive.addFile('U+1F44D.png', image);
+  for (const tone of ['1F3FB', '1F3FC', '1F3FD', '1F3FE', '1F3FF']) {
+    archive.addFile(`U+1F44D-U+${tone}.png`, image);
+  }
+  const form = new FormData();
+  form.append('archive', new Blob([archive.toBuffer()], { type: 'application/zip' }), 'tones.zip');
+  form.append('key', 'apple');
+  form.append('name', 'Apple');
+  form.append('role', 'base');
+  const imported = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
+    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: form,
+  });
+  assert.equal(imported.status, 200);
+
+  const viewer = tokenFor(createUser('emoji_tone_viewer'));
+  const picker = await request('/api/emoji', { token: viewer });
+  const cards = picker.data.flatMap((p) => p.custom || []).filter((c) => String(c.unicode_key || '').startsWith('1f44d'));
+  assert.equal(cards.length, 1, 'в панели выбора 👍 должен остаться ОДНОЙ карточкой');
+  assert.equal(cards[0].unicode_key, '1f44d');
+  assert.equal(cards[0].tones.length, 5, 'все пять тонов обязаны приехать вложенно');
+  assert.deepEqual(
+    cards[0].tones.map((t) => t.unicode_key),
+    ['1f44d-1f3fb', '1f44d-1f3fc', '1f44d-1f3fd', '1f44d-1f3fe', '1f44d-1f3ff'],
+    'порядок тонов — от светлого к тёмному, как в Unicode',
+  );
+
+  // А в каталоге ОТРИСОВКИ они обязаны лежать россыпью: в отправленном
+  // сообщении хранится именно тоновый символ, и показать его нужно им же, а
+  // не базовым 👍 другого цвета.
+  const catalog = await request('/api/emoji/catalog', { token: viewer });
+  const toned = catalog.data.filter((c) => String(c.unicode_key || '').startsWith('1f44d'));
+  assert.equal(toned.length, 6, 'каталог отрисовки схлопывать тона не имеет права');
+});
+
 test('account deletion clears dependent records and transfers group ownership', () => {
   const deletedId = createUser('deleted_user');
   const survivorId = createUser('surviving_user');

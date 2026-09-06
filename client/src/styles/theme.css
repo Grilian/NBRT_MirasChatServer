@@ -2040,6 +2040,17 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   outline: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);
 }
+/* Уголок у смайликов, под которыми спрятаны тона кожи: без него удержание —
+   скрытая возможность, о которой никто не догадается. Треугольник в углу, а
+   не значок рядом: карточка размером с сам смайлик, и любая добавка рядом
+   сдвинула бы сетку. */
+.emoji-cell.has-tones { position: relative; }
+.emoji-cell.has-tones::after {
+  content: ''; position: absolute; right: 3px; bottom: 3px; width: 0; height: 0;
+  border-left: 4px solid transparent; border-bottom: 4px solid var(--ink-faint);
+  opacity: .55; border-radius: 1px;
+}
+.emoji-cell.has-tones:hover::after { opacity: 1; }
 .emoji-empty { grid-column: 1 / -1; padding: 18px 10px; text-align: center; font-size: 13px; color: var(--ink-faint); }
 
 /* ===== Всплывающие уведомления ===== */
@@ -2560,6 +2571,16 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
   min-width: 210px; padding: 8px 10px; border: 1px solid var(--line);
   border-radius: var(--radius-sm); background: var(--paper-raised); color: var(--ink);
 }
+/* Поля нового набора появляются в том же ряду, что и выбор цели импорта, —
+   на всю ширину, чтобы не сжимать кнопку выбора файла до нечитаемой. */
+.sa-emoji-new-pack { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+.sa-emoji-new-pack input,
+.sa-emoji-new-pack select {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper-raised); color: var(--ink);
+}
+.sa-emoji-new-pack input { flex: 1; min-width: 140px; }
+
 .sa-emoji-asset-packs { display: grid; gap: 6px; margin-top: 10px; }
 .sa-emoji-asset-pack { display: flex; align-items: stretch; gap: 6px; }
 .sa-emoji-asset-pack-activate {

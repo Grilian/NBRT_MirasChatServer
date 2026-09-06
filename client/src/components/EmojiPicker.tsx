@@ -4,6 +4,11 @@ import { resolveUploadUrl } from '../utils/uploads';
 import { CustomEmoji, DEFAULT_EMOJI_FALLBACK } from '../utils/customEmoji';
 import { PickedCustomEmoji } from './EmojiComposerField';
 import { dismissLayerWithoutUnderlayActivation } from '../utils/dismissLayer';
+import EmojiVariantPopup from './EmojiVariantPopup';
+
+// Столько же, сколько удержание в переписке и в сетке смайликов админки:
+// жест один и тот же, и разное время в разных местах читалось бы как сбой.
+const TONE_LONG_PRESS_MS = 260;
 
 export interface EmojiPack {
   id: number;
@@ -65,6 +70,24 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
   const [packs, setPacks] = useState<EmojiPack[]>(packsOverride || cachedPacks || []);
   const [activePack, setActivePack] = useState(0);
   const [search, setSearch] = useState('');
+  // Выбор тона кожи: сервер схлопнул вариации под базовую карточку, и добраться
+  // до них можно удержанием (телефон) или правым кликом (ПК). Ничего не
+  // выбирать — нормальный исход: обычный тап по-прежнему вставляет базовый.
+  const [tonePopup, setTonePopup] = useState<{ item: CustomEmoji; anchorRect: DOMRect } | null>(null);
+  const toneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toneFiredRef = useRef(false);
+
+  const openTones = (item: CustomEmoji, target: HTMLElement) => {
+    if (!item.tones?.length) return;
+    setTonePopup({ item, anchorRect: target.getBoundingClientRect() });
+  };
+
+  const cancelToneTimer = () => {
+    if (toneTimerRef.current) clearTimeout(toneTimerRef.current);
+    toneTimerRef.current = null;
+  };
+
+  useEffect(() => cancelToneTimer, []);
   const [loading, setLoading] = useState(!packsOverride && !cachedPacks);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -186,10 +209,38 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
           <button
             key={`c${item.id}`}
             type="button"
-            className={'emoji-cell' + (selectedCustomEmoji.includes(selectionToken) ? ' is-selected' : '')}
+            className={'emoji-cell'
+              + (selectedCustomEmoji.includes(selectionToken) ? ' is-selected' : '')
+              + (item.tones?.length ? ' has-tones' : '')}
             aria-pressed={selectedCustomEmoji.includes(selectionToken)}
-            title={`:${item.name}:`}
+            title={item.tones?.length ? `:${item.name}: — удержание для выбора тона` : `:${item.name}:`}
             onMouseDown={(e) => e.preventDefault()}
+            onContextMenu={(e) => {
+              if (!item.tones?.length) return;
+              e.preventDefault();
+              openTones(item, e.currentTarget);
+            }}
+            onTouchStart={(e) => {
+              if (!item.tones?.length) return;
+              const target = e.currentTarget;
+              toneFiredRef.current = false;
+              cancelToneTimer();
+              toneTimerRef.current = setTimeout(() => {
+                toneFiredRef.current = true;
+                openTones(item, target);
+              }, TONE_LONG_PRESS_MS);
+            }}
+            // Палец поехал — это прокрутка сетки, а не удержание: до нижних
+            // рядов иначе было бы не добраться.
+            onTouchMove={cancelToneTimer}
+            onTouchEnd={(e) => {
+              cancelToneTimer();
+              // Удержание уже открыло попап — гасим синтетический click, иначе
+              // он вставил бы базовый смайлик поверх только что открытого
+              // выбора (та же ловушка, что и с меню сообщения в переписке).
+              if (toneFiredRef.current) e.preventDefault();
+            }}
+            onTouchCancel={cancelToneTimer}
             // В сообщение всё равно уходит код, а не картинка — формат хранения
             // переписки не меняется. Картинка нужна только полю ввода, чтобы
             // показать человеку смайлик вместо технического :name:.
@@ -208,6 +259,34 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
           </button>
           );
         })}
+        {tonePopup && (
+          <EmojiVariantPopup
+            options={(tonePopup.item.tones || []).map((tone) => ({
+              key: tone.unicode_key,
+              label: tone.unicode || tone.fallback,
+              filePath: tone.file_path,
+            }))}
+            currentFilePath={tonePopup.item.file_path}
+            anchorRect={tonePopup.anchorRect}
+            ariaLabel="Выбор тона кожи"
+            onDismiss={() => setTonePopup(null)}
+            onPick={(unicodeKey) => {
+              const tone = tonePopup.item.tones?.find((t) => t.unicode_key === unicodeKey);
+              setTonePopup(null);
+              if (!tone) return;
+              // В сообщение уходит сам тоновый символ, как и у базового: тон —
+              // это отдельный Unicode-смайлик, а не оформление, и ссылаться на
+              // строку каталога тут незачем.
+              onPick({
+                name: tonePopup.item.name,
+                filePath: tone.file_path,
+                fallback: tone.fallback || DEFAULT_EMOJI_FALLBACK,
+                token: tone.unicode || tone.fallback || DEFAULT_EMOJI_FALLBACK,
+                unicodeKey: tone.unicode_key,
+              });
+            }}
+          />
+        )}
         {/* Показываем и то, что осталось от текстового резерва после фильтра
             дублей выше (см. customFallbacks) — не как запасной вариант «на
             крайний случай», а как полноправную часть выдачи: у новой

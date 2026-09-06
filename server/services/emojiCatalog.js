@@ -50,6 +50,31 @@ const emojiFromUnicodeKey = (key) => {
 
 const internalNameFromUnicodeKey = (key) => `u_${key.replace(/-/g, '_')}`;
 
+// Модификаторы тона кожи (Fitzpatrick, U+1F3FB…U+1F3FF). В ключе они идут
+// отдельными сегментами: `1f44d-1f3fc` — 👍 среднего тона, а у «держатся за
+// руки» их бывает сразу два (`1f9d1-1f3fb-200d-1f91d-200d-1f9d1-1f3fc`).
+const SKIN_TONE_KEYS = new Set(['1f3fb', '1f3fc', '1f3fd', '1f3fe', '1f3ff']);
+
+/**
+ * Ключ того же смайлика без тона кожи — то есть его «базовая» версия.
+ * `null`, если тона нет вовсе: в панели ВЫБОРА тоновые вариации не должны
+ * лежать отдельными карточками рядом с базовой (их ровно половина каталога —
+ * 1869 из 3770, а в разделе «Люди и тело» 1864 из 2251). В каталоге ОТРИСОВКИ
+ * они, разумеется, остаются: в отправленном сообщении лежит именно тоновый
+ * символ, и показать его нужно им же, а не базовым.
+ */
+const skinToneBaseKey = (unicodeKey) => {
+  const parts = String(unicodeKey || '').split('-');
+  const withoutTone = parts.filter((part) => !SKIN_TONE_KEYS.has(part));
+  return withoutTone.length && withoutTone.length !== parts.length ? withoutTone.join('-') : null;
+};
+
+/** Порядок тонов — как в Unicode, от светлого к тёмному. */
+const skinToneIndex = (unicodeKey) => {
+  const found = String(unicodeKey || '').split('-').find((part) => SKIN_TONE_KEYS.has(part));
+  return found ? [...SKIN_TONE_KEYS].indexOf(found) : -1;
+};
+
 const structurePackKey = (group) => `unicode:${String(group).trim().toLowerCase().replace(/[^a-z0-9а-яё]+/gi, '-')}`;
 
 function ensureCategory(db, groupName, preferredPosition = null) {
@@ -256,6 +281,8 @@ module.exports = {
   unicodeKeyFromFilename,
   emojiFromUnicodeKey,
   internalNameFromUnicodeKey,
+  skinToneBaseKey,
+  skinToneIndex,
   ensureLogicalItem,
   listAssetPacks,
   activeAssetPack,
