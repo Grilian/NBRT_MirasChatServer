@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import EmojiPicker from './EmojiPicker';
 
@@ -57,6 +57,90 @@ test('обычный тап по карточке по-прежнему вста
   fireEvent.click(screen.getByRole('button', { name: /:u_1f44d:/ }));
   expect(picked).toHaveLength(1);
   expect(picked[0].token).toBe('👍');
+});
+
+// Регрессия 1.11.16: удержание залипало общим на все ячейки флагом, и
+// preventDefault на touchend НАВСЕГДА глушил клик по остальным смайликам —
+// на телефоне панель просто переставала отзываться. Проверяем не «попап
+// открылся», а именно то, что решает судьбу тапа: заглушён ли touchend.
+const touch = (el: Element, type: 'touchStart' | 'touchEnd' | 'touchMove', x = 5, y = 5) => {
+  const event = new Event(type.toLowerCase(), { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'touches', {
+    value: type === 'touchEnd' ? [] : [{ clientX: x, clientY: y }],
+  });
+  Object.defineProperty(event, 'changedTouches', { value: [{ clientX: x, clientY: y }] });
+  el.dispatchEvent(event);
+  return event;
+};
+
+test('после удержания обычные смайлики остаются нажимаемыми', () => {
+  jest.useFakeTimers();
+  const picked: any[] = [];
+  render(
+    <EmojiPicker
+      embedded
+      packsOverride={[{
+        id: 1,
+        name: 'Смешанный',
+        emoji: [],
+        custom: [
+          packWithTones[0].custom[0],
+          { id: 20, name: 'u_1f355', file_path: '/uploads/emoji/p.webp', fallback: '🍕', unicode_key: '1f355' },
+        ],
+      }]}
+      onPick={(e) => picked.push(e)}
+      onClose={() => {}}
+    />,
+  );
+
+  const toned = screen.getByRole('button', { name: /:u_1f44d:/ });
+  const plain = screen.getByRole('button', { name: /:u_1f355:/ });
+
+  // Обычный смайлик отзывается до всего.
+  expect(touch(plain, 'touchStart') && touch(plain, 'touchEnd').defaultPrevented).toBe(false);
+
+  // Удержание на смайлике с тонами: клик гасится — и это правильно, иначе
+  // поверх открытого выбора вставился бы базовый.
+  touch(toned, 'touchStart');
+  act(() => { jest.advanceTimersByTime(300); });
+  expect(touch(toned, 'touchEnd').defaultPrevented).toBe(true);
+
+  // Закрываем выбор. Пока он открыт, первое касание мимо штатно уходит на
+  // закрытие и до смайлика под ним не доходит — это общее правило всех
+  // всплывающих поверхностей приложения, а не наша поломка.
+  act(() => { fireEvent.keyDown(window, { key: 'Escape' }); });
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+  // А вот теперь обычный смайлик обязан отзываться. Именно это ломалось:
+  // залипший флаг глушил его навсегда.
+  touch(plain, 'touchStart');
+  expect(touch(plain, 'touchEnd').defaultPrevented).toBe(false);
+  touch(plain, 'touchStart');
+  expect(touch(plain, 'touchEnd').defaultPrevented).toBe(false);
+
+  jest.useRealTimers();
+});
+
+test('дрожание пальца удержание не отменяет, а настоящая прокрутка — отменяет', () => {
+  jest.useFakeTimers();
+  render(<EmojiPicker embedded packsOverride={packWithTones} onPick={() => {}} onClose={() => {}} />);
+  const cell = screen.getByRole('button', { name: /:u_1f44d:/ });
+
+  // 3 px — это Android шлёт touchmove от неподвижного пальца. Раньше любое
+  // движение отменяло жест, и удержание не срабатывало вовсе.
+  touch(cell, 'touchStart', 5, 5);
+  touch(cell, 'touchMove', 8, 7);
+  act(() => { jest.advanceTimersByTime(300); });
+  expect(touch(cell, 'touchEnd').defaultPrevented).toBe(true);
+  act(() => { fireEvent.keyDown(window, { key: 'Escape' }); });
+
+  // 40 px — это уже прокрутка сетки: жест отменяется, тап проходит как обычно.
+  touch(cell, 'touchStart', 5, 5);
+  touch(cell, 'touchMove', 5, 45);
+  act(() => { jest.advanceTimersByTime(300); });
+  expect(touch(cell, 'touchEnd').defaultPrevented).toBe(false);
+
+  jest.useRealTimers();
 });
 
 test('у смайлика без тонов выбора не появляется вовсе', () => {

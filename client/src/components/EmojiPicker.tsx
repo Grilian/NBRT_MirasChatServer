@@ -10,6 +10,11 @@ import EmojiVariantPopup from './EmojiVariantPopup';
 // жест один и тот же, и разное время в разных местах читалось бы как сбой.
 const TONE_LONG_PRESS_MS = 260;
 
+// Android шлёт touchmove от дрожания неподвижного пальца, поэтому отменять
+// удержание по ЛЮБОМУ движению нельзя — иначе оно не срабатывает вовсе. Тот
+// же порог, что у удержания в списке чатов.
+const TONE_MOVE_TOLERANCE_PX = 10;
+
 export interface EmojiPack {
   id: number;
   name: string;
@@ -75,7 +80,12 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
   // выбирать — нормальный исход: обычный тап по-прежнему вставляет базовый.
   const [tonePopup, setTonePopup] = useState<{ item: CustomEmoji; anchorRect: DOMRect } | null>(null);
   const toneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const toneFiredRef = useRef(false);
+  // Состояние ОДНОГО касания целиком, а не отдельный флаг «сработало».
+  // Отдельный флаг был общим на все ячейки и сбрасывался только у тех, что с
+  // тонами: после первого же удержания он залипал в true и preventDefault на
+  // touchend навсегда глушил клик по ВСЕМ остальным смайликам. Объект живёт
+  // ровно от touchstart до touchend, поэтому залипать нечему.
+  const toneGestureRef = useRef<{ id: number; x: number; y: number; fired: boolean; moved: boolean } | null>(null);
 
   const openTones = (item: CustomEmoji, target: HTMLElement) => {
     if (!item.tones?.length) return;
@@ -216,31 +226,56 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
             title={item.tones?.length ? `:${item.name}: — удержание для выбора тона` : `:${item.name}:`}
             onMouseDown={(e) => e.preventDefault()}
             onContextMenu={(e) => {
-              if (!item.tones?.length) return;
+              // Гасим всегда: на Android это системное меню выделения, которое
+              // лезет поверх нашего выбора тона. А открываем только когда
+              // касания нет вовсе — то есть по правому клику мышью. Во время
+              // касания за открытие отвечает таймер удержания, и делать это
+              // дважды значит открыть попап и тут же закрыть его.
               e.preventDefault();
+              if (toneGestureRef.current) return;
+              if (!item.tones?.length) return;
               openTones(item, e.currentTarget);
             }}
             onTouchStart={(e) => {
+              const point = e.touches[0];
+              // Жест заводится на ЛЮБОЙ ячейке, даже без тонов: именно он
+              // решает на touchend, гасить ли клик, и стоит его не завести —
+              // решение будет принято по чужому, давно отработавшему касанию.
+              toneGestureRef.current = {
+                id: item.id, x: point?.clientX ?? 0, y: point?.clientY ?? 0, fired: false, moved: false,
+              };
+              cancelToneTimer();
               if (!item.tones?.length) return;
               const target = e.currentTarget;
-              toneFiredRef.current = false;
-              cancelToneTimer();
               toneTimerRef.current = setTimeout(() => {
-                toneFiredRef.current = true;
+                const gesture = toneGestureRef.current;
+                if (!gesture || gesture.id !== item.id || gesture.moved) return;
+                gesture.fired = true;
                 openTones(item, target);
               }, TONE_LONG_PRESS_MS);
             }}
-            // Палец поехал — это прокрутка сетки, а не удержание: до нижних
-            // рядов иначе было бы не добраться.
-            onTouchMove={cancelToneTimer}
+            onTouchMove={(e) => {
+              const gesture = toneGestureRef.current;
+              if (!gesture) return;
+              const point = e.touches[0];
+              if (!point) return;
+              // Порог, а не любое движение: Android шлёт touchmove от дрожания
+              // неподвижного пальца, и без порога удержание не срабатывает.
+              if (Math.abs(point.clientX - gesture.x) <= TONE_MOVE_TOLERANCE_PX
+                && Math.abs(point.clientY - gesture.y) <= TONE_MOVE_TOLERANCE_PX) return;
+              gesture.moved = true;
+              cancelToneTimer();
+            }}
             onTouchEnd={(e) => {
               cancelToneTimer();
-              // Удержание уже открыло попап — гасим синтетический click, иначе
-              // он вставил бы базовый смайлик поверх только что открытого
-              // выбора (та же ловушка, что и с меню сообщения в переписке).
-              if (toneFiredRef.current) e.preventDefault();
+              const gesture = toneGestureRef.current;
+              toneGestureRef.current = null;
+              // Гасим синтетический click ТОЛЬКО если удержание сработало на
+              // этой же ячейке: иначе он вставил бы базовый смайлик поверх
+              // только что открытого выбора.
+              if (gesture?.fired && gesture.id === item.id) e.preventDefault();
             }}
-            onTouchCancel={cancelToneTimer}
+            onTouchCancel={() => { cancelToneTimer(); toneGestureRef.current = null; }}
             // В сообщение всё равно уходит код, а не картинка — формат хранения
             // переписки не меняется. Картинка нужна только полю ввода, чтобы
             // показать человеку смайлик вместо технического :name:.

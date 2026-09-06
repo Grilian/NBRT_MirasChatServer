@@ -2044,6 +2044,10 @@ button { transition: background var(--ease), color var(--ease), opacity var(--ea
    скрытая возможность, о которой никто не догадается. Треугольник в углу, а
    не значок рядом: карточка размером с сам смайлик, и любая добавка рядом
    сдвинула бы сетку. */
+/* Удержание на смайлике — вход в выбор тона, а браузер на тот же жест
+   начинает выделять текст и показывает «лупу» на Android поверх нашего
+   попапа. Ровно та же причина, по которой выделение отключено в списке чатов. */
+.emoji-grid { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .emoji-cell.has-tones { position: relative; }
 .emoji-cell.has-tones::after {
   content: ''; position: absolute; right: 3px; bottom: 3px; width: 0; height: 0;
