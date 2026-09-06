@@ -15,6 +15,19 @@ test('имена одиночных и составных файлов прив�
   assert.equal(emojiFromUnicodeKey('1f1e6-1f1e8'), '🇦🇨');
 });
 
+test('клавишные смайлики с ASCII в составе разбираются, одиночный ASCII — нет', () => {
+  // Из набора Apple такие файлы молча выпадали: отсечка «код < 0x80» была
+  // общей, а у # * и цифр 0–9 первый код именно ASCII.
+  assert.equal(unicodeKeyFromFilename('Apple/U+0023-U+FE0F-U+20E3.webp'), '23-fe0f-20e3');
+  assert.equal(unicodeKeyFromFilename('Apple/U+0037-U+FE0F-U+20E3.webp'), '37-fe0f-20e3');
+  assert.equal(emojiFromUnicodeKey('23-fe0f-20e3'), '#️⃣');
+  assert.equal(emojiFromUnicodeKey('37-fe0f-20e3'), '7️⃣');
+
+  // Одиночный ASCII по-прежнему отвергается: `u_12` — это имя, а не U+0012.
+  assert.equal(normalizeUnicodeKey('12'), null);
+  assert.equal(unicodeKeyFromFilename('u_41.webp'), null);
+});
+
 test('emoji-test.txt превращается в структуру групп и порядка', () => {
   const source = [
     '# group: Smileys & Emotion',

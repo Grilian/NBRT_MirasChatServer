@@ -23,7 +23,13 @@ const normalizeUnicodeKey = (raw) => {
     .filter(Boolean);
   if (!parts.length || parts.some((part) => !/^[0-9a-f]{2,6}$/.test(part))) return null;
   const points = parts.map((part) => Number.parseInt(part, 16));
-  if (points.some((point) => point < 0x80 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff))) return null;
+  if (points.some((point) => point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff))) return null;
+  // Отсечка ASCII нужна только для ОДИНОЧНОГО кода: `u_12` — это почти
+  // наверняка просто имя, а не символ U+0012. В составной последовательности
+  // ASCII законен: клавишные смайлики строятся как цифра + FE0F + 20E3
+  // (`U+0023-U+FE0F-U+20E3` → #️⃣). Пока отсечка была общей, из набора Apple
+  // молча выпадали все 12 таких файлов — # * и 0–9.
+  if (points.length === 1 && points[0] < 0x80) return null;
   return points.map((point) => point.toString(16)).join('-');
 };
 
