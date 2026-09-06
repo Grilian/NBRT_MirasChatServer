@@ -1,0 +1,678 @@
+From dd095f2423103c80fef0df1968678a40545c7473 Mon Sep 17 00:00:00 2001
+From: CaGrizzz <ca@grizzz.ru>
+Date: Sat, 5 Sep 2026 17:15:04 +0000
+Subject: [PATCH] =?UTF-8?q?feat:=20=D1=84=D1=83=D0=BD=D0=B4=D0=B0=D0=BC?=
+ =?UTF-8?q?=D0=B5=D0=BD=D1=82=20=D0=B2=D1=8B=D0=B1=D0=BE=D1=80=D0=B0=20?=
+ =?UTF-8?q?=D0=BF=D0=B0=D0=BA=D0=B0=20=D0=BE=D1=84=D0=BE=D1=80=D0=BC=D0=BB?=
+ =?UTF-8?q?=D0=B5=D0=BD=D0=B8=D1=8F=20=D1=81=D0=BC=D0=B0=D0=B9=D0=BB=D0=B8?=
+ =?UTF-8?q?=D0=BA=D0=B0=20(persist=20+=20=D1=80=D0=B5=D0=BD=D0=B4=D0=B5?=
+ =?UTF-8?q?=D1=80),=20=D0=B7=D0=B0=D0=BA=D1=80=D1=8B=D1=82=20=D1=81=D1=82?=
+ =?UTF-8?q?=D0=B0=D1=80=D1=8B=D0=B9=20=D1=81=D0=BF=D0=BE=D1=81=D0=BE=D0=B1?=
+ =?UTF-8?q?=20=D1=81=D0=BE=D0=B7=D0=B4=D0=B0=D0=BD=D0=B8=D1=8F=20=D0=B8?=
+ =?UTF-8?q?=D0=BC=D0=B5=D0=BD=D0=BD=D1=8B=D1=85=20=D1=81=D0=BC=D0=B0=D0=B9?=
+ =?UTF-8?q?=D0=BB=D0=B8=D0=BA=D0=BE=D0=B2?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+По итогам уточнения задачи: попап выбора пака (Apple/Google Fonts и т.п.) в
+композере должен реально сохранять выбор — его обязаны видеть все участники
+переписки, а не только сам отправитель. Раз в сообщении хранится обычный
+Unicode-символ без привязки к паку, единственный честный способ сохранить
+выбор — расширить уже существующий механизм :code: (тот же, что несёт
+кастомные :name:-смайлики), а не изобретать новый формат хранения сообщений.
+
+Также, по отдельному уточнению: старая система именных смайликов (раздел
+«+ Картинками»/«+ Символом» в админке, :name: с придуманным вручную именем)
+изначально не должна была пережить переход на новую Unicode-систему — по
+какой-то причине осталась работать параллельно. В этом коммите закрыт вход
+в неё: новые именные смайлики через админку больше не создаются.
+
+1) client/src/pages/SuperAdminApp.tsx — из EmojiPacksPanel убраны форма
+   создания нового пака и обе формы добавления элементов («+ Картинками» —
+   загрузка с придуманным именем, «+ Символом» — россыпь голых Unicode).
+   Раздел переименован в «Ручные паки (устаревшие)» с пояснением, что новые
+   смайлики через него не добавляются — только просмотр, переименование,
+   вкл/выкл и удаление того, что осталось с прежних времён (чтобы можно было
+   разобрать уже накопившийся там мусор вроде случайно созданных тестовых
+   паков). Функции uploadCustom/addUnicode/create удалены как мёртвый код.
+   Серверные ручки (POST /admin, /admin/:id/custom, /admin/:id/unicode)
+   намеренно не тронуты: старые данные должны продолжать открываться и
+   рендериться, удалять саму возможность физически (а не просто скрывать
+   кнопку) в этом коммите не стали — риск для уже отправленных сообщений
+   выше, чем польза.
+
+2) Новый формат кода для явного выбора пака — e~<unicode_key>~<packKey>,
+   тот же :...: -механизм, что и у обычных кастомных смайликов, только имя
+   составное вместо человеческого. '~' не пересекается ни с unicode_key
+   (шестнадцатеричные коды и дефисы для флагов/ZWJ-последовательностей), ни
+   с ключом пака (латиница/цифры/дефис/подчёркивание, нормализуется на
+   сервере при импорте ZIP) — разбирается однозначно.
+
+   server/routes/emoji.js — variantsByItem(): все ВКЛЮЧЁННЫЕ (не только
+   активное) оформления unicode-элемента одним батч-запросом на всю выдачу,
+   без N+1. Поле variants добавлено в GET /emoji (что можно вставить сейчас —
+   picker) и в GET /emoji/catalog (чем рендерить уже отправленное — иначе
+   выбор пака был бы виден только автору, пока сообщение не перезагрузят
+   с нуля). Присутствует только когда у элемента 2+ живых оформления —
+   не раздувает выдачу для обычных, ещё не продублированных смайликов.
+
+   client/src/utils/customEmoji.ts — buildEmojiMap кладёт составные ключи в
+   ту же плоскую карту, что и обычные :name: — рендер, обратная сборка текста
+   поля ввода и toPlainText не менялись вообще, они уже искали по имени в
+   этой карте. Отдельно: если выбранный пак с тех пор пропал (админ его
+   удалил), unicodeDefaults откатывает на актуальное оформление того же
+   unicode_key по умолчанию, а не показывает технический код как текст —
+   это НЕ то же самое, что поведение для настоящих кастомных :name: (там
+   неизвестный код сознательно остаётся текстом, см. комментарий в файле);
+   для машинного e~-кода показывать пользователю сырую строку было бы хуже,
+   чем откатиться на любую живую картинку того же смайлика.
+
+Проверено: 104/104 серверных теста (было 103, +1 новый — variants с двумя
+наборами на один ключ и подтверждение отсутствия поля при единственном
+наборе), прогнано 2× подряд без падений. 167/167 клиентских (было 162,
++5 новых на весь жизненный цикл explicit-pack-кода: рендер выбранного,
+рендер по умолчанию без выбора, откат при исчезновении пака, тот же откат
+в toPlainText, честный текст-как-есть для полностью неизвестного ключа).
+tsc --noEmit и production build — чисто.
+
+Не входит в этот коммит: сам попап выбора пака в композере (UI) — данные и
+рендер уже готовы и протестированы, but до этого коммита ничего в
+интерфейсе человека этим кодом воспользоваться ещё не может.
+---
+ client/src/components/EmojiComposerField.tsx |   2 +-
+ client/src/pages/SuperAdminApp.tsx           | 104 +++----------------
+ client/src/utils/customEmoji.test.tsx        |  56 +++++++++-
+ client/src/utils/customEmoji.ts              |  82 +++++++++++++--
+ server/routes/emoji.js                       |  51 ++++++++-
+ server/tests/regressions.test.js             |  64 ++++++++++++
+ 6 files changed, 252 insertions(+), 107 deletions(-)
+
+diff --git a/client/src/components/EmojiComposerField.tsx b/client/src/components/EmojiComposerField.tsx
+index 3b8efdd..e3642cf 100644
+--- a/client/src/components/EmojiComposerField.tsx
++++ b/client/src/components/EmojiComposerField.tsx
+@@ -69,7 +69,7 @@ function restoreRange(box: HTMLDivElement, saved: SavedDomSelection | null): Ran
+ // Код, только что дописанный перед курсором. В отличие от общего SHORTCODE
+ // якорится на конец строки: превращаем в картинку ровно то, что человек сейчас
+ // набрал, а не первый попавшийся код где-то раньше в тексте.
+-const TYPED_SHORTCODE = /:([a-z0-9_]{2,128}):$/;
++const TYPED_SHORTCODE = /:([a-z0-9_~-]{2,128}):$/;
+ 
+ const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+ 
+diff --git a/client/src/pages/SuperAdminApp.tsx b/client/src/pages/SuperAdminApp.tsx
+index 9d8974a..274cb59 100644
+--- a/client/src/pages/SuperAdminApp.tsx
++++ b/client/src/pages/SuperAdminApp.tsx
+@@ -1660,11 +1660,9 @@ function EmojiPacksPanel() {
+   const [system, setSystem] = useState<EmojiSystemState | null>(null);
+   const [error, setError] = useState('');
+   const [notice, setNotice] = useState('');
+-  const [newName, setNewName] = useState('');
+   const [savingId, setSavingId] = useState<number | null>(null);
+   const [openPack, setOpenPack] = useState<number | null>(null);
+   const [editing, setEditing] = useState<EmojiItem | null>(null);
+-  const [newEmoji, setNewEmoji] = useState('');
+   const [assetPreset, setAssetPreset] = useState<'apple' | 'animation' | 'google-fonts'>('apple');
+   const [systemBusy, setSystemBusy] = useState('');
+ 
+@@ -1785,20 +1783,6 @@ function EmojiPacksPanel() {
+     }
+   };
+ 
+-  const create = async (e: React.FormEvent) => {
+-    e.preventDefault();
+-    const name = newName.trim();
+-    if (!name) return;
+-    try {
+-      const { data } = await superAdminApi.post('/emoji/admin', { name, emoji: '' });
+-      apply(data);
+-      setNewName('');
+-      setError('');
+-    } catch (err: any) {
+-      setError(err.response?.data?.error || 'Не удалось создать пак');
+-    }
+-  };
+-
+   const update = async (id: number, patch: Record<string, unknown>) => {
+     setSavingId(id);
+     try {
+@@ -1812,47 +1796,6 @@ function EmojiPacksPanel() {
+     }
+   };
+ 
+-  // Загрузка набором: имя выводится из имени файла, без вопроса на каждый —
+-  // набор из полусотни картинок иначе превращается в полсотни диалогов.
+-  const uploadCustom = async (packId: number, files: File[]) => {
+-    setSavingId(packId);
+-    const failed: string[] = [];
+-    let latest: EmojiPack[] | null = null;
+-    // Последовательно, а не пачкой: имена проверяются на уникальность в БД, и
+-    // параллельные загрузки одинаково названных файлов гонялись бы за именем.
+-    for (const file of files) {
+-      const name = file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 32);
+-      const form = new FormData();
+-      form.append('image', file);
+-      form.append('name', name);
+-      try {
+-        const { data } = await superAdminApi.post(`/emoji/admin/${packId}/custom`, form);
+-        latest = data;
+-      } catch (err: any) {
+-        failed.push(`${file.name}: ${err.response?.data?.error || 'ошибка загрузки'}`);
+-      }
+-    }
+-    if (latest) apply(latest);
+-    setError(failed.length ? `Не загружено (${failed.length}): ${failed.join('; ')}` : '');
+-    setSavingId(null);
+-  };
+-
+-  const addUnicode = async (packId: number) => {
+-    const emoji = newEmoji.trim();
+-    if (!emoji) return;
+-    setSavingId(packId);
+-    try {
+-      const { data } = await superAdminApi.post(`/emoji/admin/${packId}/unicode`, { emoji });
+-      apply(data);
+-      setNewEmoji('');
+-      setError('');
+-    } catch (err: any) {
+-      setError(err.response?.data?.error || 'Не удалось добавить');
+-    } finally {
+-      setSavingId(null);
+-    }
+-  };
+-
+   const removePack = async (pack: EmojiPack) => {
+     if (!window.confirm(`Удалить пак «${pack.name}» со всеми смайликами?`)) return;
+     try {
+@@ -1988,7 +1931,13 @@ function EmojiPacksPanel() {
+         </div>
+       </section>
+ 
+-      <h3 className="sa-emoji-categories-title">Категории каталога</h3>
++      <h3 className="sa-emoji-categories-title">Ручные паки (устаревшие)</h3>
++      <p className="sa-hint">
++        Старый способ добавления смайликов — вручную, по одному, с придуманным именем.
++        Новые смайлики через него больше не добавляются: всё новое — только через Unicode-каталог
++        и наборы оформления выше. Здесь можно только посмотреть, что осталось с прежних времён,
++        и убрать ненужное.
++      </p>
+ 
+       <div className="sa-emoji-pack-list" ref={packListRef}>
+         {packOrder.map((pack) => {
+@@ -2021,7 +1970,10 @@ function EmojiPacksPanel() {
+                 <span className="sa-hint">{items.length}</span>
+               </button>
+               <label className="switch" title={pack.enabled ? 'Показывается' : 'Скрыт'}>
+-                <input type="checkbox" checked={pack.enabled} onChange={(e) => update(pack.id, { enabled: e.target.checked })} />
++                <input
++                  type="checkbox" checked={pack.enabled} disabled={savingId === pack.id}
++                  onChange={(e) => update(pack.id, { enabled: e.target.checked })}
++                />
+                 <span className="switch-track"><span className="switch-thumb" /></span>
+               </label>
+             </div>
+@@ -2033,6 +1985,7 @@ function EmojiPacksPanel() {
+                     className="sa-emoji-pack-name"
+                     defaultValue={pack.name}
+                     aria-label="Название пака"
++                    disabled={savingId === pack.id}
+                     onBlur={(e) => { if (e.target.value.trim() && e.target.value !== pack.name) update(pack.id, { name: e.target.value }); }}
+                   />
+                   <button type="button" className="sa-btn-danger" onClick={() => removePack(pack)}>Удалить пак</button>
+@@ -2043,34 +1996,6 @@ function EmojiPacksPanel() {
+                   onOpen={setEditing}
+                   onReorder={(order) => saveOrder(pack.id, order)}
+                 />
+-
+-                <div className="sa-emoji-pack-add">
+-                  <label className="sa-emoji-custom-add">
+-                    <input
+-                      type="file" accept="image/*" multiple style={{ display: 'none' }}
+-                      disabled={savingId === pack.id}
+-                      onChange={(e) => {
+-                        const files = Array.from(e.target.files || []);
+-                        e.target.value = '';
+-                        if (files.length) uploadCustom(pack.id, files);
+-                      }}
+-                    />
+-                    {savingId === pack.id ? 'Загрузка…' : '+ Картинками'}
+-                  </label>
+-                  <div className="sa-emoji-unicode-add">
+-                    <input
+-                      value={newEmoji}
+-                      placeholder="😀"
+-                      maxLength={32}
+-                      aria-label="Системный смайлик"
+-                      onChange={(e) => setNewEmoji(e.target.value)}
+-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addUnicode(pack.id); } }}
+-                    />
+-                    <button type="button" className="sa-btn-ghost" disabled={!newEmoji.trim()} onClick={() => addUnicode(pack.id)}>
+-                      + Символом
+-                    </button>
+-                  </div>
+-                </div>
+               </div>
+             )}
+           </div>
+@@ -2078,11 +2003,6 @@ function EmojiPacksPanel() {
+       })}
+       </div>
+ 
+-      <form onSubmit={create} className="sa-inline-form">
+-        <input type="text" placeholder="Новый пак…" value={newName} onChange={(e) => setNewName(e.target.value)} />
+-        <button type="submit" className="btn-primary">Добавить</button>
+-      </form>
+-
+       {editing && (
+         <EmojiItemModal
+           item={editing}
+diff --git a/client/src/utils/customEmoji.test.tsx b/client/src/utils/customEmoji.test.tsx
+index e63be37..272f8ba 100644
+--- a/client/src/utils/customEmoji.test.tsx
++++ b/client/src/utils/customEmoji.test.tsx
+@@ -1,7 +1,7 @@
+ import React from 'react';
+ import { fireEvent, render, screen } from '@testing-library/react';
+ import '@testing-library/jest-dom';
+-import { buildEmojiMap, getEmojiSuggestions, renderMessageText } from './customEmoji';
++import { buildEmojiMap, getEmojiSuggestions, renderMessageText, toPlainText } from './customEmoji';
+ 
+ describe('renderMessageText', () => {
+   test('makes http and www URLs clickable and keeps sentence punctuation outside', () => {
+@@ -79,3 +79,57 @@ describe('renderMessageText', () => {
+     expect(container.querySelector('.custom-emoji-fallback')).toHaveTextContent('🐶');
+   });
+ });
++
++// Явный выбор пака при отправке (см. попап выбора «Apple/Google Fonts» в
++// композере): сообщение по-прежнему хранит короткий код в тексте, но теперь
++// это не user-defined :name:, а машинный e~<unicode_key>~<packKey> — тот же
++// плоский механизм подстановки, что и для обычных кастомных смайликов.
++describe('выбор конкретного пака оформления (e~<unicode_key>~<packKey>)', () => {
++  const items = [{
++    name: 'u_1f973', file_path: '/uploads/emoji/apple_1f973.webp', fallback: '🥳',
++    unicode_key: '1f973', label: 'partying face',
++    variants: [
++      { packKey: 'apple', packName: 'Apple', role: 'base' as const, filePath: '/uploads/emoji/apple_1f973.webp' },
++      { packKey: 'google-fonts', packName: 'Google Fonts', role: 'base' as const, filePath: '/uploads/emoji/google_1f973.webp' },
++    ],
++  }];
++
++  test('составной код рендерится именно выбранной картинкой пака, а не активной по умолчанию', () => {
++    const map = buildEmojiMap(items);
++    const { container } = render(<div>{renderMessageText(':e~1f973~google-fonts:', map)}</div>);
++
++    const image = container.querySelector('img.custom-emoji');
++    expect(image).toHaveAttribute('src', expect.stringContaining('google_1f973.webp'));
++    expect(image).toHaveAttribute('alt', '🥳');
++  });
++
++  test('без явного выбора (обычный Unicode) используется активный по умолчанию набор', () => {
++    const map = buildEmojiMap(items);
++    const { container } = render(<div>{renderMessageText('Привет 🥳', map)}</div>);
++
++    expect(container.querySelector('img.custom-emoji')).toHaveAttribute(
++      'src', expect.stringContaining('apple_1f973.webp'),
++    );
++  });
++
++  test('если выбранный пак с тех пор пропал, показывается актуальное оформление по умолчанию, а не текст кода', () => {
++    const map = buildEmojiMap(items); // варианта 'telegram-legacy' в каталоге уже нет
++    const { container } = render(<div>{renderMessageText(':e~1f973~telegram-legacy:', map)}</div>);
++
++    expect(screen.queryByText(':e~1f973~telegram-legacy:')).not.toBeInTheDocument();
++    expect(container.querySelector('img.custom-emoji')).toHaveAttribute(
++      'src', expect.stringContaining('apple_1f973.webp'),
++    );
++  });
++
++  test('toPlainText тоже откатывается на символ, а не оставляет технический код', () => {
++    const map = buildEmojiMap(items);
++    expect(toPlainText(':e~1f973~google-fonts:', map)).toBe('🥳');
++    expect(toPlainText(':e~1f973~does-not-exist:', map)).toBe('🥳');
++  });
++
++  test('совсем неизвестный unicode_key в составном коде остаётся текстом как есть', () => {
++    const map = buildEmojiMap(items);
++    expect(toPlainText(':e~ffffff~apple:', map)).toBe(':e~ffffff~apple:');
++  });
++});
+diff --git a/client/src/utils/customEmoji.ts b/client/src/utils/customEmoji.ts
+index a1f012d..0f6036d 100644
+--- a/client/src/utils/customEmoji.ts
++++ b/client/src/utils/customEmoji.ts
+@@ -12,6 +12,16 @@ export interface CustomEmoji {
+   unicode_key?: string | null;
+   label?: string | null;
+   keywords?: string | null;
++  /** Другие живые оформления того же unicode_key — для попапа выбора пака. */
++  variants?: EmojiVariant[];
++}
++
++/** Одно из альтернативных оформлений юникодного смайлика (см. CustomEmoji.variants). */
++export interface EmojiVariant {
++  packKey: string;
++  packName: string;
++  role: 'base' | 'animation';
++  filePath: string;
+ }
+ 
+ /** name → чем его показывать. Плоская карта: в тексте пака нет, только :name:. */
+@@ -29,6 +39,11 @@ interface UnicodeChoice extends EmojiRenderAsset { name: string; token: string }
+ interface TrieNode { children: Map<string, TrieNode>; choice?: UnicodeChoice }
+ const unicodeTries = new WeakMap<CustomEmojiMap, TrieNode>();
+ const unicodeChoices = new WeakMap<CustomEmojiMap, UnicodeChoice[]>();
++// unicode_key → оформление по умолчанию (то, что реально приезжает файлом у
++// самого item.name). Запасной путь для составного кода e~<key>~<pack>, когда
++// именно ЭТОТ пак больше не существует (админ его удалил уже после отправки):
++// показываем актуальную картинку по умолчанию вместо технической строки кода.
++const unicodeDefaults = new WeakMap<CustomEmojiMap, Map<string, EmojiRenderAsset>>();
+ 
+ // Подставляется, когда базовый эмодзи у смайлика не задан. Одно место на весь
+ // клиент — старые записи в БД бэкфиллить не нужно.
+@@ -38,11 +53,13 @@ export const buildEmojiMap = (
+   items: {
+     name: string; file_path: string; animated_path?: string | null; fallback?: string | null;
+     unicode_key?: string | null; label?: string | null; keywords?: string | null;
++    variants?: EmojiVariant[];
+   }[],
+ ): CustomEmojiMap => {
+   const map: CustomEmojiMap = {};
+   const root: TrieNode = { children: new Map() };
+   const choices: UnicodeChoice[] = [];
++  const defaults = new Map<string, EmojiRenderAsset>();
+   for (const item of items) {
+     if (!item?.name || !item.file_path) continue;
+     const asset: EmojiRenderAsset = {
+@@ -54,6 +71,26 @@ export const buildEmojiMap = (
+       keywords: item.keywords || '',
+     };
+     map[item.name] = asset;
++    if (item.unicode_key) defaults.set(item.unicode_key, asset);
++    // Явный выбор пака, сделанный при отправке (см. EmojiPickerPopup),
++    // кладётся в текст сообщения тем же :code:-механизмом, что и обычные
++    // кастомные смайлики — только имя составное: e~<unicode_key>~<packKey>.
++    // Тот же плоский map, тот же поиск по shortcode — ничего в рендере или в
++    // обратной сборке текста поля ввода менять для этого не нужно.
++    if (item.unicode_key && item.variants) {
++      for (const variant of item.variants) {
++        map[emojiVariantToken(item.unicode_key, variant.packKey)] = {
++          filePath: variant.filePath,
++          // У выбора конкретного пака анимации нет: человек явно указал
++          // «покажи вот эту картинку», а не «покажи анимированную версию».
++          animatedPath: variant.role === 'animation' ? variant.filePath : null,
++          fallback: item.fallback || DEFAULT_EMOJI_FALLBACK,
++          unicodeKey: item.unicode_key,
++          label: item.label || '',
++          keywords: item.keywords || '',
++        };
++      }
++    }
+     if (item.unicode_key && item.fallback) {
+       const choice: UnicodeChoice = { ...asset, name: item.name, token: item.fallback };
+       choices.push(choice);
+@@ -68,9 +105,16 @@ export const buildEmojiMap = (
+   }
+   unicodeTries.set(map, root);
+   unicodeChoices.set(map, choices);
++  unicodeDefaults.set(map, defaults);
+   return map;
+ };
+ 
++// Внутреннее имя составного кода: символ '~' не встречается ни в unicode_key
++// (шестнадцатеричные коды и дефисы — для флагов и ZWJ-последовательностей),
++// ни в ключе пака (латиница, цифры, дефис и подчёркивание — нормализуется на
++// сервере при импорте ZIP), поэтому разбирается однозначно.
++export const emojiVariantToken = (unicodeKey: string, packKey: string): string => `e~${unicodeKey}~${packKey}`;
++
+ /**
+  * Если для системного эмодзи загружено изображение с таким fallback, в UI
+  * используем его shortcode. Сам Unicode остаётся резервом: когда каталог ещё
+@@ -78,7 +122,7 @@ export const buildEmojiMap = (
+  * по-прежнему сможет показать исходный символ.
+  */
+ export const preferCustomEmojiToken = (fallback: string, map: CustomEmojiMap): string => {
+-  const shortcode = /^:([a-z0-9_]{2,128}):$/.exec(fallback);
++  const shortcode = /^:([a-z0-9_~-]{2,128}):$/.exec(fallback);
+   if (shortcode) return map[shortcode[1]] ? fallback : DEFAULT_EMOJI_FALLBACK;
+ 
+   const match = Object.entries(map).find(([, item]) => item.fallback === fallback);
+@@ -98,7 +142,7 @@ export const isEmojiAnimationEnabled = (): boolean => animationEnabled;
+ // Тот же формат, что на сервере (routes/emoji.js): только латиница нижнего
+ // регистра, цифры и подчёркивание, от двух символов. Специально узкий, чтобы
+ // не цеплять ни смайлики-двоеточия (":D"), ни порты в ссылках ("host:8080").
+-const SHORTCODE = /:([a-z0-9_]{2,128}):/g;
++const SHORTCODE = /:([a-z0-9_~-]{2,128}):/g;
+ 
+ interface EmojiMatch {
+   start: number;
+@@ -138,12 +182,23 @@ function emojiMatches(text: string, map: CustomEmojiMap): EmojiMatch[] {
+   let index = 0;
+   while (index < text.length) {
+     if (text[index] === ':') {
+-      const shortcode = /^:([a-z0-9_]{2,128}):/.exec(text.slice(index));
+-      const item = shortcode ? map[shortcode[1]] : null;
+-      if (shortcode && item) {
+-        matches.push({ start: index, end: index + shortcode[0].length, name: shortcode[1], token: shortcode[0], item });
+-        index += shortcode[0].length;
+-        continue;
++      const shortcode = /^:([a-z0-9_~-]{2,128}):/.exec(text.slice(index));
++      if (shortcode) {
++        const name = shortcode[1];
++        let item: EmojiRenderAsset | undefined = map[name];
++        // Явный выбор пака (e~<unicode_key>~<packKey>), но конкретно ЭТОТ
++        // пак с тех пор пропал (админ удалил набор или выключил его) — вместо
++        // технической строки кода показываем актуальное оформление того же
++        // unicode_key по умолчанию, а не оставляем код как есть текстом.
++        if (!item && name.startsWith('e~')) {
++          const unicodeKey = name.split('~')[1];
++          item = unicodeKey ? unicodeDefaults.get(map)?.get(unicodeKey) : undefined;
++        }
++        if (item) {
++          matches.push({ start: index, end: index + shortcode[0].length, name, token: shortcode[0], item });
++          index += shortcode[0].length;
++          continue;
++        }
+       }
+     }
+     const unicode = unicodeAt(text, index, map);
+@@ -162,7 +217,7 @@ function emojiMatches(text: string, map: CustomEmojiMap): EmojiMatch[] {
+  * Хвост оборванного кода в конце строки. Обрезка текста по длине не должна
+  * оставлять на виду огрызок вида ":cat" — он уже не станет картинкой.
+  */
+-export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_]{1,128}$/, '');
++export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_~-]{1,128}$/, '');
+ 
+ /** Есть ли в тексте хоть один ИЗВЕСТНЫЙ код — чтобы зря не резать строку. */
+ export const hasCustomEmoji = (text: string, map: CustomEmojiMap): boolean => {
+@@ -434,7 +489,14 @@ const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'TR', 'BLOCKQUOTE', 'H1', 'H2', 'H
+  */
+ export function toPlainText(text: string, map: CustomEmojiMap): string {
+   if (!text) return text;
+-  return text.replace(SHORTCODE, (whole, name) => (map[name] ? map[name].fallback : whole));
++  return text.replace(SHORTCODE, (whole, name) => {
++    if (map[name]) return map[name].fallback;
++    if (name.startsWith('e~')) {
++      const fallback = unicodeDefaults.get(map)?.get(name.split('~')[1])?.fallback;
++      if (fallback) return fallback;
++    }
++    return whole;
++  });
+ }
+ 
+ const RUSSIAN_ALIASES: Record<string, string> = {
+diff --git a/server/routes/emoji.js b/server/routes/emoji.js
+index 50042ea..a5c0d60 100644
+--- a/server/routes/emoji.js
++++ b/server/routes/emoji.js
+@@ -112,6 +112,30 @@ const usageCount = (name) => {
+ const MAX_EMOJI_LENGTH = 32;
+ const MAX_ITEMS_PER_PACK = 10000;
+ 
++// Все живые (включённые) оформления одного юникодного элемента — не только
++// активное. Нужно для попапа выбора пака в композере: человек печатает 😃,
++// видит поверх поля Apple (активный) и, если для этого же ключа загружен ещё
++// и Google Fonts, может явно выбрать его вместо автоматического. Единым
++// запросом на всю выдачу, а не по одному на элемент — иначе на паке из тысяч
++// смайликов это N+1 в чистом виде.
++function variantsByItem(db) {
++  const rows = db.prepare(`
++    SELECT ea.item_id, eap.key AS pack_key, eap.name AS pack_name, eap.role, ea.file_path
++    FROM emoji_assets ea
++    JOIN emoji_asset_packs eap ON eap.id = ea.asset_pack_id
++    WHERE eap.enabled = 1
++    ORDER BY eap.role, eap.position, eap.id
++  `).all();
++  const map = new Map();
++  for (const row of rows) {
++    if (!map.has(row.item_id)) map.set(row.item_id, []);
++    map.get(row.item_id).push({
++      packKey: row.pack_key, packName: row.pack_name, role: row.role, filePath: row.file_path,
++    });
++  }
++  return map;
++}
++
+ function packsWithItems({ onlyEnabled, includeRaw = false }) {
+   const packs = db.prepare(`
+     SELECT id, name, position, enabled FROM emoji_packs
+@@ -124,6 +148,10 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
+             unicode_key, label, keywords
+      FROM emoji_items ORDER BY position, id`
+   ).all();
++  // Считается один раз на всю выдачу и только когда реально нужно: у выдачи
++  // для панели админа (includeRaw) варианты ни к чему — наборы оформления там
++  // уже видны отдельным разделом.
++  const variants = onlyEnabled ? variantsByItem(db) : null;
+   const byPack = new Map();
+   for (const item of items) {
+     if (!byPack.has(item.pack_id)) byPack.set(item.pack_id, { emoji: [], custom: [], all: [] });
+@@ -135,6 +163,11 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
+     // ОДИН список: ни картинкой, ни текстом, — просто исчезал из выдачи.
+     const isImage = !!(item.file_path && item.name);
+     if (isImage) {
++      // Список выбора для попапа — только когда реально есть из чего выбирать
++      // (2+ живых оформления у одного и того же юникодного ключа). Для обычных
++      // картиночных смайликов без unicode_key (старые ручные загрузки) вариантов
++      // не бывает вовсе — там всегда одна картинка на одно имя.
++      const itemVariants = item.unicode_key ? variants?.get(item.id) : null;
+       bucket.custom.push({
+         id: item.id,
+         name: item.name,
+@@ -148,6 +181,7 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
+         unicode_key: item.unicode_key || null,
+         label: item.label || '',
+         keywords: item.keywords || '',
++        ...(itemVariants && itemVariants.length > 1 ? { variants: itemVariants } : {}),
+       });
+     } else {
+       const glyph = item.emoji || item.fallback_emoji;
+@@ -249,14 +283,25 @@ router.get('/', verifyToken, (req, res) => {
+ // нельзя: выключение пака или уборка смайлика тогда переводили бы всю старую
+ // переписку обратно в текст :name:. Поэтому здесь всё картиночное, что когда-
+ // либо существовало, независимо от enabled пака и retired элемента.
++//
++// variants — по той же причине, что и в packsWithItems: явный выбор пака,
++// сделанный при отправке (:e~<ключ>~<пак>:), должен доходить до всех, кто
++// читает переписку, а не только до автора. Без этого поля сообщение с таким
++// кодом рендерилось бы как попало — ни один получатель не смог бы понять,
++// какую конкретно картинку выбрал отправитель.
+ router.get('/catalog', verifyToken, (req, res) => {
+   try {
+-    res.json(db.prepare(`
+-      SELECT name, file_path, animated_path, fallback_emoji AS fallback,
++    const items = db.prepare(`
++      SELECT id, name, file_path, animated_path, fallback_emoji AS fallback,
+              unicode_key, label, keywords
+       FROM emoji_items
+       WHERE name IS NOT NULL AND file_path IS NOT NULL
+-    `).all());
++    `).all();
++    const variants = variantsByItem(db);
++    res.json(items.map(({ id, ...item }) => {
++      const itemVariants = item.unicode_key ? variants.get(id) : null;
++      return itemVariants && itemVariants.length > 1 ? { ...item, variants: itemVariants } : item;
++    }));
+   } catch (e) {
+     res.status(500).json({ error: e.message });
+   }
+diff --git a/server/tests/regressions.test.js b/server/tests/regressions.test.js
+index 98d3968..c9203e1 100644
+--- a/server/tests/regressions.test.js
++++ b/server/tests/regressions.test.js
+@@ -494,6 +494,70 @@ test('юникодный элемент без картинки виден ка
+   assert.deepEqual(pack.emoji, ['😬'], 'элемент без картинки обязан быть виден как сам символ');
+ });
+ 
++test('элемент с картинками из двух наборов несёт variants — для попапа выбора пака в композере', async () => {
++  const admin = superAdminToken();
++  const appleImage = await sharp({
++    create: { width: 8, height: 8, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 1 } },
++  }).png().toBuffer();
++  const googleImage = await sharp({
++    create: { width: 8, height: 8, channels: 4, background: { r: 40, g: 50, b: 60, alpha: 1 } },
++  }).png().toBuffer();
++
++  // Тот же самый ключ (1f973 — 🥳) загружается в оба базовых набора: тот, что
++  // уже сидирован при старте (apple, id=1), и новый (google-fonts).
++  const appleArchive = new AdmZip();
++  appleArchive.addFile('U+1F973.png', appleImage);
++  const appleForm = new FormData();
++  appleForm.append('archive', new Blob([appleArchive.toBuffer()], { type: 'application/zip' }), 'apple.zip');
++  appleForm.append('key', 'apple');
++  appleForm.append('name', 'Apple');
++  appleForm.append('role', 'base');
++  const appleImport = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
++    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: appleForm,
++  });
++  assert.equal(appleImport.status, 200);
++
++  const googleArchive = new AdmZip();
++  googleArchive.addFile('U+1F973.png', googleImage);
++  const googleForm = new FormData();
++  googleForm.append('archive', new Blob([googleArchive.toBuffer()], { type: 'application/zip' }), 'google.zip');
++  googleForm.append('key', 'google-fonts');
++  googleForm.append('name', 'Google Fonts');
++  googleForm.append('role', 'base');
++  const googleImport = await fetch(`${baseUrl}/api/emoji/admin/assets/import`, {
++    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: googleForm,
++  });
++  assert.equal(googleImport.status, 200);
++
++  const list = await request('/api/emoji', { token: tokenFor(createUser('emoji_variants_viewer')) });
++  const item = list.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === '1f973');
++  assert.ok(item, 'элемент 🥳 должен присутствовать в выдаче');
++  assert.ok(Array.isArray(item.variants), 'у элемента с двумя оформлениями обязан быть список variants');
++  assert.equal(item.variants.length, 2);
++  assert.deepEqual(
++    item.variants.map((v) => v.packKey).sort(),
++    ['apple', 'google-fonts'],
++  );
++
++  // А для одного набора — apple, вообще без конкурентов — поля variants нет
++  // вовсе: выбирать не из чего, и раздувать выдачу нечем.
++  const single = db.prepare(`
++    INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES ('Одиночный', 997, 1, ?)
++  `).run(Date.now()).lastInsertRowid;
++  const soloItemId = db.prepare(`
++    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, unicode_key, position)
++    VALUES (?, '', 'u_solo_test', '/uploads/emoji/u_solo_test.webp', '🧊', 'solo-test-key', 0)
++  `).run(single).lastInsertRowid;
++  db.prepare(
++    'INSERT INTO emoji_assets (item_id, asset_pack_id, file_path, created_at) VALUES (?, 1, ?, ?)'
++  ).run(soloItemId, '/uploads/emoji/u_solo_test.webp', Date.now());
++
++  const list2 = await request('/api/emoji', { token: tokenFor(createUser('emoji_variants_viewer_2')) });
++  const soloItem = list2.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === 'solo-test-key');
++  assert.ok(soloItem);
++  assert.equal(soloItem.variants, undefined, 'у элемента с единственным оформлением variants быть не должно');
++});
++
+ test('account deletion clears dependent records and transfers group ownership', () => {
+   const deletedId = createUser('deleted_user');
+   const survivorId = createUser('surviving_user');
+-- 
+2.43.0
+
