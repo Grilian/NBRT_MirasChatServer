@@ -81,16 +81,15 @@ const CHANNEL_ID = 'messages_v2';
  * то есть ровно в том случае, ради которого пуш и нужен.
  */
 async function notifyNewMessage(userId, {
-  chatId, messageId, senderName, chatLabel, forceNotification = false, requiredFeature = null,
+  chatId, messageId, senderName, chatLabel, forceNotification = false,
   threadRootId = null
 }) {
   if (!messaging) return;
 
   try {
     const tokens = db
-      .prepare('SELECT token, capabilities FROM device_tokens WHERE user_id = ?')
+      .prepare('SELECT token FROM device_tokens WHERE user_id = ?')
       .all(userId)
-      .filter((row) => !requiredFeature || String(row.capabilities || '').split(',').includes(requiredFeature))
       .map((row) => row.token);
 
     if (!tokens.length) return;

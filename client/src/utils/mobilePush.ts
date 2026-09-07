@@ -12,7 +12,6 @@ async function registerToken(token: string) {
     await api.post('/devices', {
       token,
       platform: 'android',
-      capabilities: ['threads', 'notification-policy'],
     });
     localStorage.setItem(TOKEN_KEY, token);
   } catch (e) {

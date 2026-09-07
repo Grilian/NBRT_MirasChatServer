@@ -963,7 +963,6 @@ io.on('connection', (socket) => {
           senderName,
           chatLabel,
           forceNotification,
-          requiredFeature: 'threads',
           threadRootId: Number(root.id),
         }, { defer: isUserOnline(userId) });
       }

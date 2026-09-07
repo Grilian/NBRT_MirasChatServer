@@ -125,54 +125,10 @@ test('картинка сообщения ложится в папку отпр�
   );
 });
 
-test('старые файлы переезжают в личные папки, а пути в базе переписываются', () => {
-  const owner = createUser('st_legacy_owner');
-  const mate = createUser('st_legacy_mate');
-  const chatId = `chat_${Math.min(owner, mate)}_${Math.max(owner, mate)}`;
-
-  const legacyImage = putFile(path.join('chat-images', `msg_${owner}_1_aaaa.webp`), 'картинка');
-  const legacyDoc = putFile(path.join('chat-files', `doc_${owner}_1_bbbb.pdf`), 'документ');
-  const legacyAvatar = putFile(path.join('avatars', `user_${owner}_1.jpg`), 'аватар');
-  const legacyBg = putFile(path.join('backgrounds', `bg_${owner}_1.webp`), 'обои');
-  // Файл, на который не ссылается ни одна строка: тоже должен уехать к хозяину,
-  // иначе старый каталог никогда не опустеет.
-  const orphan = putFile(path.join('chat-images', `msg_${owner}_2_cccc.webp`), 'сирота');
-
-  const msgId = Number(db.prepare(
-    'INSERT INTO messages (chat_id, sender_id, text, file_path) VALUES (?, ?, ?, ?)'
-  ).run(chatId, owner, '', legacyImage).lastInsertRowid);
-  // Пересланная копия ссылается на тот же файл — она обязана получить новый путь
-  // тоже, иначе у одного из двух сообщений картинка пропадёт.
-  const forwardedId = Number(db.prepare(
-    'INSERT INTO messages (chat_id, sender_id, text, file_path) VALUES (?, ?, ?, ?)'
-  ).run(chatId, mate, '', legacyImage).lastInsertRowid);
-  db.prepare('INSERT INTO messages (chat_id, sender_id, text, document_path, document_name) VALUES (?, ?, ?, ?, ?)')
-    .run(chatId, owner, '', legacyDoc, 'смета.pdf');
-  db.prepare('UPDATE users SET avatar_path = ?, chat_background_path = ? WHERE id = ?')
-    .run(legacyAvatar, legacyBg, owner);
-
-  const moved = userStorage.migrateLegacyUploads(db);
-
-  const newImage = userStorage.publicPath(owner, 'images', path.basename(legacyImage));
-  assert.equal(db.prepare('SELECT file_path FROM messages WHERE id = ?').get(msgId).file_path, newImage);
-  // Пересылка — тот же файл, тот же владелец: путь общий.
-  assert.equal(db.prepare('SELECT file_path FROM messages WHERE id = ?').get(forwardedId).file_path, newImage);
-  const user = db.prepare('SELECT avatar_path, chat_background_path FROM users WHERE id = ?').get(owner);
-  assert.equal(user.avatar_path, userStorage.publicPath(owner, 'avatar', path.basename(legacyAvatar)));
-  assert.equal(user.chat_background_path, userStorage.publicPath(owner, 'wallpaper', path.basename(legacyBg)));
-
-  // Файлы действительно лежат на новом месте, а старые исчезли.
-  assert.ok(fs.existsSync(userStorage.absoluteFromPublic(newImage)));
-  assert.equal(fs.existsSync(path.join(UPLOADS, 'chat-images', path.basename(legacyImage))), false);
-  assert.ok(fs.existsSync(path.join(userStorage.userDir(owner, 'images'), path.basename(orphan))));
-  assert.ok(moved.images >= 1 && moved.orphans >= 1);
-
-  // Повторный запуск ничего не делает и не ломает: миграция идёт на каждом
-  // старте сервера.
-  const second = userStorage.migrateLegacyUploads(db);
-  assert.equal(second.images + second.files + second.avatar + second.wallpaper + second.orphans, 0);
-  assert.equal(db.prepare('SELECT file_path FROM messages WHERE id = ?').get(msgId).file_path, newImage);
-});
+// Тест переезда со старой раскладки удалён вместе с самой миграцией
+// (07.09.2026): на проде ноль строк со старыми путями, а прогон шёл на каждом
+// старте сервера. Старые пути больше не принимаются и при отправке — см.
+// isValidChatImagePath / isValidChatFilePath.
 
 // ===== Архивация вложения =====
 

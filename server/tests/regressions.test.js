@@ -116,7 +116,6 @@ test('chat unread counter covers only what opening the chat marks read', async (
   const legacy = await request('/api/unread', { token });
   const modern = await request('/api/unread', {
     token,
-    headers: { 'X-Miras-Features': 'threads,notification-policy' },
   });
 
   assert.equal(legacy.response.status, 200);
@@ -128,7 +127,6 @@ test('chat unread counter covers only what opening the chat marks read', async (
   markRead(recipientId, chatId, [rootId]);
   const afterReading = await request('/api/unread', {
     token,
-    headers: { 'X-Miras-Features': 'threads,notification-policy' },
   });
   assert.equal(afterReading.data[chatId], undefined);
 });

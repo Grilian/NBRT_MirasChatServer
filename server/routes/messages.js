@@ -61,9 +61,6 @@ function isAnnouncementChat(chatId) {
   return !!(group && group.announcements_only);
 }
 
-const CHAT_IMAGES_DIR = path.join(userStorage.UPLOADS_DIR, 'chat-images');
-fs.mkdirSync(CHAT_IMAGES_DIR, { recursive: true });
-
 const CHAT_IMAGE_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 // Длинная сторона — контентная картинка, не аватар: должно остаться читаемо
 // на весь экран телефона, но без смысла тащить оригинал в 12 мегапикселей
@@ -82,18 +79,14 @@ const chatImageUpload = multer({
 // путём (см. server/index.js). Поэтому сокет обязан сам проверить, что путь
 // похож на то, что мог выдать именно этот эндпоинт, а не что попало от
 // клиента, — регэксп ниже и есть эта проверка.
-// Старая раскладка (общая куча `chat-images`) остаётся допустимой: файлы из
-// неё разложены по личным папкам миграцией, но сообщение с таким путём могло
-// прийти от ещё не обновившегося клиента, у которого путь уже на руках.
-const CHAT_IMAGE_PATH_PATTERN = /^\/uploads\/chat-images\/[a-z0-9_-]+\.webp$/;
-
+// Старая раскладка (общая куча `chat-images`) больше НЕ допускается: путь
+// обязан быть личным. Послабление держалось ради необновившихся клиентов —
+// с 07.09.2026 такой оговорки нет, и лишний допустимый вид пути только
+// расширял бы поверхность проверки.
 function isValidChatImagePath(filePath) {
   if (typeof filePath !== 'string') return false;
   const parsed = userStorage.parseUserPath(filePath);
-  const ok = parsed
-    ? parsed.kind === 'images' && /\.webp$/.test(parsed.filename)
-    : CHAT_IMAGE_PATH_PATTERN.test(filePath);
-  if (!ok) return false;
+  if (!parsed || parsed.kind !== 'images' || !/\.webp$/.test(parsed.filename)) return false;
   const abs = userStorage.absoluteFromPublic(filePath);
   return !!abs && fs.existsSync(abs);
 }
@@ -104,9 +97,6 @@ function isValidChatImagePath(filePath) {
 // иначе это уже не тот файл, который отправляли. Поэтому и путь другой, и
 // расширение сохраняется, и MIME берётся тот, что прислал клиент (для показа
 // значка, не для доверия).
-const CHAT_FILES_DIR = path.join(userStorage.UPLOADS_DIR, 'chat-files');
-fs.mkdirSync(CHAT_FILES_DIR, { recursive: true });
-
 /**
  * Предел размера файла. Ровно 50 МБ по требованию; при превышении человек
  * должен увидеть не «ошибка загрузки», а объяснение — система в тестовом
@@ -132,15 +122,12 @@ const chatFileUpload = multer({
 // случайная часть. Оригинальное имя человека хранится в БД отдельно и на
 // файловую систему не влияет — иначе кириллица, пробелы и «../» в имени
 // превращались бы в проблему на каждом шаге.
-const CHAT_FILE_PATH_PATTERN = /^\/uploads\/chat-files\/[a-zA-Z0-9_.-]+$/;
-
 function isValidChatFilePath(filePath) {
-  // Отдельно от шаблона: `..` под него и так не подходит, но проверка дешёвая,
-  // а цена промаха — чтение чужого файла с диска.
+  // Отдельная проверка на `..`: под разбор личного пути она и так не подходит,
+  // но стоит дёшево, а цена промаха — чтение чужого файла с диска.
   if (typeof filePath !== 'string' || filePath.includes('..')) return false;
   const parsed = userStorage.parseUserPath(filePath);
-  const ok = parsed ? parsed.kind === 'files' : CHAT_FILE_PATH_PATTERN.test(filePath);
-  if (!ok) return false;
+  if (!parsed || parsed.kind !== 'files') return false;
   const abs = userStorage.absoluteFromPublic(filePath);
   return !!abs && fs.existsSync(abs);
 }

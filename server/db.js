@@ -754,10 +754,28 @@ try {
 } catch (e) {
   // Колонка уже есть
 }
+// Уборка 07.09.2026: механизм «возможностей клиента» снят целиком.
+//
+// device_tokens.capabilities существовал ради одного признака — 'threads':
+// сервер не слал пуш о ветке устройству, которое про ветки ещё не знает.
+// Обратная совместимость со старыми клиентами снята, признак есть у всех,
+// и целый механизм (колонка + заголовок X-Miras-Features + фильтр в push.js)
+// остался бы висеть без единого потребителя.
 try {
-  db.exec(`ALTER TABLE device_tokens ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`);
+  db.exec('ALTER TABLE device_tokens DROP COLUMN capabilities');
 } catch (e) {
-  // Колонка уже есть
+  // Колонки уже нет
+}
+
+// organizations и organization_members — заброшенный заход на
+// мультиорганизационность: ни одного упоминания ни в сервере, ни в клиенте
+// при 1 и 28 строках данных на проде. Схема их не создаёт, но на боевой базе
+// они лежат с очень давних пор.
+try {
+  db.exec('DROP TABLE IF EXISTS organization_members');
+  db.exec('DROP TABLE IF EXISTS organizations');
+} catch (e) {
+  // Таблиц уже нет
 }
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_sender_client_id
@@ -1332,16 +1350,5 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status, sender_id);
   CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
 `);
-
-// Переезд загрузок в личные папки пользователей. Идемпотентно и потому идёт на
-// каждом запуске: уже перенесённое пропускается за один запрос, а «выполнить
-// один раз руками» — это то, о чём забывают при следующей выкладке.
-try {
-  require('./services/userStorage').migrateLegacyUploads(db);
-} catch (e) {
-  // Не повод не подняться: старые пути остаются рабочими, файлы читаются
-  // оттуда же, где лежали.
-  console.error('Не удалось разложить загрузки по личным папкам:', e.message);
-}
 
 module.exports = db;

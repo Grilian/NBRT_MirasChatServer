@@ -6,7 +6,12 @@ const os = require('os');
 const net = require('net');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
-const { releaseVersion } = require('../package.json');
+// Версия одна. Пара releaseVersion/buildVersion появилась в горячем фиксе
+// 1.6.10, чтобы electron-updater сравнивал semver по одному полю, а в
+// интерфейсе показывалась другая метка; с тех пор все три значения
+// синхронизировались руками при каждом выпуске. Лишний повод разъехаться
+// убран 07.09.2026.
+const { version: appVersion } = require('../package.json');
 
 const isDev = !app.isPackaged;
 
@@ -946,7 +951,7 @@ async function checkLinuxUpdate() {
     const manifest = await response.json();
     if (!manifest.version || !manifest.url) return;
 
-    const current = releaseVersion || app.getVersion();
+    const current = appVersion || app.getVersion();
     if (compareVersions(manifest.version, current) <= 0) {
       // Уже актуальны — старое скачанное (если было, например, откатили
       // версию на сервере уже после закачки) больше показывать незачем.
@@ -1096,7 +1101,7 @@ ipcMain.on('update:install', () => installUpdate());
 
 // В настройках и отчёте серверу показываем общий номер всех платформ, а не
 // технический SemVer, необходимый electron-updater.
-ipcMain.handle('app:version', () => releaseVersion || app.getVersion());
+ipcMain.handle('app:version', () => appVersion || app.getVersion());
 
 ipcMain.handle('autostart:get', () => getAutoLaunchEnabled());
 ipcMain.handle('autostart:set', (event, enabled) => setAutoLaunchEnabled(!!enabled));
