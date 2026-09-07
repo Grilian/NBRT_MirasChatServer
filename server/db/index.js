@@ -20,6 +20,7 @@ for (const step of [
   require('./steps/06-stickers-files'),
   require('./steps/07-seed'),
   require('./steps/08-normalize'),
+  require('./steps/09-tasks'),
 ]) {
   step(db);
 }
