@@ -3,6 +3,7 @@ const { isParticipant, participantsForChatId, parseAdminChatId } = require('./ch
 const { reactionsForMessages } = require('./reactions');
 const { attachPollsToMessages } = require('./polls');
 const { isSharedChat, markRead } = require('./readReceipts');
+const { getSelfChatName } = require('./appSettings');
 
 class ThreadError extends Error {
   constructor(code, message, status = 400) {
@@ -110,7 +111,7 @@ function chatMeta(chatId, userId) {
     const group = db.prepare('SELECT name FROM chat_groups WHERE id = ?').get(Number(groupMatch[1]));
     return { name: group?.name || 'Группа', kind: 'group', avatar_path: null };
   }
-  if (/^self_\d+$/.test(String(chatId))) return { name: 'Избранное', kind: 'self', avatar_path: null };
+  if (/^self_\d+$/.test(String(chatId))) return { name: getSelfChatName(), kind: 'self', avatar_path: null };
   if (parseAdminChatId(chatId)) return { name: 'Администратор', kind: 'personal', avatar_path: null };
   const participants = participantsForChatId(chatId) || [];
   const otherId = participants.find((id) => Number(id) !== Number(userId)) || participants[0];

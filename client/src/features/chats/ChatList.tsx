@@ -1,5 +1,6 @@
 import React from 'react';
 import Avatar from '@/shared/ui/Avatar';
+import { QUICK_ACCESS_LABEL } from './Chat';
 import { formatChatListTime } from '@/shared/lib/time';
 import { describeStatus } from '@/features/status/statusMeta';
 import { CustomEmojiMap, renderTextWithEmoji } from '@/features/emoji/customEmoji';
@@ -241,7 +242,10 @@ const ChatList: React.FC<ChatListProps> = ({
     )
   ));
 
-  let lastGroupLabel: string | null = null;
+  // Заголовок «Быстрый доступ» уже нарисован над строкой веток, поэтому
+  // строка «Следы», приходящая с тем же ярлыком, свой не повторяет. Если
+  // веток нет (фильтр не «Все»), заголовок нарисует сама строка «Следы».
+  let lastGroupLabel: string | null = filter === 'all' ? QUICK_ACCESS_LABEL : null;
 
   const isNarrowScreen = () => window.matchMedia('(max-width: 760px)').matches;
 
@@ -457,6 +461,8 @@ const ChatList: React.FC<ChatListProps> = ({
             отфильтрованных видах его быть не должно: он не «личный», не
             «группа» и не «новостной». */}
         {filter === 'all' && (
+        <>
+        <div className="roster-section">{QUICK_ACCESS_LABEL}</div>
         <div
           tabIndex={0}
           role="button"
@@ -483,6 +489,7 @@ const ChatList: React.FC<ChatListProps> = ({
             </div>
           </div>
         </div>
+        </>
         )}
         {filtered.length === 0 && <div className="roster-empty">Ничего не найдено</div>}
         {filtered.map((chat) => {
@@ -509,7 +516,11 @@ const ChatList: React.FC<ChatListProps> = ({
               || (last.sticker_fallback ? `${last.sticker_fallback} Стикер` : '')
               || (last.document_name ? `📎 ${last.document_name}` : '')
               || (last.file_path ? 'Фотография' : ''))
-            : '';
+            // Пустые «Следы» объясняют себя сами: фирменное слово без
+            // пояснения ничего не говорит человеку, который видит его впервые.
+            // Как только там появится первое сообщение, подпись сменится на
+            // его превью — объяснять станет нечего.
+            : (chat.section === 'self' ? 'Сохранённые сообщения' : '');
 
           return (
             <React.Fragment key={chat.id}>

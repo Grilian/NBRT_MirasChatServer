@@ -153,6 +153,11 @@ interface DirectoryUser {
 
 const GENERAL_CHAT_ID = 'general';
 
+/** Подпись блока «Ветки + Следы» наверху списка. Одна на два места: заголовок
+ *  рисует ChatList над строкой веток, а строка «Следы» приходит с ним же —
+ *  разойдись они, над списком появились бы два одинаковых заголовка подряд. */
+export const QUICK_ACCESS_LABEL = 'Быстрый доступ';
+
 // Синтетический "чат" для уведомлений о задачах: тосты и системные уведомления
 // группируются по chatId, а у задачи переписки нет. Префикс с двоеточием не
 // может совпасть ни с одним настоящим chat_id.
@@ -604,7 +609,7 @@ const Chat: React.FC = () => {
   // управления (одно на всех). До первого ответа /users/me берём из
   // localStorage — иначе при запуске он моргал бы дефолтным названием.
   const [selfChatId, setSelfChatId] = useState(localStorage.getItem('selfChatId') || '');
-  const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Избранное');
+  const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Следы');
   // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
   const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
 
@@ -1062,10 +1067,10 @@ const Chat: React.FC = () => {
         setCurrentStatusExpiresAt(data.status_expires_at || null);
         setCurrentStatusCustom(data.status_custom || null);
         setSelfChatId(data.self_chat_id || '');
-        setSelfChatName(data.self_chat_name || 'Избранное');
+        setSelfChatName(data.self_chat_name || 'Следы');
         setReactionEmoji(Array.isArray(data.reaction_emoji) ? data.reaction_emoji : []);
         localStorage.setItem('selfChatId', data.self_chat_id || '');
-        localStorage.setItem('selfChatName', data.self_chat_name || 'Избранное');
+        localStorage.setItem('selfChatName', data.self_chat_name || 'Следы');
         localStorage.setItem('username', data.username);
         localStorage.setItem('displayName', data.display_name);
         localStorage.setItem('avatarPath', data.avatar_path || '');
@@ -2363,12 +2368,15 @@ const Chat: React.FC = () => {
     }
 
     setForwardIds(null);
-    // В «Избранное» уходят, не отрываясь от переписки, — туда не переключаемся.
+    // След оставляют, не отрываясь от переписки, — туда не переключаемся.
     if (openTarget) handleSelectChat(targetChatId);
     else pushToast({
       chatId: 'forwarded-to-self',
       title: selfChatName,
-      body: toSend.length > 1 ? `Переслано сообщений: ${toSend.length}` : 'Сообщение переслано',
+      // «След оставлен» — формулировка концепции. Она короче «Сообщение
+      // переслано» и, главное, называет действие тем же словом, что и пункт
+      // меню: человек видит подтверждение того, что нажал.
+      body: toSend.length > 1 ? `Оставлено следов: ${toSend.length}` : 'След оставлен',
       avatarPath: null,
     });
   };
@@ -2628,9 +2636,12 @@ const Chat: React.FC = () => {
   ).sort((a, b) => a.localeCompare(b, 'ru'));
 
   function groupRank(c: { id: string; section: ChatSection; groupLabel: string | null }) {
-    // Закреплённые — в самом начале списка, выше даже общего чата: закреп для
-    // того и делают, чтобы чат был первым. В отдельный раздел их не выносим —
-    // они остаются обычными строками, просто наверху.
+    // «Следы» — самый верх, рядом с «Ветками»: вместе они образуют блок
+    // быстрого доступа. Это не переписка с человеком, а личное хранилище, и
+    // место ему не по свежести последнего сообщения.
+    if (c.section === 'self') return -3;
+    // Закреплённые — сразу за блоком быстрого доступа: закреп для того и
+    // делают, чтобы чат был наверху.
     if (favorites.includes(c.id)) return -2;
     // Общий чат больше не закреплён: живёт среди обычных чатов и поднимается
     // только свежестью последнего сообщения.
@@ -2654,7 +2665,7 @@ const Chat: React.FC = () => {
   // правилам группировки и свежести. Общий чат специального места больше не имеет.
   const allChats: RosterChat[] = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
-    // «Избранное» — обычная личная переписка по месту в списке: её позицию
+    // «Следы» — обычная личная переписка по месту в списке: её позицию
     // определяет последнее сообщение, а не специальное закрепление.
     ...(selfChatId ? [{
       id: selfChatId,
@@ -2696,16 +2707,20 @@ const Chat: React.FC = () => {
       const bTime = lastMessages[b.id] ? new Date(lastMessages[b.id].created_at).getTime() : 0;
       return bTime - aTime;
     })
-    // У закреплённых заголовка раздела нет намеренно: они не отдельная группа,
-    // а те же чаты, поднятые наверх — раньше ярлык «Избранное» читался как
-    // перенос в другое место списка. Без жёсткой группировки заголовки отделов
-    // не нужны вовсе: ранг у всех людей один, и разделитель разрезал бы список
-    // в случайном месте.
+    // Заголовки разделов. Прежде закреплённые шли без подписи намеренно — они
+    // не отдельная группа, а те же чаты, поднятые наверх. С появлением блока
+    // «Быстрый доступ» над ними это перестало работать: без своей подписи
+    // закреплённые читались бы как продолжение блока. Подпись появилась.
+    //
+    // Без жёсткой группировки заголовки отделов не нужны вовсе: ранг у всех
+    // людей один, и разделитель разрезал бы список в случайном месте.
     .map(c => ({
       ...c,
-      groupLabel: favorites.includes(c.id)
-        ? null
-        : (!uiPrefs.groupContacts && c.section === 'staff' ? null : c.groupLabel),
+      groupLabel: c.section === 'self'
+        ? QUICK_ACCESS_LABEL
+        : favorites.includes(c.id)
+          ? 'Закреплённые'
+          : (!uiPrefs.groupContacts && c.section === 'staff' ? null : c.groupLabel),
     }));
 
   // Поиск влияет только на основной список. Недавние строятся из полного

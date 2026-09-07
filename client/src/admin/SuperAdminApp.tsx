@@ -1367,7 +1367,7 @@ function SelfChatPanel() {
 
   return (
     <div className="sa-card sa-card--compact">
-      <h2>Избранное / Облако / Архив</h2>
+      <h2>Следы / Избранное / Облако</h2>
       {error && <p className="form-error">{error}</p>}
 
       <p className="sa-hint">
@@ -1381,7 +1381,7 @@ function SelfChatPanel() {
           type="text"
           value={name}
           maxLength={40}
-          placeholder="Избранное"
+          placeholder="Следы"
           onChange={(e) => { setName(e.target.value); setStatus(''); }}
         />
         <button type="submit" className="btn-primary">Сохранить</button>
@@ -1455,7 +1455,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'emoji', label: 'Смайлики' },
   { id: 'stickers', label: 'Стикеры' },
   { id: 'reactions', label: 'Реакции' },
-  { id: 'selfchat', label: 'Избранное' },
+  { id: 'selfchat', label: 'Следы' },
   { id: 'google', label: 'Google Календарь' },
   { id: 'updates', label: 'Обновления' },
 ];
