@@ -169,3 +169,7 @@ desktop/release/
 server/package-lock.json
 client/package-lock.json
 mobile/package-lock.json
+
+# Макеты редизайна: скриншоты из дизайн-инструмента и документ концепции.
+# Исходники, а не код — в репозитории им не место.
+.redesign/
