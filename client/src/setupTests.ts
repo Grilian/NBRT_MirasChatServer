@@ -11,3 +11,34 @@ import { afterEach } from 'vitest';
 afterEach(() => {
   cleanup();
 });
+
+// jsdom не реализует matchMedia вовсе, а приложение спрашивает его при
+// ЗАГРУЗКЕ модулей (utils/autoFocus вычисляет AUTOFOCUS_ON_OPEN на верхнем
+// уровне). Без заглушки падает не тест, а сам импорт — и понять по ошибке,
+// что дело в среде, а не в коде, довольно трудно. Тесты, которым нужен другой
+// ответ, переопределяют matchMedia у себя, как и раньше.
+if (!window.matchMedia) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
+// Тот же случай: ResizeObserver нет в jsdom, а лента доскручивается по нему.
+if (!('ResizeObserver' in window)) {
+  (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
