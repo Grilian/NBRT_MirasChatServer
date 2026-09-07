@@ -87,7 +87,9 @@
 .date-sep {
   position: sticky; top: 2px; z-index: 3; align-self: center;
   font-size: 13px; font-weight: 500; color: #fff;
-  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  /* Замерено 07.09.2026: прежняя полупрозрачная плашка (22% чернил) давала
+     белому тексту 2.23:1 при норме 4.5. Цвет подобран расчётом. */
+  background: var(--day-sep);
   padding: 5px 13px; border-radius: var(--radius-pill); margin: 8px 0 12px;
   backdrop-filter: blur(4px);
 }

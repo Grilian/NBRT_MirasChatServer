@@ -13,7 +13,8 @@
   transition: background var(--ease), color var(--ease), border-color var(--ease);
 }
 .roster-filter:hover { background: var(--row-hover); }
-.roster-filter.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* Белый текст, значит фон — «сильный» акцент: на обычном белый давал 3.31. */
+.roster-filter.is-active { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
 
 /* «Мой статус» — не первый чат в списке, а отдельный блок над ним: своё
    состояние человек меняет заметно реже, чем открывает переписки. */

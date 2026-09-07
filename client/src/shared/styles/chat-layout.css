@@ -339,9 +339,20 @@
 .row:hover { background: var(--row-hover); }
 .row.is-active,
 .row.is-active:hover { background: var(--row-active); }
+/* На выделенной строке перекрашивается ВСЁ, что на ней написано. Раньше
+   список был короче — плашка со временем и префикс автора оставались
+   приглушённым серым на синем и давали 1.41:1 при норме 4.5. */
 .row.is-active .row-name,
 .row.is-active .row-time,
+.row.is-active .row-stamp,
+.row.is-active .row-check,
+.row.is-active .row-preview-author,
 .row.is-active .row-preview { color: var(--row-active-ink); }
+/* Плашка закрепления на выделенной строке — своя подложка поверх синего,
+   иначе она сливается с ним и признак пропадает. */
+.row.is-active .row-stamp.is-pinned {
+  background: color-mix(in srgb, #fff 22%, transparent);
+}
 .row.is-active .row-unread { background: #fff; color: var(--row-active); }
 .row.is-active .icon-btn-ghost { color: color-mix(in srgb, var(--row-active-ink) 70%, transparent); }
 .row.is-active .icon-btn-ghost:hover { background: color-mix(in srgb, #fff 20%, transparent); color: var(--row-active-ink); }
@@ -512,7 +523,7 @@
 .conv-empty { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--chat-bg); }
 .conv-empty-inline { display: flex; justify-content: center; padding: 24px 0; }
 .conv-empty-badge {
-  background: color-mix(in srgb, var(--ink) 22%, transparent); color: #fff;
+  background: var(--day-sep); color: #fff;
   padding: 7px 16px; border-radius: var(--radius-pill); font-size: 14px; font-weight: 500;
   backdrop-filter: blur(4px);
 }
