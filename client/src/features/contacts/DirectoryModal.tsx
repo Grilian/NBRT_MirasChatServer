@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import Modal from '@/shared/ui/Modal';
 import api from '@/shared/api/client';
 import Avatar from '@/shared/ui/Avatar';
 import { nameFor } from '@/shared/lib/user';
@@ -39,8 +40,7 @@ const DirectoryModal: React.FC<DirectoryModalProps> = ({ existingContactIds, onC
     .filter(u => nameFor(u).toLowerCase().includes(query.toLowerCase()));
 
   return (
-    <div className="modal-overlay mobile-page-overlay" onClick={onClose}>
-      <div className="modal-card directory-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} className="directory-modal">
         <div className="conv-head">
           <div className="conv-title"><div className="settings-title">Справочник сотрудников</div></div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
@@ -76,8 +76,7 @@ const DirectoryModal: React.FC<DirectoryModalProps> = ({ existingContactIds, onC
             </div>
           ))}
         </div>
-      </div>
-    </div>
+      </Modal>
   );
 };
 

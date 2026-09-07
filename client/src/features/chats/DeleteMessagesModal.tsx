@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Modal from '@/shared/ui/Modal';
 
 export interface DeleteRequest {
   ids: number[];
@@ -28,8 +29,7 @@ const DeleteMessagesModal: React.FC<DeleteMessagesModalProps> = ({ request, onCa
   const title = many ? `Удалить сообщения (${ids.length})` : 'Удалить сообщение';
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-card confirm-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onCancel} className="confirm-modal">
         <div className="conv-head">
           <div className="conv-title"><div className="settings-title">{title}</div></div>
           <button type="button" className="icon-btn" onClick={onCancel} aria-label="Закрыть">
@@ -81,8 +81,7 @@ const DeleteMessagesModal: React.FC<DeleteMessagesModalProps> = ({ request, onCa
             Удалить
           </button>
         </div>
-      </div>
-    </div>
+      </Modal>
   );
 };
 

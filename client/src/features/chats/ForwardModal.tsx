@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Avatar from '@/shared/ui/Avatar';
 import { ChatSection } from './ChatList';
 import { AUTOFOCUS_ON_OPEN } from '@/shared/hooks/autoFocus';
-import { acquireStandardKeyboardResizeMode } from '@/shared/platform/mobileKeyboard';
+import Modal, { ModalHead } from '@/shared/ui/Modal';
 import { CustomEmojiMap, renderTextWithEmoji } from '@/features/emoji/customEmoji';
 
 export interface ForwardTarget {
@@ -33,14 +33,6 @@ interface ForwardModalProps {
 const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, onConfirm, customEmoji = {} }) => {
   const [query, setQuery] = useState('');
 
-  // Окно с полем ввода поверх переписки. Под ним остаётся смонтированный
-  // MessageInput, держащий Android в overlay-режиме (adjustNothing): WebView под
-  // клавиатуру не сжимается, а `.modal-overlay` растянут на `inset: 0`, поэтому
-  // центрированная карточка остаётся по центру ВСЕГО экрана и её низ уходит под
-  // IME — а поиск «Куда переслать» тут как раз внизу. Тот же приём, что в
-  // PollCreator: на время окна берём штатный adjustResize.
-  useEffect(() => acquireStandardKeyboardResizeMode(), []);
-
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return targets
@@ -49,17 +41,8 @@ const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, on
   }, [targets, query]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card directory-modal forward-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="conv-head">
-          <div className="conv-title">
-            <div className="settings-title">Переслать</div>
-            <div className="status">{items.length} сообщ.</div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-        </div>
+    <Modal onClose={onClose} className="directory-modal forward-modal">
+        <ModalHead title="Переслать" subtitle={`${items.length} сообщ.`} onClose={onClose} />
 
         {/* Что уедет — видно до выбора чата: пересылка нескольких сообщений
             иначе превращается в лотерею, особенно после выделения пачкой. */}
@@ -110,8 +93,7 @@ const ForwardModal: React.FC<ForwardModalProps> = ({ items, targets, onClose, on
             </div>
           ))}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

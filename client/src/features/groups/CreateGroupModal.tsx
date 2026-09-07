@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Modal from '@/shared/ui/Modal';
 import api from '@/shared/api/client';
 import MemberPicker from '@/shared/ui/MemberPicker';
 import { AUTOFOCUS_ON_OPEN } from '@/shared/hooks/autoFocus';
@@ -48,8 +49,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onCreated 
   };
 
   return (
-    <div className="modal-overlay mobile-page-overlay" onClick={onClose}>
-      <div className="modal-card directory-modal create-group-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} className="directory-modal create-group-modal">
         <div className="conv-head">
           <div className="conv-title"><div className="settings-title">Новая группа</div></div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
@@ -85,8 +85,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onCreated 
             {saving ? 'Создаём…' : 'Создать'}
           </button>
         </div>
-      </div>
-    </div>
+      </Modal>
   );
 };
 

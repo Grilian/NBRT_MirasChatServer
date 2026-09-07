@@ -1,7 +1,7 @@
 import type { MessageReaction } from '@/shared/api/types';
 export type { MessageReaction };
 import React, { useEffect } from 'react';
-import { registerBackInterceptor } from '@/shared/hooks/backInterceptors';
+import Modal, { ModalHead } from '@/shared/ui/Modal';
 import Avatar from '@/shared/ui/Avatar';
 import { nameFor } from '@/shared/lib/user';
 import { formatMoscowDateTime } from '@/shared/lib/time';
@@ -21,21 +21,9 @@ interface ReactionDetailsModalProps {
 const ReactionDetailsModal: React.FC<ReactionDetailsModalProps> = ({
   reactions, canRemoveOthers, currentUserId, customEmoji = {}, onClose, onRemove,
 }) => {
-  // Аппаратный Back на Android закрывает это окно, а не экран под ним.
-  useEffect(() => registerBackInterceptor(onClose), [onClose]);
-
   return (
-  <div className="modal-overlay" onClick={onClose}>
-    <div className="modal-card directory-modal reactions-modal" onClick={(e) => e.stopPropagation()}>
-      <div className="conv-head">
-        <div className="conv-title">
-          <div className="settings-title">Реакции</div>
-          <div className="status">{reactions.length}</div>
-        </div>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-        </button>
-      </div>
+  <Modal onClose={onClose} className="directory-modal reactions-modal">
+      <ModalHead title="Реакции" subtitle={reactions.length} onClose={onClose} />
 
       <div className="directory-list">
         {reactions.length === 0 && <div className="roster-empty">Реакций пока нет</div>}
@@ -69,8 +57,7 @@ const ReactionDetailsModal: React.FC<ReactionDetailsModalProps> = ({
           );
         })}
       </div>
-    </div>
-  </div>
+  </Modal>
   );
 };
 
