@@ -55,6 +55,7 @@ const {
   closeExpiredPolls,
 } = require('./services/polls');
 const { listRecentChats } = require('./services/recentChats');
+const { trimDanglingShortcode } = require('./utils/shortcode');
 const {
   ThreadError,
   rootForUser,
@@ -486,12 +487,14 @@ io.on('connection', (socket) => {
     // Обрезка не должна разрубить код кастомного смайлика: огрызок ":cat" уже
     // не станет картинкой и остался бы в БД навсегда техническим текстом.
     // Клиент режет текст сам, но его обрезку можно обойти — это последняя линия.
+    // Обрезка хвоста — общим шаблоном (utils/shortcode.js): две разъехавшиеся
+    // копии этого правила и были причиной бага с кодом `:e~<ключ>~<пак>:`.
     const finalText = pollDraft
       ? pollDraft.question
       : stickerRequested
         ? ''
         : (text.length > MAX_MESSAGE_LENGTH
-          ? text.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '')
+          ? trimDanglingShortcode(text.slice(0, MAX_MESSAGE_LENGTH))
           : text);
 
     // Картинка приходит уже загруженной отдельным REST-запросом (см.
@@ -837,7 +840,7 @@ io.on('connection', (socket) => {
         ? pollDraft.question
         : stickerRequested
           ? ''
-          : rawText.slice(0, MAX_MESSAGE_LENGTH).replace(/:[a-z0-9_]{1,32}$/, '');
+          : trimDanglingShortcode(rawText.slice(0, MAX_MESSAGE_LENGTH));
       const hasImage = !pollDraft && typeof data.filePath === 'string' && isValidChatImagePath(data.filePath);
       const filePath = hasImage ? data.filePath : null;
       const fileWidth = hasImage && Number.isFinite(Number(data.fileWidth)) ? Number(data.fileWidth) : null;
