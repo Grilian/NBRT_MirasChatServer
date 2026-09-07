@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import api from '@/shared/api/client';
 import Avatar from '@/shared/ui/Avatar';
+import Modal from '@/shared/ui/Modal';
 import MemberPicker from '@/shared/ui/MemberPicker';
-import { acquireStandardKeyboardResizeMode } from '@/shared/platform/mobileKeyboard';
 import { nameFor } from '@/shared/lib/user';
 import {
   WritePolicy, WRITE_POLICY_ORDER, WRITE_POLICY_LABELS, WRITE_BLOCKED_HINT,
@@ -44,7 +44,6 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
   // смонтированный MessageInput с Android adjustNothing — иначе переименование
   // группы и поиск в «Добавить участников» уходят под клавиатуру. См. тот же
   // приём в PollCreator.
-  useEffect(() => acquireStandardKeyboardResizeMode(), []);
 
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -212,216 +211,214 @@ const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card directory-modal group-info-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="conv-head">
-          <div className="conv-title"><div className="settings-title">{adding ? 'Добавить участников' : 'Группа'}</div></div>
-          <button type="button" className="icon-btn" onClick={adding ? () => setAdding(false) : onClose} aria-label="Закрыть">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-        </div>
+    <Modal onClose={onClose} className="directory-modal group-info-modal">
+      <div className="conv-head">
+        <div className="conv-title"><div className="settings-title">{adding ? 'Добавить участников' : 'Группа'}</div></div>
+        <button type="button" className="icon-btn" onClick={adding ? () => setAdding(false) : onClose} aria-label="Закрыть">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+        </button>
+      </div>
 
-        {loading && <div className="roster-empty">Загрузка...</div>}
+      {loading && <div className="roster-empty">Загрузка...</div>}
 
-        {!loading && group && adding && (
-          <>
-            <MemberPicker
-              excludeUserIds={group.members.map((m) => m.id)}
-              selectedIds={addIds}
-              onChange={setAddIds}
-            />
-            <div className="cal-dialog-actions create-group-actions">
-              <button type="button" className="sa-btn-ghost" onClick={() => setAdding(false)}>Отмена</button>
-              <button type="button" className="btn-primary" onClick={confirmAdd} disabled={busy || addIds.length === 0}>
-                {busy ? 'Добавляем…' : `Добавить${addIds.length ? ` (${addIds.length})` : ''}`}
-              </button>
-            </div>
-          </>
-        )}
+      {!loading && group && adding && (
+        <>
+          <MemberPicker
+            excludeUserIds={group.members.map((m) => m.id)}
+            selectedIds={addIds}
+            onChange={setAddIds}
+          />
+          <div className="cal-dialog-actions create-group-actions">
+            <button type="button" className="sa-btn-ghost" onClick={() => setAdding(false)}>Отмена</button>
+            <button type="button" className="btn-primary" onClick={confirmAdd} disabled={busy || addIds.length === 0}>
+              {busy ? 'Добавляем…' : `Добавить${addIds.length ? ` (${addIds.length})` : ''}`}
+            </button>
+          </div>
+        </>
+      )}
 
-        {!loading && group && !adding && (
-          <>
-            <div className="group-info-header">
-              {/* Фото профиля меняет только создатель: остальным это чужая
-                  группа, и подменять её лицо они не должны. У постороннего
-                  аватар остаётся картинкой, а не кнопкой. */}
-              <div className={'group-info-avatar' + (isOwner ? ' is-editable' : '')}>
-                <Avatar name={group.name} avatarPath={group.avatar_path || null} isGroup />
-                {isOwner && (
-                  <>
-                    <button
-                      type="button"
-                      className="group-info-avatar-edit"
-                      title="Сменить фото группы"
-                      aria-label="Сменить фото группы"
-                      onClick={() => avatarInputRef.current?.click()}
-                      disabled={avatarBusy}
-                    >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                        <circle cx="12" cy="13" r="4" />
-                      </svg>
-                    </button>
-                    <input
-                      ref={avatarInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = '';
-                        if (file) void uploadAvatar(file);
-                      }}
-                    />
-                  </>
-                )}
-              </div>
-              {isOwner && editingName ? (
-                <input
-                  className="group-info-name-input"
-                  value={nameDraft}
-                  autoFocus
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  onBlur={saveName}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); saveName(); }
-                    if (e.key === 'Escape') { setNameDraft(group.name); setEditingName(false); }
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="group-info-name"
-                  onClick={() => isOwner && setEditingName(true)}
-                  disabled={!isOwner}
-                  title={isOwner ? 'Переименовать' : undefined}
-                >
-                  {group.name}
-                </button>
+      {!loading && group && !adding && (
+        <>
+          <div className="group-info-header">
+            {/* Фото профиля меняет только создатель: остальным это чужая
+                группа, и подменять её лицо они не должны. У постороннего
+                аватар остаётся картинкой, а не кнопкой. */}
+            <div className={'group-info-avatar' + (isOwner ? ' is-editable' : '')}>
+              <Avatar name={group.name} avatarPath={group.avatar_path || null} isGroup />
+              {isOwner && (
+                <>
+                  <button
+                    type="button"
+                    className="group-info-avatar-edit"
+                    title="Сменить фото группы"
+                    aria-label="Сменить фото группы"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={avatarBusy}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                      <circle cx="12" cy="13" r="4" />
+                    </svg>
+                  </button>
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (file) void uploadAvatar(file);
+                    }}
+                  />
+                </>
               )}
-              <div className="group-info-count">{group.member_count} {declineMembers(group.member_count)}</div>
+            </div>
+            {isOwner && editingName ? (
+              <input
+                className="group-info-name-input"
+                value={nameDraft}
+                autoFocus
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={saveName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); saveName(); }
+                  if (e.key === 'Escape') { setNameDraft(group.name); setEditingName(false); }
+                }}
+              />
+            ) : (
               <button
                 type="button"
-                className={'group-info-notification-btn' + (notificationsMuted ? ' is-muted' : '')}
-                onClick={toggleNotifications}
-                disabled={notificationBusy}
-                aria-pressed={notificationsMuted}
+                className="group-info-name"
+                onClick={() => isOwner && setEditingName(true)}
+                disabled={!isOwner}
+                title={isOwner ? 'Переименовать' : undefined}
               >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-                  {notificationsMuted && <path d="M4 4l16 16" />}
-                </svg>
-                {notificationBusy ? 'Сохраняем…' : notificationsMuted ? 'Включить уведомления' : 'Отключить уведомления'}
-              </button>
-              {notificationError && <div className="group-info-notification-error" role="status">{notificationError}</div>}
-            </div>
-
-            {isOwner && (
-              <button type="button" className="group-info-add-btn" onClick={() => setAdding(true)}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
-                Добавить участников
+                {group.name}
               </button>
             )}
+            <div className="group-info-count">{group.member_count} {declineMembers(group.member_count)}</div>
+            <button
+              type="button"
+              className={'group-info-notification-btn' + (notificationsMuted ? ' is-muted' : '')}
+              onClick={toggleNotifications}
+              disabled={notificationBusy}
+              aria-pressed={notificationsMuted}
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+                {notificationsMuted && <path d="M4 4l16 16" />}
+              </svg>
+              {notificationBusy ? 'Сохраняем…' : notificationsMuted ? 'Включить уведомления' : 'Отключить уведомления'}
+            </button>
+            {notificationError && <div className="group-info-notification-error" role="status">{notificationError}</div>}
+          </div>
 
-            {isOwner ? (
-              <div className="group-info-write">
-                <div className="settings-section-title">Кто может писать</div>
-                <select
-                  value={group.write_policy}
-                  onChange={(e) => saveWritePolicy(e.target.value as WritePolicy)}
-                >
-                  {WRITE_POLICY_ORDER.map((p) => (
-                    <option key={p} value={p}>{WRITE_POLICY_LABELS[p]}</option>
-                  ))}
-                </select>
+          {isOwner && (
+            <button type="button" className="group-info-add-btn" onClick={() => setAdding(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+              Добавить участников
+            </button>
+          )}
 
-                {/* Списки правятся сразу под выбором режима — отдельного окна
-                    не заводим: без них режим не имеет смысла и человек всё
-                    равно пойдёт их заполнять следующим действием. */}
-                {group.write_policy === 'members' && (
-                  <div className="group-info-write-list">
-                    {group.members.map((m) => (
-                      <label key={m.id} className="group-info-write-item">
-                        <input
-                          type="checkbox"
-                          checked={group.write_user_ids.includes(m.id)}
-                          onChange={(e) => saveWritePolicy('members', {
-                            users: e.target.checked
-                              ? [...group.write_user_ids, m.id]
-                              : group.write_user_ids.filter((id) => id !== m.id),
-                          })}
-                        />
-                        <span>{nameFor(m)}{m.id === currentUserId ? ' (вы)' : ''}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
+          {isOwner ? (
+            <div className="group-info-write">
+              <div className="settings-section-title">Кто может писать</div>
+              <select
+                value={group.write_policy}
+                onChange={(e) => saveWritePolicy(e.target.value as WritePolicy)}
+              >
+                {WRITE_POLICY_ORDER.map((p) => (
+                  <option key={p} value={p}>{WRITE_POLICY_LABELS[p]}</option>
+                ))}
+              </select>
 
-                {group.write_policy === 'departments' && (
-                  <div className="group-info-write-list">
-                    {departments.length === 0 && <div className="group-info-write-empty">Отделы не заведены</div>}
-                    {departments.map((d) => (
-                      <label key={d.id} className="group-info-write-item">
-                        <input
-                          type="checkbox"
-                          checked={group.write_department_ids.includes(d.id)}
-                          onChange={(e) => saveWritePolicy('departments', {
-                            departments: e.target.checked
-                              ? [...group.write_department_ids, d.id]
-                              : group.write_department_ids.filter((id) => id !== d.id),
-                          })}
-                        />
-                        <span>{d.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-
-                {/* Счётчик просмотров к правам не относится — он про то, как
-                    выглядят сообщения, и работает при любой политике. */}
-                <div className="create-group-announce group-info-announce">
-                  <span className="label">Показывать счётчик просмотров</span>
-                  <label className="switch">
-                    <input type="checkbox" checked={group.announcements_only} onChange={toggleAnnouncementsOnly} />
-                    <span className="switch-track"><span className="switch-thumb" /></span>
-                  </label>
-                </div>
-              </div>
-            ) : group.write_policy !== 'all' && (
-              <div className="group-info-announce-note">{WRITE_BLOCKED_HINT[group.write_policy]}</div>
-            )}
-
-            <div className="directory-list group-info-members">
-              {group.members.map((m) => (
-                <div key={m.id} className="row group-info-row">
-                  <Avatar name={nameFor(m)} avatarPath={m.avatar_path} />
-                  <div className="row-body">
-                    <div className="row-name">
+              {/* Списки правятся сразу под выбором режима — отдельного окна
+                  не заводим: без них режим не имеет смысла и человек всё
+                  равно пойдёт их заполнять следующим действием. */}
+              {group.write_policy === 'members' && (
+                <div className="group-info-write-list">
+                  {group.members.map((m) => (
+                    <label key={m.id} className="group-info-write-item">
+                      <input
+                        type="checkbox"
+                        checked={group.write_user_ids.includes(m.id)}
+                        onChange={(e) => saveWritePolicy('members', {
+                          users: e.target.checked
+                            ? [...group.write_user_ids, m.id]
+                            : group.write_user_ids.filter((id) => id !== m.id),
+                        })}
+                      />
                       <span>{nameFor(m)}{m.id === currentUserId ? ' (вы)' : ''}</span>
-                      {m.role === 'owner' && <span className="badge-admin">Создатель</span>}
-                    </div>
-                  </div>
-                  {isOwner && m.role !== 'owner' && (
-                    <button type="button" className="icon-btn-ghost danger" title="Убрать из группы" onClick={() => removeMember(m.id)}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-                    </button>
-                  )}
+                    </label>
+                  ))}
                 </div>
-              ))}
-            </div>
-
-            <div className="group-info-footer">
-              {isOwner ? (
-                <button type="button" className="sa-btn-danger" onClick={deleteGroup}>Удалить группу</button>
-              ) : (
-                <button type="button" className="sa-btn-danger" onClick={leaveGroup}>Покинуть группу</button>
               )}
+
+              {group.write_policy === 'departments' && (
+                <div className="group-info-write-list">
+                  {departments.length === 0 && <div className="group-info-write-empty">Отделы не заведены</div>}
+                  {departments.map((d) => (
+                    <label key={d.id} className="group-info-write-item">
+                      <input
+                        type="checkbox"
+                        checked={group.write_department_ids.includes(d.id)}
+                        onChange={(e) => saveWritePolicy('departments', {
+                          departments: e.target.checked
+                            ? [...group.write_department_ids, d.id]
+                            : group.write_department_ids.filter((id) => id !== d.id),
+                        })}
+                      />
+                      <span>{d.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {/* Счётчик просмотров к правам не относится — он про то, как
+                  выглядят сообщения, и работает при любой политике. */}
+              <div className="create-group-announce group-info-announce">
+                <span className="label">Показывать счётчик просмотров</span>
+                <label className="switch">
+                  <input type="checkbox" checked={group.announcements_only} onChange={toggleAnnouncementsOnly} />
+                  <span className="switch-track"><span className="switch-thumb" /></span>
+                </label>
+              </div>
             </div>
-          </>
-        )}
-      </div>
-    </div>
+          ) : group.write_policy !== 'all' && (
+            <div className="group-info-announce-note">{WRITE_BLOCKED_HINT[group.write_policy]}</div>
+          )}
+
+          <div className="directory-list group-info-members">
+            {group.members.map((m) => (
+              <div key={m.id} className="row group-info-row">
+                <Avatar name={nameFor(m)} avatarPath={m.avatar_path} />
+                <div className="row-body">
+                  <div className="row-name">
+                    <span>{nameFor(m)}{m.id === currentUserId ? ' (вы)' : ''}</span>
+                    {m.role === 'owner' && <span className="badge-admin">Создатель</span>}
+                  </div>
+                </div>
+                {isOwner && m.role !== 'owner' && (
+                  <button type="button" className="icon-btn-ghost danger" title="Убрать из группы" onClick={() => removeMember(m.id)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="group-info-footer">
+            {isOwner ? (
+              <button type="button" className="sa-btn-danger" onClick={deleteGroup}>Удалить группу</button>
+            ) : (
+              <button type="button" className="sa-btn-danger" onClick={leaveGroup}>Покинуть группу</button>
+            )}
+          </div>
+        </>
+      )}
+    </Modal>
   );
 };
 

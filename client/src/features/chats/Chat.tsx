@@ -91,6 +91,7 @@ import {
   saveUiPrefs
 } from '@/features/settings/uiPrefs';
 import { useLayoutMode } from '@/shared/hooks/useLayoutMode';
+import Modal from '@/shared/ui/Modal';
 import TopBar from '@/app/TopBar';
 import { SearchHit, SearchTarget } from '@/features/search/globalSearch';
 import { APP_NAME } from '@/app/version';
@@ -809,8 +810,13 @@ const Chat: React.FC = () => {
   // чате и сворачивала приложение вместо возврата к списку. Разворачиваешь —
   // тот же открытый чат, "назад" снова сворачивает, и так до полного
   // закрытия приложения.
-  const backNavRef = useRef({ view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, generalInfoOpen, profileOpen, peopleOpen, activeThread, threadInboxOpen, forwardOpen: forwardIds !== null, deleteRequestOpen: deleteRequest !== null, statusSheetOpen });
-  backNavRef.current = { view, directoryOpen, infoModalUserId, createGroupOpen, pollCreatorOpen, groupInfoId, generalInfoOpen, profileOpen, peopleOpen, activeThread, threadInboxOpen, forwardOpen: forwardIds !== null, deleteRequestOpen: deleteRequest !== null, statusSheetOpen };
+  //
+  // Состояний тут ровно три, и это не случайность: всё, что рисуется
+  // ПОВЕРХНОСТЬЮ (окна, шторки, слои), закрывается своим перехватчиком и в
+  // это состояние не поднимается вовсе. Здесь осталась только навигация —
+  // ветка, список веток и сам вид, — у которой поверхности нет.
+  const backNavRef = useRef({ view, activeThread, threadInboxOpen });
+  backNavRef.current = { view, activeThread, threadInboxOpen };
 
   useEffect(() => watchMobileKeyboard(), []);
 
@@ -904,23 +910,24 @@ const Chat: React.FC = () => {
       // нет и Android отдаёт Back приложению, сначала закрываем конструкцию,
       // а уже следующим нажатием выполняем навигацию.
       if (closeMobileInputSurface()) return;
-      // Модалки поверх всего — закрываются первыми, иначе "назад" уводил
-      // экран из-под открытого окна, а само окно оставалось висеть.
-      // Оверлеи, живущие внутри ChatWindow (просмотр картинки, список
-      // поставивших реакцию), в это состояние не поднимаются — они сами
-      // подписываются на перехват и закрываются первыми, последний открытый.
+      // Любая закрываемая ПОВЕРХНОСТЬ закрывается здесь — и закрывается та,
+      // которую открыли последней.
+      //
+      // Раньше рядом с этим вызовом стоял список из одиннадцати `if` — по
+      // строке на каждое окно, и порядок в нём поддерживался руками. Список
+      // был уже наполовину мёртвым: шесть окон успели переехать на общий
+      // примитив и закрывались перехватчиком выше, так и не дойдя до своей
+      // строки. Теперь на примитиве ВСЕ, и список удалён целиком: окно,
+      // забытое в нём, — это Back, уводящий экран из-под открытой карточки,
+      // а забыть строку тем легче, чем длиннее список.
+      //
+      // Порядок «последняя открытая — первая закрытая» не эвристика, а
+      // единственно верный: она и лежит сверху. Позиция в разметке при этом
+      // ничего не решает — перехватчик регистрируется при монтировании, то
+      // есть в момент открытия.
       if (runTopBackInterceptor()) return;
-      if (nav.forwardOpen) { setForwardIds(null); return; }
-      if (nav.deleteRequestOpen) { setDeleteRequest(null); return; }
-      if (nav.statusSheetOpen) { setStatusSheetOpen(false); return; }
-      if (nav.groupInfoId !== null) { setGroupInfoId(null); return; }
-      if (nav.generalInfoOpen) { setGeneralInfoOpen(false); return; }
-      if (nav.pollCreatorOpen) { setPollCreatorOpen(false); return; }
-      if (nav.createGroupOpen) { setCreateGroupOpen(false); return; }
-      if (nav.infoModalUserId !== null) { setInfoModalUserId(null); return; }
-      if (nav.directoryOpen) { setDirectoryOpen(false); return; }
-      if (nav.profileOpen) { setProfileOpen(false); return; }
-      if (nav.peopleOpen) { setPeopleOpen(false); return; }
+      // Дальше — не окна, а сама навигация: у неё поверхности нет, и
+      // закрывать её нечему.
       if (nav.activeThread) { setActiveThread(null); return; }
       if (nav.threadInboxOpen) { leaveConversation(); return; }
       // Тот же сброс, что и в goToSection: аппаратная кнопка «назад» возвращает
@@ -3206,31 +3213,27 @@ const Chat: React.FC = () => {
       )}
 
       {!narrowLayout && settingsModalOpen && (
-        <div className="modal-overlay" onClick={() => setSettingsModalOpen(false)}>
-          <div className="modal-card settings-modal" onClick={(e) => e.stopPropagation()}>
-            <SettingsPanel
+        <Modal onClose={() => setSettingsModalOpen(false)} className="settings-modal">
+          <SettingsPanel
               username={currentDisplayName}
               avatarPath={currentAvatarPath}
               onClose={() => setSettingsModalOpen(false)}
               onOpenProfile={openOwnProfileEdit}
               onDeleteAccount={handleDeleteSelf}
-              onLogout={handleLogout}
-              closeMode="close"
-            />
-          </div>
-        </div>
+            onLogout={handleLogout}
+            closeMode="close"
+          />
+        </Modal>
       )}
 
       {!narrowLayout && tasksModalOpen && (
-        <div className="modal-overlay" onClick={() => setTasksModalOpen(false)}>
-          <div className="modal-card tasks-modal" onClick={(e) => e.stopPropagation()}>
-            <TasksPanel
-              currentUserId={currentUserId}
-              changeToken={tasksChangeToken}
-              onClose={() => setTasksModalOpen(false)}
-            />
-          </div>
-        </div>
+        <Modal onClose={() => setTasksModalOpen(false)} className="tasks-modal">
+          <TasksPanel
+            currentUserId={currentUserId}
+            changeToken={tasksChangeToken}
+            onClose={() => setTasksModalOpen(false)}
+          />
+        </Modal>
       )}
 
       {profilePreviewOpen && (
@@ -3257,36 +3260,34 @@ const Chat: React.FC = () => {
       )}
 
       {profileOpen && (
-        <div className="modal-overlay mobile-page-overlay" onClick={() => setProfileOpen(false)}>
-          <div className="modal-card profile-modal" onClick={(e) => e.stopPropagation()}>
-            <ProfileEdit
-              currentUsername={currentUsername}
-              currentDisplayName={currentDisplayName}
-              currentAvatarPath={currentAvatarPath}
-              currentBio={currentBio}
-              currentPhone={currentPhone}
-              currentDepartment={currentDepartment}
-              currentPosition={currentPosition}
-              currentBirthDate={currentBirthDate}
-              statusPreset={currentStatusPreset}
-              statusCustom={currentStatusCustom}
-              customEmoji={customEmoji}
-              onStatusChanged={(preset, custom) => {
-                setCurrentStatusPreset(preset);
-                setCurrentStatusCustom(custom);
-                localStorage.setItem('statusPreset', preset || '');
-                localStorage.setItem('statusCustom', custom || '');
-              }}
-              onBack={() => setProfileOpen(false)}
-              onSaved={(profile) => {
-                handleProfileSaved(profile);
-                setProfileOpen(false);
-                setProfilePreviewOpen(true);
-              }}
-              onAvatarChanged={handleAvatarChanged}
-            />
-          </div>
-        </div>
+        <Modal onClose={() => setProfileOpen(false)} className="profile-modal" pageOnMobile>
+          <ProfileEdit
+            currentUsername={currentUsername}
+            currentDisplayName={currentDisplayName}
+            currentAvatarPath={currentAvatarPath}
+            currentBio={currentBio}
+            currentPhone={currentPhone}
+            currentDepartment={currentDepartment}
+            currentPosition={currentPosition}
+            currentBirthDate={currentBirthDate}
+            statusPreset={currentStatusPreset}
+            statusCustom={currentStatusCustom}
+            customEmoji={customEmoji}
+            onStatusChanged={(preset, custom) => {
+              setCurrentStatusPreset(preset);
+              setCurrentStatusCustom(custom);
+              localStorage.setItem('statusPreset', preset || '');
+              localStorage.setItem('statusCustom', custom || '');
+            }}
+            onBack={() => setProfileOpen(false)}
+            onSaved={(profile) => {
+              handleProfileSaved(profile);
+              setProfileOpen(false);
+              setProfilePreviewOpen(true);
+            }}
+            onAvatarChanged={handleAvatarChanged}
+          />
+        </Modal>
       )}
 
       {deleteRequest && (
@@ -3343,20 +3344,18 @@ const Chat: React.FC = () => {
       )}
 
       {peopleOpen && (
-        <div className="modal-overlay mobile-page-overlay" onClick={() => setPeopleOpen(false)}>
-          <div className="modal-card people-modal" onClick={(e) => e.stopPropagation()}>
-            <PeopleSection
-              currentUserId={currentUserId}
-              existingContactIds={users.map(u => u.id)}
-              onlineUserIds={onlineUsers}
-              customEmoji={customEmoji}
-              onOpenChat={(user) => { setPeopleOpen(false); handleStartChat(user); }}
-              onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
-              onAddContact={handleAddContact}
-              onClose={() => setPeopleOpen(false)}
-            />
-          </div>
-        </div>
+        <Modal onClose={() => setPeopleOpen(false)} className="people-modal" pageOnMobile>
+          <PeopleSection
+            currentUserId={currentUserId}
+            existingContactIds={users.map(u => u.id)}
+            onlineUserIds={onlineUsers}
+            customEmoji={customEmoji}
+            onOpenChat={(user) => { setPeopleOpen(false); handleStartChat(user); }}
+            onOpenUserInfo={(userId) => setInfoModalUserId(userId)}
+            onAddContact={handleAddContact}
+            onClose={() => setPeopleOpen(false)}
+          />
+        </Modal>
       )}
 
       {section === 'calendar' && (

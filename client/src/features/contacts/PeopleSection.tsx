@@ -106,7 +106,10 @@ const PeopleSection: React.FC<PeopleSectionProps> = ({
     <div className="section-pane">
       <div className="conv-head">
         <div className="conv-title">
-          <div className="name">Люди</div>
+          {/* «Контакты», а не «Люди»: раздел переименован ещё в 1.10.6, а
+              заголовок внутри него остался прежним — на рельсе одно, на
+              экране другое. */}
+          <div className="name">Контакты</div>
           <div className="status">
             {loading ? 'Загрузка…' : pluralPeople(total)}
           </div>

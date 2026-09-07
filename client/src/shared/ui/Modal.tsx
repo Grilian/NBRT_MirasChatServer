@@ -43,16 +43,28 @@ interface ModalProps {
   persistent?: boolean;
   /** Подпись для экранных читалок, когда в шапке нет видимого заголовка. */
   label?: string;
+  /**
+   * На узком экране это не карточка посреди экрана, а СТРАНИЦА во весь экран.
+   *
+   * Так по концепции устроены Контакты, Настройки и Профиль: на широком окне
+   * их открывают, чтобы глянуть и вернуться к делу, — там окно; на телефоне
+   * карточка с полями посреди экрана превращается в щель между клавиатурой и
+   * верхним краем, и правильнее занять экран целиком.
+   */
+  pageOnMobile?: boolean;
 }
 
 const Modal: React.FC<ModalProps> = ({
   onClose, children, className = '', nested = false, persistent = false, label,
+  pageOnMobile = false,
 }) => {
   useDismissibleLayer(onClose);
 
   return (
     <div
-      className={'modal-overlay' + (nested ? ' modal-overlay-nested' : '')}
+      className={'modal-overlay'
+        + (nested ? ' modal-overlay-nested' : '')
+        + (pageOnMobile ? ' mobile-page-overlay' : '')}
       onClick={persistent ? undefined : onClose}
       role="presentation"
     >

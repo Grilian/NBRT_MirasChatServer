@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PollDraft } from '@/shared/api/poll';
-import { acquireStandardKeyboardResizeMode } from '@/shared/platform/mobileKeyboard';
+import { useDismissibleLayer } from '@/shared/ui/useDismissibleLayer';
 
 interface PollCreatorProps {
   onClose: () => void;
@@ -53,7 +53,10 @@ const PollCreator: React.FC<PollCreatorProps> = ({ onClose, onCreate, submitting
 
   // Под перепиской остаётся MessageInput с Android adjustNothing. Редактору
   // опроса нужен штатный adjustResize, иначе нижние варианты закрывает IME.
-  useEffect(() => acquireStandardKeyboardResizeMode(), []);
+  // Не только режим клавиатуры, но и Escape с аппаратным «Назад». Своя
+  // разметка слоя у окна остаётся: это не карточка посреди экрана, а свой
+  // вид, — а обвязка у всех закрываемых поверхностей обязана быть одна.
+  useDismissibleLayer(onClose);
 
   const cleanOptions = useMemo(() => options.map((option) => option.trim()).filter(Boolean), [options]);
   const duplicateOptions = useMemo(() => {
