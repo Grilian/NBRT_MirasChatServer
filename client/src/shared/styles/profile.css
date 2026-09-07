@@ -1,0 +1,236 @@
+/* Карточка профиля. */
+
+/* ===== Profile hero refinement =====
+   Профиль больше не имеет отдельной шапки: фото является верхней поверхностью,
+   а навигация и редактирование лежат поверх него. */
+.user-info-modal { width: min(440px, calc(100vw - 48px)); max-width: 440px; max-height: min(860px, 92vh); background: var(--paper-raised); }
+.user-info-modal .user-info-body { padding: 0 0 22px; align-items: stretch; text-align: left; gap: 0; }
+.user-info-modal .user-info-top {
+  width: 100%; margin: 0 0 14px; min-height: 590px; border-radius: 0;
+  background: linear-gradient(180deg, #151c23 0%, #10161d 100%);
+}
+/* ВАЖНО: файл редактора уже сохранён строго в 3:4. Публичный профиль не
+   должен снова растягивать этот кадр на фактическую высоту содержимого:
+   у чужого профиля есть ряд действий, поэтому .user-info-top выше, чем в
+   собственном preview, и прежний height:100% + object-fit:cover незаметно
+   делал дополнительный zoom/crop. Фото теперь всегда занимает отдельный
+   неизменный кадр 3:4; всё, что не помещается, продолжается ниже на тёмной
+   подложке, но сам результат редактора остаётся пиксель-в-пиксель тем же. */
+.user-info-modal .user-info-cover-img {
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: center center;
+}
+.user-info-modal .user-info-cover-fade {
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  backdrop-filter: none; -webkit-mask-image: none; mask-image: none;
+  background: linear-gradient(to bottom, rgba(4,8,12,.04) 0%, rgba(4,8,12,.06) 38%, rgba(4,8,12,.42) 66%, rgba(4,8,12,.90) 100%);
+}
+.user-info-floating-head {
+  position: absolute; z-index: 3; top: 16px; left: 16px; right: 16px;
+  display: flex; align-items: center; justify-content: space-between; pointer-events: none;
+}
+.user-info-glass-btn {
+  pointer-events: auto; width: 46px; height: 46px; border-radius: 50%; padding: 0;
+  border: 1px solid rgba(255,255,255,.20); background: rgba(13,19,25,.38); color: #fff;
+  backdrop-filter: blur(12px); box-shadow: 0 5px 18px rgba(0,0,0,.18);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background var(--ease), transform var(--ease), border-color var(--ease);
+}
+.user-info-glass-btn:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.34); transform: translateY(-1px); }
+.user-info-modal .user-info-top-content { padding: 355px 20px 20px; display: flex; flex-direction: column; align-items: center; }
+.user-info-modal .user-info-top.has-no-photo .user-info-top-content { padding-top: 150px; }
+.user-info-modal .user-info-name { font-size: 27px; font-weight: 700; letter-spacing: -.02em; }
+.user-info-modal .user-info-status { margin-top: 4px; font-size: 13.5px; }
+.user-info-modal .user-info-status.is-online::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--online); box-shadow: 0 0 0 2px rgba(0,0,0,.18); }
+.user-info-modal .user-info-actions { margin: 18px 0 20px; gap: 13px; }
+.user-info-modal .user-info-action { width: 56px; height: 56px; background: rgba(18,24,30,.52); border-color: rgba(255,255,255,.20); backdrop-filter: blur(13px); }
+.user-info-modal .user-info-fields { border-radius: 22px; }
+.user-info-modal .user-info-top .user-info-fields {
+  width: 100%; margin: 0; padding: 8px 16px; background: rgba(25,32,38,.68);
+  border: 1px solid rgba(255,255,255,.13); backdrop-filter: blur(18px); box-shadow: 0 12px 30px rgba(0,0,0,.18);
+}
+/* Публичные поля читаются как информация, а не как таблица. */
+.user-info-modal .user-info-top .user-info-field { display: block; padding: 10px 0 11px; }
+.user-info-modal .user-info-top .user-info-label { display: block; margin-bottom: 4px; font-size: 12px; line-height: 1.2; }
+.user-info-modal .user-info-top .user-info-field > span:last-child { display: block; font-size: 14.5px; line-height: 1.35; color: #fff; overflow-wrap: anywhere; }
+.user-info-modal .user-info-top .user-info-comment-value { justify-content: flex-start; text-align: left; }
+.user-info-modal .user-info-admin, .user-info-modal .user-info-files { width: auto; margin-left: 20px; margin-right: 20px; }
+
+@media (max-width: 760px) {
+  .user-info-modal { width: 100%; max-width: none; max-height: none; height: 100%; border-radius: 0; }
+  .user-info-modal .user-info-top { min-height: min(690px, 82vh); }
+  .user-info-modal .user-info-top-content { padding-top: min(430px, 51vh); }
+}
+
+/* Profile photo preparation =================================================
+   Одна вертикальная компоновка для desktop/mobile. Главный кадр всегда 3:4 —
+   это та же геометрия, в которой файл будет сохранён и показан в профиле. */
+.photo-editor-backdrop {
+  position: fixed; inset: 0; z-index: 2400;
+  display: grid; place-items: center; padding: 18px;
+  background: rgba(3, 8, 13, .76); backdrop-filter: blur(12px);
+}
+.photo-editor-modal {
+  width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--paper-raised) 96%, transparent);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .48);
+}
+.photo-editor-head {
+  position: relative; flex: none; padding: 18px 54px 15px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.photo-editor-head-copy { min-width: 0; }
+.photo-editor-head h2 { margin: 0; font-size: 20px; line-height: 1.2; letter-spacing: -.02em; }
+.photo-editor-head p {
+  margin: 6px 0 0; color: var(--ink-muted); font-size: 12.5px; line-height: 1.42;
+}
+.photo-editor-close {
+  position: absolute; top: 15px; right: 17px;
+  width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--paper-sunken); color: var(--ink-muted);
+  font-size: 24px; line-height: 1; cursor: pointer;
+}
+.photo-editor-close:hover { color: var(--ink); background: var(--row-hover); }
+
+.photo-editor-workspace {
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 18px 20px 14px;
+}
+.photo-editor-preview {
+  position: relative; width: min(320px, 100%); aspect-ratio: 3 / 4; margin: 0 auto;
+  overflow: hidden; border-radius: 20px; background: #0f151b;
+  cursor: grab; touch-action: none; user-select: none;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .30);
+}
+.photo-editor-preview:active { cursor: grabbing; }
+.photo-editor-preview > img,
+.photo-editor-mini-profile > img,
+.photo-editor-mini-circle-frame > img {
+  position: absolute; transform-origin: center; pointer-events: none; user-select: none;
+  object-fit: unset; /* размеры задаются математикой crop — ничего не растягиваем */
+}
+.photo-editor-fade {
+  position: absolute; z-index: 1; inset: 0; pointer-events: none;
+  background: linear-gradient(to bottom, transparent 48%, rgba(5, 8, 11, .10) 62%, rgba(5, 8, 11, .72) 100%);
+}
+/* Avatar использует object-fit:cover. Для вертикального 3:4 это центральный
+   квадрат по всей ширине кадра; окружность показывает именно эту область. */
+.photo-editor-avatar-guide {
+  position: absolute; z-index: 2; left: 50%; top: 50%;
+  width: calc(100% - 16px); aspect-ratio: 1; transform: translate(-50%, -50%);
+  border-radius: 50%; border: 1.5px solid rgba(255,255,255,.64);
+  box-shadow: 0 0 0 999px rgba(5, 9, 13, .10), inset 0 0 28px rgba(255,255,255,.035);
+  pointer-events: none;
+}
+.photo-editor-profile-sample {
+  position: absolute; z-index: 3; left: 18px; right: 18px; bottom: 58px;
+  display: flex; flex-direction: column; align-items: center;
+  color: #fff; text-shadow: 0 1px 8px rgba(0,0,0,.48); pointer-events: none;
+}
+.photo-editor-profile-sample > strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 20px; line-height: 1.15; }
+.photo-editor-profile-sample > span { margin-top: 3px; font-size: 11.5px; color: rgba(255,255,255,.78); }
+.photo-editor-profile-sample > span i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--online); }
+
+/* Все инструменты живут на фотографии и не отнимают вертикальное место. */
+.photo-editor-overlay-controls {
+  position: absolute; z-index: 5; left: 10px; right: 10px; bottom: 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  pointer-events: none;
+}
+.photo-editor-zoom-control,
+.photo-editor-tool-group {
+  pointer-events: auto; display: flex; align-items: center;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 13px;
+  background: rgba(13,18,23,.74); backdrop-filter: blur(12px);
+  box-shadow: 0 5px 16px rgba(0,0,0,.18);
+}
+.photo-editor-zoom-control { height: 38px; padding: 0 4px; }
+.photo-editor-zoom-control button,
+.photo-editor-tool-group button {
+  width: 36px; height: 36px; padding: 0; border: 0; border-radius: 10px;
+  background: transparent; color: rgba(255,255,255,.90); cursor: pointer;
+  font-size: 19px; line-height: 1;
+}
+.photo-editor-zoom-control button:hover,
+.photo-editor-tool-group button:hover,
+.photo-editor-tool-group button.is-active { background: rgba(255,255,255,.12); color: #fff; }
+.photo-editor-zoom-control button:disabled { opacity: .32; cursor: default; background: transparent; }
+.photo-editor-zoom-control span { min-width: 48px; text-align: center; color: rgba(255,255,255,.86); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.photo-editor-tool-group { gap: 2px; padding: 1px 3px; }
+
+.photo-editor-preview-section { width: 100%; margin-top: 15px; }
+.photo-editor-preview-title { margin-bottom: 9px; color: var(--ink); font-size: 13px; font-weight: 650; }
+.photo-editor-mini-previews { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.photo-editor-mini-card {
+  min-width: 0; height: 96px; padding: 10px;
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 15px;
+  background: color-mix(in srgb, var(--paper-sunken) 88%, transparent);
+}
+.photo-editor-mini-card > div:last-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.photo-editor-mini-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 11.5px; font-weight: 650; }
+.photo-editor-mini-card span { color: var(--ink-faint); font-size: 10px; line-height: 1.25; }
+.photo-editor-mini-circle {
+  position: relative; flex: none; width: 66px; height: 66px; overflow: hidden;
+  border-radius: 50%; background: #0f151b; box-shadow: 0 0 0 1px var(--line);
+}
+/* Внутри круга создаём виртуальный кадр 3:4 и показываем его центральный
+   квадрат — ровно как .avatar-img { object-fit:cover }. */
+.photo-editor-mini-circle-frame {
+  position: absolute; left: 0; top: 50%; width: 100%; height: 133.333%;
+  transform: translateY(-50%); overflow: hidden;
+}
+.photo-editor-mini-profile {
+  position: relative; flex: none; width: 58px; aspect-ratio: 3 / 4;
+  overflow: hidden; border-radius: 9px; background: #0f151b; box-shadow: 0 0 0 1px var(--line);
+}
+.photo-editor-mini-profile-fade { position: absolute; z-index: 1; inset: 0; background: linear-gradient(to bottom, transparent 48%, rgba(5,8,11,.74)); pointer-events: none; }
+.photo-editor-mini-profile b {
+  position: absolute; z-index: 2; left: 5px; right: 5px; bottom: 7px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #fff; font-size: 8.5px; line-height: 1.1; text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+
+.photo-editor-footer {
+  flex: none; display: grid; grid-template-columns: .8fr 1.2fr; gap: 9px;
+  padding: 13px 20px 18px; border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper-raised) 97%, transparent);
+}
+.photo-editor-footer .btn-secondary,
+.photo-editor-footer .btn-primary { width: 100%; min-width: 0; height: 42px; }
+
+@media (max-width: 520px) {
+  .photo-editor-backdrop { padding: 0; place-items: stretch; background: var(--paper-raised); backdrop-filter: none; }
+  .photo-editor-modal { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+  .photo-editor-head { padding: calc(16px + env(safe-area-inset-top, 0px)) 52px 13px 16px; }
+  .photo-editor-close { top: calc(13px + env(safe-area-inset-top, 0px)); right: 15px; }
+  .photo-editor-head h2 { font-size: 19px; }
+  .photo-editor-head p { font-size: 12px; }
+  .photo-editor-workspace { padding: 14px 16px 10px; }
+  .photo-editor-preview { width: min(318px, 82vw); }
+  .photo-editor-mini-card { height: 88px; padding: 8px; gap: 8px; }
+  .photo-editor-mini-circle { width: 58px; height: 58px; }
+  .photo-editor-mini-profile { width: 52px; }
+  .photo-editor-mini-card span { display: none; }
+  .photo-editor-footer { padding: 11px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (max-height: 720px) and (min-width: 521px) {
+  .photo-editor-head { padding-top: 14px; padding-bottom: 12px; }
+  .photo-editor-workspace { padding-top: 12px; padding-bottom: 10px; }
+  .photo-editor-preview { width: min(270px, 100%); }
+  .photo-editor-mini-card { height: 82px; }
+  .photo-editor-mini-circle { width: 56px; height: 56px; }
+  .photo-editor-mini-profile { width: 48px; }
+}

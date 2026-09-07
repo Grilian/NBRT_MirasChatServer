@@ -1,0 +1,201 @@
+/* Десктопная навигация и боковая шторка приложения. */
+
+/* ===== Desktop navigation refresh =====
+   На широком экране рельс — набор крупных узнаваемых иконок без подписей.
+   Мобильная нижняя навигация ниже переопределяет эти правила и сохраняет
+   подписи: это другая плотность экрана, не второй набор разделов. */
+.rail-menu-button {
+  width: 40px; height: 40px; padding: 0; border: 1px solid transparent;
+  border-radius: 13px; background: transparent; color: var(--ink-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background var(--ease), color var(--ease), border-color var(--ease), transform var(--ease);
+}
+.rail-menu-button:hover,
+.rail-menu-button.is-open {
+  color: var(--ink); background: var(--row-hover); border-color: var(--line);
+}
+.rail-menu-button:active { transform: scale(.96); }
+
+@media (min-width: 761px) {
+  .nav-rail { padding: 7px 6px 8px; gap: 5px; }
+  .rail-brand { padding: 0 0 5px; }
+  .rail-items { gap: 5px; }
+  .rail-item {
+    min-height: 48px; padding: 4px; gap: 0; justify-content: center;
+    border-radius: 15px; color: var(--rail-tone, var(--ink-muted));
+    background: transparent;
+  }
+  .rail-item:hover {
+    color: var(--rail-tone, var(--ink));
+    background: color-mix(in srgb, var(--rail-tone, var(--ink)) 10%, transparent);
+  }
+  .rail-item.is-active,
+  .rail-item.is-active:hover {
+    color: var(--rail-tone, var(--accent));
+    background: color-mix(in srgb, var(--rail-tone, var(--accent)) 18%, transparent);
+  }
+  .rail-icon {
+    width: 40px; height: 40px; align-items: center; justify-content: center;
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--rail-tone, var(--ink-muted)) 12%, transparent);
+    transition: background var(--ease), transform var(--ease), box-shadow var(--ease);
+  }
+  .rail-item:hover .rail-icon {
+    background: color-mix(in srgb, var(--rail-tone, var(--ink-muted)) 18%, transparent);
+    transform: translateY(-1px);
+  }
+  .rail-item.is-active .rail-icon {
+    background: color-mix(in srgb, var(--rail-tone, var(--accent)) 28%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rail-tone, var(--accent)) 26%, transparent);
+  }
+  .rail-icon svg { width: 25px; height: 25px; stroke-width: 1.9; }
+  .rail-label { display: none; }
+  .rail-badge { top: -4px; left: 27px; border-color: var(--sidebar); }
+  .rail-item.is-active .rail-badge {
+    background: var(--unread-badge); color: #fff; border-color: var(--sidebar);
+  }
+  .rail-soon { top: 7px; right: 5px; }
+
+  /* Заголовок «Чаты» на десктопе больше не занимает отдельную строку: поиск
+     начинается на той же высоте, что hamburger в рельсе. */
+  .roster-head { padding: 7px 10px 8px; }
+  .roster-account { display: none; }
+  .roster-search-area { min-height: 40px; }
+  .search input { min-height: 40px; padding-top: 8px; padding-bottom: 8px; }
+  /* Контакты и новая группа переехали в выезжающее меню. На мобильном эти
+     кнопки сохраняются — правило ограничено только широким режимом. */
+  .search .new-chat-btn { display: none; }
+}
+
+/* ===== Left application drawer ===== */
+.app-menu-layer {
+  position: absolute; inset: 0; z-index: 120;
+  background: color-mix(in srgb, #05080c 42%, transparent);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: stretch; justify-content: flex-start;
+  animation: app-menu-shade-in .16s ease-out;
+}
+.app-menu-drawer {
+  width: min(336px, calc(100vw - 44px)); height: 100%; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--paper-raised); border-right: 1px solid var(--line);
+  box-shadow: 18px 0 42px rgba(0, 0, 0, .28);
+  animation: app-menu-slide-in .22s cubic-bezier(.22,.61,.36,1);
+}
+@keyframes app-menu-shade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes app-menu-slide-in { from { transform: translateX(-26px); opacity: .65; } to { transform: translateX(0); opacity: 1; } }
+
+.app-menu-profile {
+  flex: none; display: grid; grid-template-columns: 52px minmax(0, 1fr) 34px;
+  align-items: center; gap: 11px; padding: 18px 16px 15px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 9%, var(--paper-raised)), var(--paper-raised) 68%);
+}
+.app-menu-avatar {
+  width: 52px; height: 52px; padding: 0; border: none; border-radius: 50%;
+  background: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.app-menu-avatar .avatar { width: 52px; height: 52px; font-size: 18px; }
+.app-menu-avatar:hover .avatar { box-shadow: 0 0 0 2px var(--accent); }
+.app-menu-profile-text { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.app-menu-profile-name {
+  font: 650 16px/1.2 var(--font-display); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-menu-status {
+  width: 100%; min-width: 0; padding: 0; border: none; background: none;
+  display: flex; align-items: center; gap: 5px; color: var(--ink-muted);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.app-menu-status:hover { color: var(--accent); }
+.app-menu-status-label { flex: none; color: var(--ink-faint); }
+.app-menu-status span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-menu-close {
+  align-self: start; width: 32px; height: 32px; padding: 0; border: none;
+  border-radius: 50%; background: transparent; color: var(--ink-faint); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.app-menu-close:hover { color: var(--ink); background: var(--row-hover); }
+
+.app-menu-items {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 9px 8px 6px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.app-menu-item {
+  width: 100%; min-height: 46px; padding: 6px 9px; border: none;
+  border-radius: 12px; background: transparent; color: var(--ink);
+  display: flex; align-items: center; gap: 11px; text-align: left;
+  font: inherit; cursor: pointer; transition: background var(--ease), transform var(--ease);
+}
+button.app-menu-item:hover, .app-menu-theme:hover { background: var(--row-hover); }
+button.app-menu-item:active { transform: translateX(1px); }
+button.app-menu-item:disabled { opacity: .42; cursor: default; }
+.app-menu-item-icon {
+  flex: none; width: 34px; height: 34px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-muted); background: var(--paper-sunken);
+}
+.app-menu-item-icon.is-chats { color: #6e9fbe; background: color-mix(in srgb, #6e9fbe 14%, transparent); }
+.app-menu-item-icon.is-bookmarks { color: #b48c63; background: color-mix(in srgb, #b48c63 14%, transparent); }
+.app-menu-item-icon.is-tasks { color: #72a078; background: color-mix(in srgb, #72a078 14%, transparent); }
+.app-menu-item-icon.is-apps { color: #8e80bb; background: color-mix(in srgb, #8e80bb 14%, transparent); }
+.app-menu-item-icon.is-groups { color: #6c97c7; background: color-mix(in srgb, #6c97c7 14%, transparent); }
+.app-menu-item-icon.is-contacts { color: #6da79b; background: color-mix(in srgb, #6da79b 14%, transparent); }
+.app-menu-item-icon.is-calls { color: #7297aa; background: color-mix(in srgb, #7297aa 14%, transparent); }
+.app-menu-item-icon.is-favorites { color: #b47c86; background: color-mix(in srgb, #b47c86 14%, transparent); }
+.app-menu-item-icon.is-settings { color: #7e8fa4; background: color-mix(in srgb, #7e8fa4 14%, transparent); }
+.app-menu-item-icon.is-theme { color: #8e87b4; background: color-mix(in srgb, #8e87b4 14%, transparent); }
+.app-menu-item-body { flex: 1; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.app-menu-item-body > span { font-size: 14px; font-weight: 520; }
+.app-menu-item-body small { flex: none; font-size: 10.5px; color: var(--ink-faint); }
+
+.app-menu-theme { cursor: default; }
+.app-menu-switch { flex: none; margin-left: 4px; }
+.app-menu-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.app-menu-switch-track {
+  position: relative; width: 42px; height: 23px; border-radius: 999px;
+  display: block; cursor: pointer; background: color-mix(in srgb, var(--ink) 18%, transparent);
+  border: 1px solid var(--line); transition: background var(--ease), border-color var(--ease);
+}
+.app-menu-switch-thumb {
+  position: absolute; width: 17px; height: 17px; left: 2px; top: 2px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.28);
+  transition: transform .18s ease;
+}
+.app-menu-switch input:checked + .app-menu-switch-track { background: var(--accent); border-color: var(--accent); }
+.app-menu-switch input:checked + .app-menu-switch-track .app-menu-switch-thumb { transform: translateX(19px); }
+.app-menu-switch input:focus-visible + .app-menu-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app-menu-footer {
+  flex: none; padding: 11px 16px 14px; border-top: 1px solid var(--line);
+  background: var(--paper); color: var(--ink-faint);
+}
+.app-menu-soon { margin-bottom: 7px; font-size: 11.5px; color: var(--ink-muted); }
+.app-menu-app-name { font-size: 12.5px; font-weight: 650; color: var(--ink-muted); }
+.app-menu-app-version { margin-top: 2px; font-size: 11px; }
+
+/* ===== Compact desktop windows opened from the application menu ===== */
+.settings-modal { width: min(560px, calc(100vw - 48px)); max-width: 560px; height: min(760px, 88vh); max-height: 88vh; }
+.settings-modal .settings-panel { min-height: 0; flex: 1; }
+.settings-modal .settings-body { min-height: 0; flex: 1; overflow-y: auto; }
+.tasks-modal { width: min(650px, calc(100vw - 48px)); max-width: 650px; height: min(720px, 86vh); max-height: 86vh; }
+.tasks-modal > .section-pane { min-height: 0; flex: 1; }
+.task-head-actions, .user-info-head-actions { display: flex; align-items: center; gap: 7px; }
+
+/* Крупные действия на телефоне выглядят как полноценные экраны: без
+   плавающей карточки, полей вокруг и скругления. Settings уже является
+   section-host; те же правила применяются к Контактам, Новой группе и форме
+   профиля, когда они открыты поверх текущего раздела. */
+@media (max-width: 760px) {
+  .mobile-page-overlay {
+    padding: 0; align-items: stretch; justify-content: flex-start;
+    background: var(--paper); backdrop-filter: none;
+  }
+  .mobile-page-overlay > .modal-card {
+    width: 100%; max-width: none; height: 100%; max-height: none;
+    border-radius: 0; box-shadow: none; border: none;
+  }
+  .mobile-page-overlay .directory-list,
+  .mobile-page-overlay .section-scroll,
+  .mobile-page-overlay .settings-body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+}

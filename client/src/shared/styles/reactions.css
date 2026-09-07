@@ -1,0 +1,143 @@
+/* Реакции под сообщением. */
+
+/* ===== Реакции ===== */
+/* Под пузырём, каждая с аватаром поставившего — в спеке именно так, а не
+   просто «эмодзи + счётчик»: в рабочей переписке важно, кто именно отметил. */
+/* Наезд на пузырь снизу (под временем) — так плашки читаются как часть
+   сообщения, а не как отдельная строка под ним. z-index обязателен: без него
+   фон пузыря перекрывал бы верхнюю кромку плашек. */
+/* Реакции и кнопка ветки живут в ОДНОЙ строке под пузырём (.msg-underrow):
+   обе относятся к одному сообщению, а разложенные по разным строкам они и
+   занимали двойную высоту, и отрывали реакции от пузыря. Наезд на пузырь и
+   z-index теперь на самой строке — иначе фон пузыря съедал бы верхнюю кромку
+   плашек. flex-wrap оставлен: при десятке реакций кнопка ветки уезжает на
+   следующую строку, а не выдавливает их за край. */
+.msg-underrow {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px;
+  max-width: 100%; margin-top: -2px; position: relative; z-index: 1;
+}
+.msg.mine .msg-underrow { justify-content: flex-end; }
+.msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; }
+.msg.mine .msg-reactions { justify-content: flex-end; }
+.reaction-chip {
+  position: relative; display: inline-flex; align-items: center; gap: 3px;
+  background: var(--paper-raised); border: 1px solid var(--line); border-radius: var(--radius-pill);
+  padding: 2px 7px 2px 6px; cursor: pointer; font-size: 13px; line-height: 1;
+}
+/* Лица внахлёст: первое целиком, каждое следующее наезжает на предыдущее.
+   Обводка цветом плашки отделяет их друг от друга, иначе стопка сливается
+   в пятно. Порядок наложения обратный, чтобы верхним оказалось первое. */
+.reaction-chip-faces { display: inline-flex; align-items: center; }
+.reaction-chip-faces .avatar { border: 1.5px solid var(--paper-raised); }
+.reaction-chip-faces .avatar:not(:first-child) { margin-left: -7px; }
+.reaction-chip.is-mine .reaction-chip-faces .avatar { border-color: var(--bubble-in); }
+.reaction-chip-count { font-weight: 600; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.reaction-chip:hover { border-color: var(--border-strong, var(--accent)); }
+.reaction-chip.is-mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.reaction-chip .avatar { width: 18px; height: 18px; font-size: 8px; }
+.reaction-chip-emoji { font-size: 14px; }
+.reaction-chip-emoji .custom-emoji {
+  width: 18px; height: 18px; vertical-align: middle; margin: 0;
+}
+.reaction-chip-emoji .custom-emoji-fallback,
+.reaction-chip-emoji .custom-emoji-fallback.is-placeholder {
+  width: 18px; height: 18px; font-size: 13px; line-height: 18px;
+  vertical-align: middle; margin: 0;
+}
+.reaction-chip-remove {
+  display: none; border: none; background: none; color: var(--ink-faint);
+  cursor: pointer; padding: 0 0 0 2px; line-height: 1;
+}
+.reaction-chip:hover .reaction-chip-remove { display: inline-flex; }
+.reaction-chip-remove:hover { color: var(--unread); }
+/* На тач-экране крестик по наведению не показать — там снятие долгим
+   удержанием по самой реакции (см. startReactionLongPress). */
+@media (hover: none) {
+  .reaction-chip-remove { display: none !important; }
+}
+
+/* Быстрые реакции — отдельная плашка над карточкой меню (по референсу).
+   Набор задаётся в панели управления и бывает длиннее, чем влезает в ряд:
+   лишние прячутся за стрелку и разворачиваются в несколько рядов. Прокрутки
+   тут намеренно нет — колесом мыши горизонтальную не провернуть, и на ПК
+   ряд просто выглядел обрезанным. */
+.msg-menu-reactions {
+  display: flex; align-items: center; gap: 2px; flex: none;
+  padding: 5px 8px; max-width: min(360px, calc(100vw - 24px));
+  background: var(--paper-raised); border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-lg);
+}
+/* Развёрнутый вид — сетка в несколько рядов, поэтому уже не пилюля. */
+.msg-menu-reactions.is-expanded {
+  flex-wrap: wrap; border-radius: var(--radius-lg); max-width: min(360px, calc(100vw - 24px));
+}
+.msg-menu-reaction-more { color: var(--ink-muted); }
+.msg-menu-reaction-more.is-open svg { transform: rotate(180deg); }
+.msg-menu-reaction {
+  flex: none; border: none; background: none; cursor: pointer;
+  font-size: 26px; line-height: 1; width: 42px; height: 42px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.msg-menu-reaction .custom-emoji {
+  width: 30px; height: 30px; vertical-align: middle; margin: 0;
+}
+.msg-menu-reaction .custom-emoji-fallback,
+.msg-menu-reaction .custom-emoji-fallback.is-placeholder {
+  width: 30px; height: 30px; font-size: 23px; line-height: 30px;
+  vertical-align: middle; margin: 0;
+}
+.msg-menu-reaction:hover { background: var(--row-hover); }
+.msg-menu-reaction.is-active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+.reactions-modal { max-width: 380px; }
+.reaction-row { cursor: default; }
+.reaction-row-emoji { font-size: 20px; flex: none; }
+.reaction-row-emoji .custom-emoji {
+  width: 28px; height: 28px; vertical-align: middle; margin: 0;
+}
+.reaction-row-emoji .custom-emoji-fallback,
+.reaction-row-emoji .custom-emoji-fallback.is-placeholder {
+  width: 28px; height: 28px; font-size: 20px; line-height: 28px;
+  vertical-align: middle; margin: 0;
+}
+.reaction-row-remove { flex: none; }
+
+/* Подтверждение удаления: область действия выбирается здесь, а не в
+   системном window.confirm — там галочку «также у собеседника» не показать. */
+.confirm-modal { max-width: 400px; }
+.confirm-body { padding: 14px 20px 4px; display: flex; flex-direction: column; gap: 10px; }
+.confirm-text { font-size: 14px; color: var(--ink-muted); margin: 0; }
+.confirm-warning { font-size: 14px; color: var(--ink); margin: 0; font-weight: 500; }
+.confirm-check { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.confirm-check input { accent-color: var(--accent); width: 17px; height: 17px; flex: none; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
+
+/* Пересылка: сверху — что уедет, снизу — куда. */
+.forward-modal { max-width: 460px; }
+.forward-preview {
+  max-height: 140px; overflow-y: auto; margin: 12px 18px 0; padding: 8px 10px;
+  background: var(--paper-sunken); border-radius: var(--radius-md); font-size: 13px;
+}
+.forward-preview-item { display: flex; gap: 6px; padding: 2px 0; min-width: 0; }
+.forward-preview-author { font-weight: 600; flex: none; }
+.forward-preview-text { color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.select-toolbar-forward {
+  display: inline-flex; align-items: center; gap: 5px; border: none; background: none;
+  color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 4px 8px;
+}
+.select-toolbar-forward:disabled { opacity: .45; cursor: default; }
+
+/* Справочник «Люди» — окно повыше обычного: это длинный список с группировкой. */
+.people-modal { max-width: 520px; max-height: 88vh; }
+.people-modal .section-pane { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.people-registered { color: var(--ink-faint); }
+
+/* Профиль в модалке шире справочника: внутри полноценная форма с полями. */
+.profile-modal { max-width: 480px; max-height: 88vh; }
+.profile-modal .settings-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.profile-modal .settings-body { flex: 1; overflow-y: auto; }
+.profile-modal .profile-form-card { max-width: none !important; }
+.directory-search { margin: 14px 18px; }
+.directory-list { flex: 1; overflow-y: auto; padding: 4px 8px 14px; }
+.directory-row { cursor: pointer; }

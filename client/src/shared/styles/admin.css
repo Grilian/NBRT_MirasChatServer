@@ -1,0 +1,255 @@
+/* Панель супер-админа и справочник. */
+
+/* ===== Панель супер-админа ===== */
+.sa-shell { width: 100%; height: 100%; overflow-y: auto; background: var(--paper-sunken); color: var(--ink); }
+.sa-header { display: flex; align-items: center; justify-content: space-between; padding: 15px 24px; background: var(--sidebar); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 3; }
+.sa-tabs {
+  display: flex; gap: 4px; padding: 10px 24px 0; background: var(--sidebar); border-bottom: 1px solid var(--line);
+  position: sticky; top: 57px; z-index: 3; overflow-x: auto;
+}
+.sa-tab {
+  border: none; background: none; cursor: pointer; padding: 10px 16px; font-size: 13.5px; font-weight: 600;
+  color: var(--ink-muted); border-radius: var(--radius-sm) var(--radius-sm) 0 0; display: flex; align-items: center; gap: 7px;
+  white-space: nowrap; transition: color var(--ease), background var(--ease);
+}
+.sa-tab:hover { color: var(--ink); background: var(--row-hover); }
+.sa-tab.is-active { color: var(--accent); background: var(--paper-sunken); box-shadow: inset 0 -2px 0 var(--accent); }
+.sa-tab-count {
+  font-size: 11px; font-weight: 700; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+  border-radius: var(--radius-pill); padding: 1px 7px;
+}
+.sa-tab.is-active .sa-tab-count { background: var(--accent); color: var(--accent-ink); }
+.sa-main { max-width: 1120px; margin: 0 auto; padding: 22px 24px 40px; display: flex; flex-direction: column; gap: 20px; }
+.sa-card { background: var(--paper-raised); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); }
+/* Группы/Отделы/Обновления — короткие списки и формы, растягивать их на всю
+   ширину карточки пользователей незачем: выглядит пусто и расшатывает ритм
+   вкладок между собой. */
+.sa-card--compact { max-width: 560px; margin-left: auto; margin-right: auto; }
+.sa-card h2 { margin: 0 0 14px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.sa-card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.sa-card-head h2 { margin: 0; }
+.sa-count { font-size: 11.5px; font-weight: 600; color: var(--ink-faint); background: var(--paper-sunken); border-radius: var(--radius-pill); padding: 1px 8px; }
+.sa-search {
+  border: 1px solid var(--line); background: var(--paper-sunken); color: var(--ink); border-radius: var(--radius-pill);
+  padding: 8px 14px; font-size: 13px; min-width: 220px;
+}
+.sa-search:focus { border-color: var(--accent); outline: none; }
+.sa-table-wrap { overflow-x: auto; margin: 0 -2px; }
+.sa-empty { text-align: center; color: var(--ink-faint); padding: 22px 10px !important; }
+.sa-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.sa-table th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint);
+  padding: 8px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--paper-raised); z-index: 1;
+}
+.sa-table td { padding: 8px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.sa-table th:first-child, .sa-table td:first-child { padding-left: 4px; }
+.sa-table th:last-child, .sa-table td:last-child { padding-right: 4px; text-align: right; }
+.sa-table tr:last-child td { border-bottom: none; }
+.sa-table tbody tr:hover td { background: var(--row-hover); }
+.sa-table select, .sa-table input[type="text"], .sa-table input[type="password"] {
+  border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: 6px; padding: 6px 9px; font-size: 13px;
+}
+/* Таблица пользователей растёт быстрее остальных и легче всего расползается
+   вбок — колонка с именем раньше не была ничем ограничена и тянула за собой
+   всю строку. width: auto вместо 100% — таблица не растягивается на всю
+   карточку, а обжимается по содержимому (короткие кнопки и бейджи не должны
+   тянуть за собой пустое пространство). Длинные имена обрезаются
+   многоточием по фиксированной ширине; полное имя и логин остаются в title
+   (всплывающая подсказка). */
+.sa-table-users { width: auto; max-width: 100%; margin: 0 auto; }
+.sa-user-cell { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.sa-row-muted { opacity: .6; }
+.sa-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.sa-link:hover { color: var(--accent); }
+.sa-hint { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--ink-muted); }
+.sa-versions { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.sa-version {
+  display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+  background: var(--paper-sunken); border-radius: var(--radius-pill); padding: 2px 8px;
+}
+.sa-version-platform { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); }
+/* «old» — не версия, а её отсутствие: приглушаем, чтобы взгляд цеплялся за
+   тех, у кого версия есть, но старая. */
+.sa-version.is-old { background: none; color: var(--ink-faint); font-style: italic; padding-left: 0; }
+.sa-user-modal { max-width: 380px; }
+.sa-user-modal-body { padding: 4px 20px 22px; }
+.sa-user-modal-body .user-info-field { font-size: 13.5px; }
+.sa-muted-tag { margin-left: 6px; font-size: 12px; }
+/* Пак смайликов в панели управления */
+.sa-emoji-pack { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; }
+.sa-emoji-pack-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.sa-emoji-pack-name {
+  flex: 1; min-width: 0; border: 1px solid transparent; background: none; color: var(--ink);
+  font-size: 14px; font-weight: 600; border-radius: 6px; padding: 5px 7px;
+}
+.sa-emoji-pack-name:focus { outline: none; border-color: var(--accent); background: var(--paper-sunken); }
+.sa-emoji-input {
+  width: 100%; border: 1px solid var(--line); background: var(--paper-sunken); color: var(--ink);
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 18px; line-height: 1.5;
+  font-family: inherit; resize: vertical;
+}
+.sa-emoji-input:focus { outline: none; border-color: var(--accent); }
+.sa-emoji-pack-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.sa-emoji-pack-foot .sa-hint { margin: 0; }
+
+.sa-inline-form { display: flex; gap: 8px; margin-top: 14px; }
+.sa-inline-form input { flex: 1; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px; }
+/* .btn-primary по умолчанию width: 100% — рассчитан на форму логина.
+   Внутри flex-строки это заставляло кнопку раздуваться и отжимать поле
+   ввода в узкую полоску. */
+.sa-inline-form .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; white-space: nowrap; }
+.sa-btn-ghost { border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 6px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }
+.sa-btn-ghost:hover { background: var(--paper-sunken); }
+.sa-btn-danger { border: none; background: none; color: var(--unread); font-size: 12.5px; cursor: pointer; padding: 4px 6px; }
+.sa-btn-danger:hover { text-decoration: underline; }
+.sa-emoji-notice {
+  margin: 8px 0; padding: 9px 11px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 10%, var(--paper-sunken)); color: var(--ink);
+  font-size: 13px;
+}
+.sa-emoji-system {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px; margin: 14px 0 18px;
+}
+.sa-emoji-system-block {
+  min-width: 0; padding: 13px; border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--paper-sunken);
+}
+.sa-emoji-system-block h3 { margin: 0 0 6px; font-size: 14px; }
+.sa-emoji-import-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.sa-emoji-import-row select {
+  min-width: 210px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--paper-raised); color: var(--ink);
+}
+/* Поля нового набора появляются в том же ряду, что и выбор цели импорта, —
+   на всю ширину, чтобы не сжимать кнопку выбора файла до нечитаемой. */
+.sa-emoji-new-pack { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+.sa-emoji-new-pack input,
+.sa-emoji-new-pack select {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper-raised); color: var(--ink);
+}
+.sa-emoji-new-pack input { flex: 1; min-width: 140px; }
+
+.sa-emoji-asset-packs { display: grid; gap: 6px; margin-top: 10px; }
+.sa-emoji-asset-pack { display: flex; align-items: stretch; gap: 6px; }
+.sa-emoji-asset-pack-activate {
+  flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper-raised); color: var(--ink); text-align: left; cursor: pointer;
+}
+.sa-emoji-asset-pack.is-active .sa-emoji-asset-pack-activate { border-color: var(--accent); }
+.sa-emoji-asset-pack-activate:disabled { opacity: .5; cursor: default; }
+.sa-emoji-asset-pack span { font-weight: 600; }
+.sa-emoji-asset-pack small { color: var(--ink-muted); }
+.sa-emoji-asset-pack strong { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--accent); font-size: 12px; }
+.sa-emoji-asset-pack-delete {
+  flex: none; width: 34px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper-raised); color: var(--ink-muted); cursor: pointer; font-size: 17px; line-height: 1;
+}
+.sa-emoji-asset-pack-delete:hover { color: var(--unread); border-color: var(--unread); }
+.sa-emoji-asset-pack-delete:disabled { opacity: .5; cursor: default; }
+.sa-emoji-categories-title { margin: 0 0 9px; font-size: 15px; }
+@media (max-width: 840px) { .sa-emoji-system { grid-template-columns: 1fr; } }
+/* Google Календарь: несколько карточек подряд вместо одной длинной формы —
+   настройка приложения, подключение аккаунта, выбор календаря и состояние
+   заполняются по очереди, и каждый следующий шаг имеет смысл только после
+   предыдущего. */
+.sa-google { display: flex; flex-direction: column; gap: 16px; }
+.sa-google .sa-card--compact { margin-bottom: 0; }
+.sa-google-form { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.sa-google-form label,
+.sa-google-field { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
+.sa-google-form label { margin-top: 0; }
+.sa-google-form label > span,
+.sa-google-field > span { font-size: 12.5px; color: var(--ink-dim); }
+.sa-google-form label em { font-style: normal; color: var(--accent); }
+.sa-google-form input,
+.sa-google-field input,
+.sa-google-field select {
+  border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink);
+  border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px; width: 100%;
+}
+.sa-google-form input:focus,
+.sa-google-field input:focus,
+.sa-google-field select:focus { outline: none; border-color: var(--accent); }
+.sa-google-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+/* .btn-primary растянут на всю ширину ради формы логина — в ряду с другими
+   кнопками он отжимал бы их за край, та же правка, что и в .sa-inline-form. */
+.sa-google-actions .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; }
+.sa-google .sa-btn-danger { margin-left: auto; }
+
+/* Список дополнительных календарей. Кружок слева — тот же цвет, которым слой
+   будет виден в сетке календаря: подбирать его вслепую по названию нельзя. */
+.sa-google-sources { list-style: none; margin: 14px 0 0; padding: 0; display: flex;
+  flex-direction: column; gap: 8px; }
+.sa-google-sources li { display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.sa-google-source-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sa-google-source-name em { font-style: normal; font-size: 12px; color: var(--ink-dim); }
+.sa-google-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; }
+.sa-google-dot--violet { background: #8b5cf6; }
+.sa-google-dot--teal { background: #14b8a6; }
+.sa-google-dot--green { background: #22c55e; }
+.sa-google-dot--orange { background: #f97316; }
+.sa-google-dot--graphite { background: #64748b; }
+
+.sa-google-add { display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  flex-wrap: wrap; }
+.sa-google-add select { flex: 1 1 180px; min-width: 0; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--surface);
+  color: var(--ink); font-size: 14px; }
+.sa-google-add select:focus { outline: none; border-color: var(--accent); }
+.sa-google-add .btn-primary { width: auto; margin-top: 0; padding: 9px 20px; }
+
+.sa-verified-badge { color: var(--accent); font-weight: 700; margin-left: 4px; }
+.sa-reaction-preview { display: flex; flex-wrap: wrap; gap: 7px; font-size: 22px; margin: 4px 0 12px; }
+.sa-reaction-preview button {
+  width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.sa-reaction-preview button:hover { border-color: var(--accent); background: var(--row-hover); }
+.sa-reaction-preview .custom-emoji { width: 30px; height: 30px; }
+.sa-reaction-picker-toggle {
+  border: 1px solid var(--line); border-radius: 9px; background: var(--surface);
+  color: var(--accent); cursor: pointer; padding: 9px 13px; font-weight: 600;
+}
+.sa-reaction-picker-toggle:hover { background: var(--row-hover); }
+.sa-reaction-picker {
+  margin-top: 10px; max-height: 300px; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
+}
+.sa-reaction-picker .emoji-grid { max-height: 238px; overflow-y: auto; }
+.sa-reaction-picker .emoji-cell.is-selected {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.sa-reaction-save { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sa-reaction-save .btn-primary { width: auto; margin-top: 0; }
+.sa-new-badge {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--unread); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .03em;
+  text-transform: uppercase; vertical-align: middle;
+}
+.sa-password-status { display: inline-block; margin-left: 8px; font-size: 11.5px; color: var(--ink-faint); }
+.sa-password-status.is-expired { color: var(--unread); font-weight: 600; }
+
+/* ===== Directory modal ===== */
+.modal-overlay {
+  position: fixed; inset: 0; background: color-mix(in srgb, black 45%, transparent); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  pointer-events: auto; overscroll-behavior: contain;
+}
+/* Профиль может открыться поверх уже открытого окна (справочник «Люди») —
+   без этого он стоял бы наравне с ним по z-index, и порядок в DOM решал бы,
+   кто сверху, а не то, какое окно открыли позже. */
+.modal-overlay-nested { z-index: 55; }
+.modal-card {
+  position: relative; /* якорь для плашек внутри окна (например «в разработке») */
+  width: 100%; max-width: 420px; max-height: 80vh; background: var(--paper-raised);
+  border-radius: var(--radius-lg); display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+.modal-card .conv-head { background: var(--paper-raised); }

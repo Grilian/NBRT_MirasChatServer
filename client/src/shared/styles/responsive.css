@@ -1,0 +1,205 @@
+/* Узкий экран: одна панель, нижняя навигация. */
+
+/* ===== Responsive: single-pane / mobile navigation ===== */
+@media (max-width: 760px) {
+  .chat-layout { display: block; position: relative; overflow: hidden; height: 100%; }
+  .thread-panel {
+    position: absolute; inset: 0; width: 100%; z-index: 40; border-left: none;
+    box-shadow: none; animation: thread-pane-in .24s cubic-bezier(.22, .61, .36, 1);
+  }
+  .thread-header { min-height: 52px; padding-left: 8px; justify-content: flex-start; }
+  .thread-header > div { flex: 1; }
+  .thread-close { order: -1; transform: rotate(0); }
+  .thread-close-desktop { display: none; }
+  .thread-header .thread-close-mobile { display: inline; font-size: 38px; font-weight: 300; line-height: .7; }
+  .thread-root { max-height: 30%; padding: 12px; }
+  .thread-messages .conv-body { padding: 10px 9px 12px; }
+  .thread-messages .bubble { max-width: 90%; }
+  @keyframes thread-pane-in {
+    from { transform: translateX(10%); opacity: .45; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  /* Рельс становится нижней панелью вкладок: вертикальный на 84px съел бы
+     четверть ширины телефона. Внутри самой переписки он прячется — там нужен
+     весь экран, а вернуться можно кнопкой «назад» в шапке. */
+  /* Нижняя панель — «островок»: отделена от края экрана, со своей рамкой и
+     тенью. Это оформление, а не всплывающий элемент: панель постоянна и
+     остаётся основной навигацией. Отступ снизу учитывает жестовую полосу
+     Android и iOS (safe-area), иначе панель ложится прямо на неё. */
+  .nav-rail {
+    position: absolute; top: auto; z-index: 3;
+    left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    flex-direction: row; height: 58px; padding: 0 2px; gap: 0;
+    border: 1px solid var(--line); border-radius: 18px;
+    background: var(--paper); box-shadow: var(--shadow-lg);
+    overflow: hidden;
+  }
+  .rail-brand, .rail-foot { display: none; }
+  /* В нижней панели ровно шесть разделов (MOBILE_SECTIONS) — они делят строку
+     поровну (flex:1 1 0, min-width:0). «Пространства» и «Файлы» туда не
+     помещаются и остаются на десктопном рельсе. */
+  .rail-item-desktop-only { display: none; }
+  .roster-search-open-btn {
+    display: flex; transition: width .22s ease, opacity .18s ease, background var(--ease), color var(--ease);
+  }
+  .roster.is-search-collapsed .roster-search-open-btn {
+    width: 30px; opacity: 1; pointer-events: auto;
+  }
+  .roster-head { padding: 12px 14px 8px; }
+  /* Панель парит НАД содержимым, а не отодвигает его: раздел занимает весь
+     экран до самого низа. Отступ снизу получают только ПРОКРУЧИВАЕМЫЕ
+     области — чтобы последний элемент можно было поднять над панелью. Тот
+     же отступ на самих разделах-контейнерах давал внизу мёртвую полосу
+     фона: у флекс-контейнера padding не прокручивается вместе с
+     содержимым, он просто съедает высоту. */
+  .roster-list,
+  .section-host .settings-body,
+  .section-host .cal-grid-scroll,
+  .section-host .cal-agenda,
+  .section-host .cal-month,
+  .section-host .files-body,
+  .section-host .home-section,
+  .section-host .tasks-list {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
+  .roster-account { margin-bottom: 10px; transition: margin-bottom .22s ease; }
+  .roster.is-search-collapsed .roster-account { margin-bottom: 0; }
+  .roster-search-area {
+    max-height: 160px; opacity: 1; transform: translateY(0); overflow: hidden;
+    transition: max-height .24s cubic-bezier(.22,.61,.36,1), opacity .18s ease, transform .24s cubic-bezier(.22,.61,.36,1);
+  }
+  .roster.is-search-collapsed .roster-search-area {
+    max-height: 0; opacity: 0; transform: translateY(-8px); pointer-events: none;
+  }
+  .search input { min-height: 42px; padding-left: 38px; font-size: 15px; }
+  .search .search-icon { left: 14px; width: 17px; height: 17px; }
+
+  /* На телефоне лента раскрывается только при активации поиска. Здесь нужны
+     подписи и крупная зона тапа, поэтому она заметно выше десктопной. */
+  .recent-chats {
+    gap: 12px; max-height: 0; opacity: 0; padding: 0;
+    transition: max-height .24s cubic-bezier(.22,.61,.36,1), opacity .18s ease, padding .24s ease;
+  }
+  .roster-search-area.is-recent-open .recent-chats {
+    max-height: 94px; opacity: 1; padding: 10px 1px 2px;
+  }
+  .recent-chat { flex-basis: 62px; width: 62px; gap: 5px; }
+  .recent-chat .avatar { width: 56px; height: 56px; font-size: 18px; }
+  .recent-chat .avatar .dot { width: 13px; height: 13px; border-width: 2.5px; }
+  .recent-chat > span {
+    display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-size: 11.5px; line-height: 1.2; color: var(--ink-muted);
+    text-align: center;
+  }
+  .rail-items { flex-direction: row; overflow-x: hidden; overflow-y: hidden; gap: 0; }
+  .rail-item { flex: 1 1 0; min-width: 0; border-radius: 0; justify-content: center; }
+  .rail-item.is-active { background: none; color: var(--accent); }
+  .rail-item.is-active:hover { background: var(--row-hover); }
+  .rail-item.is-active .rail-badge { background: var(--unread-badge); color: #fff; border-color: var(--sidebar); }
+  .chat-layout.is-conversation-view .nav-rail { display: none; }
+
+  /* Панели занимают ВЕСЬ экран, включая полосу под нижней навигацией: панель
+     парит поверх содержимого, а не отодвигает его. Раньше здесь стояло
+     inset: 0 0 58px, и под панелью оставалась мёртвая полоса фона — та самая
+     пустота на вкладках чатов, календаря и настроек. Запас, чтобы последний
+     элемент можно было поднять над панелью, дают сами прокручиваемые области
+     (padding-bottom ниже), а не контейнер. */
+  .roster, .conversation, .section-host {
+    position: absolute; inset: 0; width: 100%; height: auto; border-right: none;
+  }
+  /* Панель на телефоне ровно одна: список чатов ИЛИ переписка (см.
+     useNarrowLayout в Chat.tsx). Прятать вторую трансформом, оставляя её в
+     DOM, больше нельзя — именно так и возникала «чат-ловушка»: стоило
+     композитору WebView потерять трансформ (перестроение под клавиатуру,
+     возврат из фона, оборванный переход), переписка оставалась поверх списка,
+     хотя состояние уже говорило «список». Выйти было нечем: и «назад», и
+     рельс вели туда, где мы и так были. Поэтому вместо перехода между двумя
+     постоянными элементами — короткий въезд той панели, которая появилась. */
+  .chat-layout.is-conversation-view .conversation { inset: 0; }
+  .conversation { animation: pane-in .26s cubic-bezier(.22, .61, .36, 1); }
+  @keyframes pane-in {
+    from { transform: translateX(12%); opacity: .4; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  /* Уход с экрана при открытой клавиатуре: Android в этот же момент меняет
+     размер WebView и роняет анимацию на полпути — тогда обходимся вовсе без неё. */
+  .chat-layout.is-no-pane-anim .roster, .chat-layout.is-no-pane-anim .conversation { animation: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .conversation { animation: none; }
+  }
+  .conv-head .back-btn { display: inline-flex; }
+  .conv-body { padding: 12px 10px 14px; }
+  .bubble { max-width: 86%; }
+
+  /* Telegram-подобная схема: нижняя emoji-поверхность живёт в WebView
+     постоянно. Android IME настроена как adjustNothing и просто накрывает её.
+     Composer резервирует эту высоту только пока активен любой режим ввода.
+     При keyboard <-> emoji флаг не меняется, поэтому layout остаётся ровно
+     тем же самым и чат не получает промежуточного resize-кадра. */
+  .composer { z-index: 31; }
+  .composer.has-mobile-input-surface {
+    margin-bottom: var(--mobile-emoji-height, 300px);
+  }
+  /* Плавно только само появление/исчезание зарезервированного места целиком
+     (0 ↔ высота клавиатуры) — единственный момент, где высота реально
+     меняется. Переключение клавиатура↔панель эту высоту не трогает вовсе,
+     поэтому там анимировать нечего. */
+  @media (prefers-reduced-motion: no-preference) {
+    .composer.has-mobile-input-surface, .composer:not(.has-mobile-input-surface) {
+      transition: margin-bottom 220ms cubic-bezier(.4, 0, .2, 1);
+    }
+  }
+  .mobile-emoji-surface {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: var(--mobile-emoji-height, 300px);
+    z-index: 30; overflow: hidden;
+    transform: translateY(100%); pointer-events: none;
+    transition: transform 220ms cubic-bezier(.4, 0, .2, 1);
+    background: transparent;
+  }
+  /* Фон — ТОЛЬКО когда панель действительно показывает смайлики.
+     В режиме клавиатуры эта поверхность всего лишь держит зарезервированное
+     место, которое IME накрывает собой. Высота места берётся от ПРОШЛОЙ
+     клавиатуры (onKeyboardWillShow), и стоит новой оказаться ниже — над ней
+     оставалась полоса цвета --sidebar, читавшаяся как пустая панель
+     непонятного назначения (её и видели на 1.8.1). Пустое место обязано быть
+     невидимым: тогда любое расхождение высот показывает переписку, а не
+     панель, и чинить нечего. */
+  .mobile-emoji-surface.is-emoji-visible { background: var(--sidebar); }
+  .mobile-emoji-surface.is-surface-active { transform: translateY(0); }
+  .mobile-emoji-surface.is-emoji-mode { pointer-events: auto; }
+  .mobile-emoji-surface .emoji-picker.is-mobile-panel { visibility: hidden; }
+  .mobile-emoji-surface.is-emoji-visible .emoji-picker.is-mobile-panel { visibility: visible; }
+  .emoji-picker.is-mobile-panel {
+    position: absolute; inset: 0;
+    width: 100%; max-width: none; height: 100%; margin: 0;
+    border-left: none; border-right: none; border-bottom: none;
+    border-radius: 0; box-shadow: none;
+    background: var(--sidebar);
+    animation: none;
+  }
+  .emoji-picker.is-mobile-panel .emoji-tabs {
+    flex: none; padding: 5px 8px 0; background: var(--sidebar);
+  }
+  .emoji-picker.is-mobile-panel .emoji-grid {
+    flex: 1; min-height: 0; max-height: none; overflow-y: auto;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    align-content: start; padding: 8px 8px max(10px, env(safe-area-inset-bottom));
+    background: var(--paper-sunken);
+    overscroll-behavior: contain;
+  }
+  .emoji-picker.is-mobile-panel .emoji-cell { min-height: 42px; padding: 7px 0; font-size: 24px; }
+  .emoji-picker.is-mobile-panel .emoji-cell .custom-emoji { width: 30px; height: 30px; }
+  .emoji-tab-name { display: none; }
+
+  /* На узком экране — во всю ширину под шапкой */
+  .toast-stack { top: 10px; left: 10px; right: 10px; width: auto; }
+  /* Наведения на тач-экране нет, поэтому кнопки строки видны всегда — но
+     в полную силу они превращали список в панель управления (в референсе
+     справа только время и счётчик). Приглушаем: заметны, когда нужны, и не
+     спорят с именем и превью. Уже отмеченная звезда остаётся яркой — это
+     состояние чата, а не кнопка. */
+  .row .row-actions .icon-btn-ghost { opacity: .45; padding: 3px; }
+  .row .row-actions .icon-btn-ghost.is-fav { opacity: 1; }
+  .row .row-actions { gap: 0; }
+}

@@ -1,0 +1,189 @@
+/* Фильтры списка, «Мой статус», «Главная», окно статуса, просмотрщик. */
+
+/* ===== Фильтры списка чатов, «Мой статус», правая часть строки ===== */
+.roster-filters {
+  display: flex; gap: 6px; padding: 0 12px 8px; overflow-x: auto;
+  scrollbar-width: none; flex: none;
+}
+.roster-filters::-webkit-scrollbar { display: none; }
+.roster-filter {
+  flex: none; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-muted);
+  font-size: 12.5px; white-space: nowrap;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.roster-filter:hover { background: var(--row-hover); }
+.roster-filter.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* «Мой статус» — не первый чат в списке, а отдельный блок над ним: своё
+   состояние человек меняет заметно реже, чем открывает переписки. */
+.roster-mystatus {
+  flex: none; display: flex; align-items: center; gap: 10px; width: calc(100% - 24px);
+  margin: 0 12px 8px; padding: 8px 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--line); background: var(--paper-sunken);
+  cursor: pointer; text-align: left; color: inherit;
+  transition: background var(--ease);
+}
+.roster-mystatus:hover { background: var(--row-hover); }
+.roster-mystatus-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.roster-mystatus-title {
+  font-size: 13.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.roster-mystatus-hint { font-size: 11.5px; color: var(--ink-muted); }
+
+/* Правая колонка строки: плашка «булавка + время», под ней галочки и счётчик. */
+.row-side {
+  flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  margin-left: 8px;
+}
+.row-stamp {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; color: var(--ink-muted); white-space: nowrap;
+}
+.row-stamp svg { width: 12px; height: 12px; }
+/* Закреплённый чат — та же плашка, но с фоном: признак читается сразу, а
+   отдельного элемента в строке не появляется. */
+.row-stamp.is-pinned {
+  padding: 2px 8px; border-radius: 999px; background: var(--paper-sunken);
+}
+.row-side-bottom { display: inline-flex; align-items: center; gap: 6px; }
+.row-check { display: inline-flex; color: var(--ink-muted); }
+.row-check svg { width: 15px; height: 15px; }
+.row-check.is-read { color: var(--accent); }
+.row-muted { display: inline-flex; color: var(--ink-muted); opacity: .7; flex: none; }
+.row-muted svg { width: 13px; height: 13px; }
+
+/* Миниатюра последнего сообщения — перед текстом, без роста высоты строки. */
+.row-thumb {
+  flex: none; width: 18px; height: 18px; border-radius: 4px; object-fit: cover;
+  /* Отступ даёт gap самой строки — свой margin складывался с ним в двойной. */
+  background: var(--paper-sunken);
+}
+.row-preview-author { color: var(--ink-muted); }
+
+/* ===== Главная ===== */
+.home-section {
+  display: flex; flex-direction: column; gap: 18px; min-height: 0; height: 100%;
+  padding: 22px 22px 18px; overflow-y: auto;
+}
+.home-head h1 { margin: 0; font-size: 22px; font-weight: 650; }
+.home-date { margin: 4px 0 0; color: var(--ink-muted); font-size: 13px; }
+.home-group { display: flex; flex-direction: column; gap: 8px; }
+.home-group h2 {
+  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+.home-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.home-card {
+  display: flex; align-items: center; gap: 12px; padding: 13px 14px; cursor: pointer;
+  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
+  color: inherit; text-align: left; transition: background var(--ease), border-color var(--ease);
+}
+.home-card:hover { background: var(--row-hover); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.home-card-icon { font-size: 22px; line-height: 1; flex: none; }
+.home-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.home-card-count { font-size: 20px; font-weight: 650; line-height: 1.1; }
+.home-card-label { font-size: 13px; color: var(--ink-muted); }
+.home-card-go { width: 16px; height: 16px; color: var(--ink-muted); flex: none; }
+.home-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 40px 16px; text-align: center; color: var(--ink-muted); font-size: 14px;
+}
+.home-empty span { font-size: 30px; }
+.home-empty p { margin: 0; max-width: 420px; }
+
+/* Расписание дня и входы в разделы на «Главной». */
+.home-schedule { display: flex; flex-direction: column; gap: 6px; }
+.home-event {
+  display: flex; align-items: baseline; gap: 12px; padding: 11px 14px; cursor: pointer;
+  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
+  color: inherit; text-align: left; transition: background var(--ease);
+}
+.home-event:hover { background: var(--row-hover); }
+.home-event-time { flex: none; min-width: 62px; font-size: 13px; font-weight: 600; color: var(--accent); }
+.home-event-title { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-schedule-all {
+  align-self: flex-start; border: none; background: none; cursor: pointer;
+  color: var(--accent); font-size: 13px; padding: 4px 2px;
+}
+.home-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.home-link {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; cursor: pointer;
+  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
+  color: inherit; font-size: 14px; transition: background var(--ease);
+}
+.home-link:hover { background: var(--row-hover); }
+
+/* ===== Окно статуса ===== */
+.status-picker { display: flex; flex-direction: column; gap: 14px; }
+.status-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.status-preset-btn {
+  display: flex; align-items: center; gap: 9px; padding: 11px 12px; cursor: pointer;
+  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
+  color: inherit; font-size: 14px; text-align: left;
+  transition: background var(--ease), border-color var(--ease), transform .12s ease;
+}
+.status-preset-btn:hover { background: var(--row-hover); }
+.status-preset-btn:active { transform: scale(.985); }
+.status-preset-btn.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--paper));
+}
+.status-preset-emoji { font-size: 19px; line-height: 1; }
+
+.status-custom-form { display: flex; flex-direction: column; gap: 12px; position: relative; }
+.status-custom-field {
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 4px;
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper);
+}
+.status-custom-field:focus-within { border-color: var(--accent); }
+.status-custom-field input {
+  flex: 1; min-width: 0; border: none; background: none; outline: none;
+  font-size: 14.5px; color: inherit; padding: 8px 2px;
+}
+.status-emoji-btn {
+  flex: none; width: 38px; height: 38px; border-radius: var(--radius-sm); cursor: pointer;
+  border: none; background: var(--paper-sunken); font-size: 20px; line-height: 1;
+}
+.status-emoji-btn:hover { background: var(--row-hover); }
+/* Панель эмодзи раскрывается прямо в окне статуса: отдельным popup поверх
+   модалки она перекрывала бы поле, ради которого её и открыли. */
+.status-emoji-popover {
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--paper); max-height: 260px;
+}
+
+.status-expiry { display: flex; flex-direction: column; gap: 8px; }
+.status-expiry-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-muted); }
+.status-expiry-row label { flex: none; min-width: 34px; }
+.status-expiry-row select, .status-expiry-row input[type="time"] {
+  flex: 1; min-width: 0; height: 36px; padding: 0 10px; font-size: 13.5px;
+  border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--paper); color: inherit;
+}
+.status-expiry-clear { border: none; background: none; cursor: pointer; color: var(--accent); font-size: 12.5px; }
+.status-expiry-hint { margin: 0; font-size: 12px; color: var(--ink-muted); }
+.status-actions { display: flex; gap: 8px; }
+.status-actions .btn-primary { flex: 1; }
+
+/* ===== Фото профиля группы ===== */
+.group-info-avatar { position: relative; flex: none; }
+.group-info-avatar-edit {
+  position: absolute; right: -4px; bottom: -4px; width: 26px; height: 26px;
+  display: grid; place-items: center; cursor: pointer; border-radius: 50%;
+  border: 2px solid var(--paper); background: var(--accent); color: #fff;
+}
+.group-info-avatar-edit:disabled { opacity: .6; cursor: default; }
+
+/* ===== Меню просмотрщика изображений ===== */
+.lightbox-menu-btn {
+  position: absolute; top: 14px; right: 62px; width: 38px; height: 38px;
+  display: grid; place-items: center; cursor: pointer; border-radius: 50%;
+  border: none; background: rgba(0, 0, 0, .45); color: #fff; z-index: 2;
+}
+.lightbox-menu-btn:hover { background: rgba(0, 0, 0, .65); }
+.lightbox-notice {
+  position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+  padding: 9px 14px; border-radius: 999px; z-index: 2;
+  background: rgba(0, 0, 0, .7); color: #fff; font-size: 13px; max-width: 84vw; text-align: center;
+}

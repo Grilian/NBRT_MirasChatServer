@@ -1,0 +1,27 @@
+/* Стили приложения.
+ *
+ * Раньше это был один файл на 4896 строк. Разделён 07.09.2026 СТРОГО ПО
+ * ИСХОДНОМУ ПОРЯДКУ: части подключаются здесь в той же последовательности, в
+ * какой шли в файле, поэтому каскад не сдвинулся ни на строку. Разбиение по
+ * фичам с переносом стилей в сами фичи — следующим шагом, вместе с
+ * дизайн-системой.
+ */
+@import './tokens.css';
+@import './base.css';
+@import './chat-layout.css';
+@import './messages.css';
+@import './polls.css';
+@import './emoji.css';
+@import './notifications.css';
+@import './responsive.css';
+@import './admin.css';
+@import './reactions.css';
+@import './modals.css';
+@import './roster-home.css';
+@import './files.css';
+@import './tasks.css';
+@import './roster-polish.css';
+@import './navigation.css';
+@import './profile.css';
+@import './app-menu.css';
+@import './admin-emoji.css';

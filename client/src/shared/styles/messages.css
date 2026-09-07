@@ -1,0 +1,911 @@
+/* Лента: пузыри, картинки, композер, контекстное меню, ветки. */
+
+/* ===== Ветки сообщений ===== */
+/* Зазор до пузыря задаётся только padding-top: min-height здесь был 32px, и у
+   короткой кнопки без аватаров текст центрировался внутри этой высоты — сверху
+   набегало вдвое больше воздуха, чем в margin, и кнопка выглядела оторванной от
+   сообщения. Высоту теперь диктует содержимое (аватары ответивших, когда есть). */
+/* align-self: stretch снят вместе с переездом в общую строку .msg-underrow:
+   растянутая на всю ширину кнопка выдавила бы реакции на отдельную строку и
+   вернула бы ровно то разделение, ради устранения которого их и свели вместе. */
+.thread-link {
+  display: flex; align-items: center; gap: 8px; max-width: 100%;
+  margin: 0 -5px; padding: 2px 7px 3px; border: none; border-radius: 9px;
+  background: transparent; color: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  cursor: pointer; text-align: left; font: inherit;
+}
+.thread-link:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.thread-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.thread-link-avatars { display: flex; flex: none; min-width: 28px; padding-left: 7px; }
+.thread-link-avatars .avatar { margin-left: -7px; box-shadow: 0 0 0 2px var(--bubble-in); }
+.msg.mine .thread-link-avatars .avatar { box-shadow-color: var(--bubble-out); }
+.thread-link-copy { display: flex; flex-direction: column; min-width: 0; line-height: 1.18; }
+.thread-link-copy strong { font-size: 13px; font-weight: 650; }
+.thread-link-copy small { color: var(--ink-muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thread-link-unread {
+  margin-left: auto; flex: none; padding: 2px 7px; border-radius: var(--radius-pill);
+  background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 700;
+}
+
+.thread-panel {
+  /* position: relative — якорь для .right-panel-resizer, который висит на
+     левой границе панели. */
+  position: relative;
+  min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  background: var(--chat-bg); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.08);
+  z-index: 7;
+}
+.thread-header {
+  flex: none; min-height: 50px; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 7px 12px 7px 16px; background: var(--sidebar); border-bottom: 1px solid var(--line);
+}
+.thread-header > div { min-width: 0; display: flex; flex-direction: column; }
+.thread-header strong { color: var(--ink); font-size: 16px; }
+.thread-header span { color: var(--ink-muted); font-size: 12px; }
+.thread-close {
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center;
+  border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink); cursor: pointer; font-size: 34px; line-height: 1;
+}
+.thread-close:hover { background: var(--paper-sunken); border-color: color-mix(in srgb, var(--ink) 22%, transparent); }
+.thread-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.thread-header .thread-close-desktop {
+  color: var(--ink); font-size: 30px; font-weight: 500; line-height: 1;
+  transform: translateY(-1px);
+}
+.thread-close-mobile { display: none; }
+.thread-root {
+  flex: none; max-height: 34%; overflow: auto; display: flex; align-items: flex-start; gap: 10px;
+  padding: 14px 15px; background: var(--paper-raised); border-bottom: 1px solid var(--line);
+}
+.thread-root-body { min-width: 0; flex: 1; }
+.thread-author { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.thread-author strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; }
+.thread-author span { flex: none; color: var(--ink-faint); font-size: 11px; }
+.thread-text { color: var(--ink); font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.thread-image { display: block; max-width: 100%; max-height: 200px; object-fit: contain; border-radius: var(--radius-md); margin: 4px 0 7px; }
+.thread-divider { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 14px; color: var(--ink-muted); font-size: 12px; }
+.thread-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
+.thread-messages { flex: 1; min-height: 0; display: flex; }
+.thread-messages > .conv-wrap { flex: 1; min-width: 0; }
+.thread-messages .conv-body { padding: 10px 12px 12px; }
+.thread-messages .conv-body.is-initial-positioning { visibility: visible; pointer-events: auto; }
+.thread-messages .bubble { max-width: 88%; }
+.thread-state { flex: 1; display: grid; place-items: center; padding: 20px; color: var(--ink-muted); text-align: center; }
+.thread-state.is-error { color: var(--unread); }
+
+/* Раньше здесь при 761–1050px ветка превращалась в overlay поверх переписки.
+   Так делать нельзя: человек терял из виду тот самый чат, на сообщение в
+   котором отвечал, и получал две накрывающие друг друга ленты вместо двух
+   соседних. Теперь при нехватке места правая область просто ЗАКРЫВАЕТСЯ
+   (решает layoutMode.ts), а её содержимое запоминается и возвращается, когда
+   место появится. Overlay остался только в мобильном режиме — там это не
+   наложение, а отдельный экран навигации. */
+
+/* Разделитель дня — «плашка» поверх обоев, залипает при прокрутке */
+.date-sep {
+  position: sticky; top: 2px; z-index: 3; align-self: center;
+  font-size: 13px; font-weight: 500; color: #fff;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  padding: 5px 13px; border-radius: var(--radius-pill); margin: 8px 0 12px;
+  backdrop-filter: blur(4px);
+}
+.load-more-hint {
+  position: absolute; z-index: 6; top: 8px; left: 50%; transform: translateX(-50%);
+  font-size: 13px; color: var(--ink-muted); padding: 7px 12px; border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--paper-raised) 90%, transparent); box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
+/* ---- Пузыри ---- */
+/* Строка сообщения занимает всю ширину ленты. Это не меняет визуальную
+   ширину пузыря, зато вся пустая область слева/справа принадлежит сообщению:
+   правый клик на ПК и тап/удержание на телефоне ловятся так же, как по пузырю. */
+.msg { width: 100%; max-width: none; margin-bottom: 2px; display: flex; flex-direction: column; position: relative; }
+.msg.ends-group { margin-bottom: 10px; }
+.msg.mine { align-self: stretch; align-items: flex-end; }
+.msg.theirs { align-self: stretch; align-items: flex-start; }
+
+/* min-width: 0 обязателен: пузырь — флекс-элемент .msg, а у флекс-элемента
+   минимальная ширина по умолчанию равна содержимому. В CSS min-width сильнее
+   max-width, поэтому длинная неразрывная строка внутри (цитата с nowrap,
+   ссылка) раздувала пузырь ЗА пределы max-width, и текст вылезал за край. */
+.bubble {
+  position: relative; max-width: min(70%, 680px); min-width: 0;
+  padding: 6px 11px 7px; border-radius: var(--radius-md);
+  font-size: 14.5px; line-height: 1.35;
+}
+.msg.theirs .bubble { background: var(--bubble-in); color: var(--bubble-in-ink); }
+.msg.mine .bubble { background: var(--bubble-out); color: var(--bubble-out-ink); }
+/* Прозрачная картинка без подписи — без цветного пузыря вовсе, иначе
+   прозрачные места «просвечивали» бы акцентным цветом сообщения (синим у
+   своих) вместо нейтрального фона переписки: заливка другого цвета — тоже
+   подложка, просто другая, а не её отсутствие. Хвостик рисовать не из чего —
+   у прозрачного пузыря нет своего цвета, поэтому скрываем и его.
+   Селектор продублирован под .mine/.theirs: специфичность правил цвета выше
+   («.msg.mine .bubble» — три класса против двух здесь), просто «.bubble.
+   bubble-alpha-only» их не перебивало, и фон оставался синим/серым. */
+.msg.mine .bubble.bubble-alpha-only,
+.msg.theirs .bubble.bubble-alpha-only { background: none; }
+.msg.ends-group .bubble.bubble-alpha-only::after { display: none; }
+
+/* Хвостик — только у последнего пузыря в блоке одного автора, как в Telegram */
+.msg.ends-group.theirs .bubble { border-bottom-left-radius: 3px; }
+.msg.ends-group.mine .bubble { border-bottom-right-radius: 3px; }
+.msg.ends-group .bubble::after {
+  content: ''; position: absolute; bottom: 0; width: 0; height: 0; border-style: solid;
+}
+.msg.ends-group.theirs .bubble::after {
+  left: -7px; border-width: 0 0 11px 8px;
+  border-color: transparent transparent var(--bubble-in) transparent;
+}
+.msg.ends-group.mine .bubble::after {
+  right: -7px; border-width: 0 8px 11px 0;
+  border-color: transparent transparent var(--bubble-out) transparent;
+}
+.msg.ends-group .bubble-editing::after { display: none; }
+
+.bubble-author { font-size: 13.5px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+.bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-link, .message-email {
+  color: var(--accent); font-weight: 500; overflow-wrap: anywhere; word-break: break-word;
+}
+.message-link { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.message-link:hover { color: var(--accent-hover); }
+.message-email { text-decoration: none; }
+
+/* Картинка бьёт краями пузыря (отрицательные márgin компенсируют его padding),
+   а не сидит внутри с рамкой вокруг, как отдельная плашка. Соотношение сторон
+   задаётся инлайн-стилем из file_width/file_height — резервирует место под
+   картинку ещё до её загрузки, вёрстка не прыгает. */
+/* max-height задан КОНТЕЙНЕРУ, а не картинке внутри. Раньше ограничение висело
+   на <img>: контейнер держал пропорции оригинала и вырастал высоким, картинку
+   же обрезало до 320px, и при object-fit: cover у высоких снимков пропадали
+   верх и низ — в полноэкранном просмотре при этом всё было цело.
+   Теперь пропорция и предел высоты живут на одном элементе: браузер сам сужает
+   ширину, и кадр виден целиком. */
+/* Ширина картинки — вся ширина пузыря, без собственного предела. Прежние 320px
+   были уже пузыря (он ограничен min(70%, 680px)), и под длинным текстом кадр
+   висел узкой полосой посреди широкого сообщения. Растянуть сверх исходника это
+   не может: в чат картинка кладётся уменьшенной до 1600px по большей стороне,
+   что заведомо больше пузыря, а на всякий случай сверху стоит ещё и предел по
+   натуральной ширине (inline из file_width, см. ChatWindow.tsx).
+
+   Предел по высоте остаётся, иначе портретный кадр во всю ширину занял бы
+   несколько экранов. Но он поднят с 320px: при 320 полную ширину получали
+   только кадры шире 2:1, а обычное фото 4:3 упиралось в высоту и оставалось
+   таким же узким, как раньше. */
+.bubble-image {
+  position: relative; display: block; width: calc(100% + 22px); max-height: 480px;
+  margin: -6px -11px 4px;
+  border: none; padding: 0; cursor: pointer; background: var(--paper-sunken);
+  border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
+}
+/* У картинки с прозрачностью подложки быть не должно — она видна сквозь
+   прозрачные места и превращает наклейку в плашку. Непрозрачным, наоборот,
+   рисуем тонкую рамку: на скриншоте приложения край снимка иначе сливается
+   с фоном переписки. Прозрачность помечает сервер при загрузке. */
+.bubble-image.has-alpha { background: none; }
+.bubble-image:not(.has-alpha) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent); }
+.bubble-image:only-child { margin-bottom: -7px; border-radius: var(--radius-md); }
+/* Отрицательный верхний отступ затягивает картинку под верхний край пузыря —
+   это верно, только когда над ней ничего нет. Стоит появиться строке выше
+   (имя автора в общем чате, «Переслано от», цитата ответа), и картинка
+   наползает на неё. Правило намеренно общее — по «не первый ребёнок», а не по
+   конкретному соседу: на имени автора этот баг уже ловили один раз, на
+   пересылке — второй, и следующий элемент над картинкой поймал бы третий. */
+.bubble-image:not(:first-child) { margin-top: 4px; border-radius: var(--radius-md); }
+.bubble-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bubble-image.has-local-preview:not([style]) img { height: auto; max-height: 320px; object-fit: contain; }
+.bubble-image.is-send-failed img { filter: brightness(.62); }
+.image-send-retry {
+  position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%;
+  color: #fff; background: var(--unread); box-shadow: var(--shadow-md);
+  font-size: 25px; font-weight: 700; line-height: 1;
+}
+
+.lightbox-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 60;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  overflow: hidden; isolation: isolate; pointer-events: auto; overscroll-behavior: contain;
+  /* Щипок и протяжку внутри просмотра разбирает наш код (см. ImageLightbox).
+     Без этого браузер забирал бы жест себе и масштабировал страницу целиком
+     вместе с интерфейсом, а не картинку. */
+  touch-action: none;
+}
+.lightbox-img {
+  position: relative; z-index: 1;
+  max-width: 100%; max-height: 100%; border-radius: var(--radius-md);
+  /* Переход только для «сбросить» и двойного клика; во время самого жеста
+     класс is-zoomed его снимает, иначе картинка догоняла бы палец с
+     опозданием. */
+  transition: transform 160ms ease; transform-origin: center center;
+  user-select: none; -webkit-user-drag: none;
+}
+.lightbox-overlay.is-zoomed .lightbox-img { transition: none; cursor: grab; }
+.lightbox-overlay.is-zoomed .lightbox-img:active { cursor: grabbing; }
+.lightbox-reset {
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+  z-index: 2;
+  border: none; background: rgba(255, 255, 255, .16); color: #fff; cursor: pointer;
+  border-radius: var(--radius-pill); padding: 9px 16px; font-size: 13.5px; font-weight: 600;
+}
+.lightbox-reset:hover { background: rgba(255, 255, 255, .26); }
+.lightbox-close {
+  position: absolute; top: 16px; right: 16px; border: none; background: rgba(255, 255, 255, .12);
+  z-index: 3;
+  color: #fff; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer;
+}
+.lightbox-close:hover { background: rgba(255, 255, 255, .22); }
+
+/* Время и галочки обтекаются текстом внутри пузыря — характерная деталь
+   Telegram: короткое сообщение и время помещаются в одну строку. */
+.bubble-meta {
+  float: right; display: inline-flex; align-items: center; gap: 4px;
+  margin: 7px -2px -3px 9px; font-size: 12px; line-height: 1; white-space: nowrap;
+}
+.msg.theirs .bubble-meta { color: var(--meta-in); }
+.msg.mine .bubble-meta { color: var(--meta-out); }
+
+/* Картинка без подписи: время — плашкой НА самом кадре, как в Telegram.
+   Раньше оно оставалось обычной строкой под картинкой, и ради одной строчки
+   под каждым снимком висела полоска цвета пузыря — она читалась как рамка,
+   которой у фотографии быть не должно.
+   Свой цвет на плашке, а не var(--meta-*): под ней произвольная фотография, и
+   тема приложения о её яркости ничего не знает — белое по затемнению читается
+   на любой. По той же причине плашка непрозрачна настолько, чтобы держать
+   контраст и на светлом кадре. */
+.bubble-meta.is-on-image {
+  position: absolute; right: 8px; bottom: 7px; z-index: 2;
+  float: none; margin: 0; padding: 2px 8px;
+  border-radius: var(--radius-pill); background: rgba(0, 0, 0, .5);
+  backdrop-filter: blur(3px);
+}
+.msg.theirs .bubble-meta.is-on-image,
+.msg.mine .bubble-meta.is-on-image { color: #fff; }
+.bubble-meta.is-on-image .ticks.read { color: #8fd7ff; }
+/* Полоска пузыря под картинкой снимается вместе с переездом времени: под
+   снимком больше нечего показывать. */
+.bubble-has-image-meta .bubble-image { margin-bottom: -7px; }
+/* «Голый» кадр (над ним в пузыре нет ни имени автора, ни пересылки, ни
+   цитаты) — пузыря нет вовсе, остаётся одна картинка. */
+.bubble-bare-image { padding: 0; }
+/* Ширина здесь НЕ задаётся: её приносит инлайн-стиль из натуральных размеров
+   кадра (см. ChatWindow.tsx). Процентная ширина в этом месте невозможна —
+   пузырь без полей сам ждёт ширины от картинки. */
+.bubble-bare-image .bubble-image { margin: 0; border-radius: var(--radius-md); }
+/* Хвостик пузыря срезает угол у последнего сообщения блока — картинка,
+   занявшая пузырь целиком, обязана повторить этот срез, иначе её угол
+   выступает за скруглённый угол пузыря. */
+.msg.ends-group.theirs .bubble-bare-image .bubble-image { border-bottom-left-radius: 3px; }
+.msg.ends-group.mine .bubble-bare-image .bubble-image { border-bottom-right-radius: 3px; }
+
+/* ---- Стикер в ленте ----
+   Стикер — элемент переписки, а не графическое вложение: у него нет ни
+   просмотрщика, ни увеличения, поэтому и cursor: zoom-in, который стоит у
+   .bubble-image, здесь неуместен — курсор обычный, как над текстом.
+   Размер фиксированный: стикер не тянется по ширине пузыря (иначе в широком
+   окне он раздувался бы до размеров фотографии) и не зависит от размеров
+   файла — все стикеры в ленте одного размера, как в Telegram. */
+.bubble-sticker {
+  display: block; width: 144px; height: 144px; object-fit: contain;
+  /* Перетаскивание отключено: стикер не файл, «сохранить как» ему ни к чему. */
+  -webkit-user-drag: none; user-select: none;
+}
+/* Стикер удалили из пака — вместо картинки остаётся его эмодзи. Тот же размер,
+   чтобы лента не дёргалась, если каталог подъехал позже сообщения. */
+.bubble-sticker-fallback {
+  display: flex; align-items: center; justify-content: center;
+  width: 144px; height: 144px; font-size: 72px; line-height: 1;
+}
+@media (max-width: 760px) {
+  .bubble-sticker, .bubble-sticker-fallback { width: 120px; height: 120px; }
+  .bubble-sticker-fallback { font-size: 60px; }
+}
+
+.bubble-time { font-variant-numeric: tabular-nums; }
+.edited-label { font-style: italic; }
+.bubble-seen { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
+
+/* Цитата внутри пузыря — полоска слева, как в Telegram. Кнопка, а не div:
+   по ней уходят к исходному сообщению. */
+/* min-width: 0 обязателен и на самой цитате, и на её строках: у флекс-элемента
+   минимальная ширина по умолчанию равна содержимому, поэтому длинная строка с
+   nowrap распирала блок изнутри и вылезала за край пузыря, а многоточие не
+   появлялось — обрезать было нечего, ширина «подстраивалась» под текст. */
+.bubble-reply {
+  display: flex; flex-direction: column; gap: 1px; width: 100%; min-width: 0; text-align: left;
+  border: none; border-left: 2px solid currentColor; background: color-mix(in srgb, currentColor 8%, transparent);
+  border-radius: 0 6px 6px 0; padding: 4px 8px; margin-bottom: 4px; cursor: pointer;
+  font: inherit; color: inherit; opacity: .85; overflow: hidden;
+}
+.bubble-reply:hover { opacity: 1; }
+.bubble-reply-author {
+  font-size: 12px; font-weight: 600;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bubble-reply-text {
+  font-size: 12.5px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Имя отправителя может быть длинным — строку тоже обрезаем, а не растягиваем
+   ею пузырь. */
+.bubble-forwarded {
+  display: flex; align-items: center; gap: 4px; font-size: 12px; font-style: italic;
+  opacity: .75; margin-bottom: 3px; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bubble-forwarded svg { flex: none; }
+
+/* Прыжок к исходному сообщению — короткая вспышка, иначе непонятно, куда
+   именно уехал экран. */
+.msg.is-highlighted .bubble { animation: msg-flash 1.6s ease-out; }
+@keyframes msg-flash {
+  0%, 40% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg.is-highlighted .bubble { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+}
+.bubble-meta .ticks { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: inherit; }
+.bubble-meta .ticks.read { color: var(--tick-read); }
+.bubble-meta .ticks.is-sending { opacity: .72; }
+.bubble-meta .ticks.is-failed { color: var(--unread); cursor: pointer; }
+.msg.is-pending-delivery .bubble { opacity: .78; }
+
+.bubble-editing { padding: 3px; background: none !important; box-shadow: none; }
+.bubble-edit-input {
+  width: 100%; min-width: 200px; border: 1px solid var(--accent); background: var(--paper-raised); color: var(--ink);
+  border-radius: var(--radius-md); padding: 8px 12px; font-size: 14.5px; font-family: inherit;
+}
+
+/* Кнопка «к последним сообщениям» — тёмный круг над полосой ввода справа. */
+.jump-to-bottom {
+  position: absolute; right: 14px; bottom: 12px; z-index: 5;
+  width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--paper-raised); color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-lg);
+}
+.jump-to-bottom:hover { color: var(--accent); }
+.jump-badge {
+  position: absolute; top: -5px; right: -3px; min-width: 21px; height: 21px; padding: 0 6px;
+  border-radius: var(--radius-pill); background: var(--unread-badge); color: #fff;
+  font: 600 12px/21px var(--font-ui); text-align: center;
+}
+
+/* Контекстное меню сообщения — правый клик (десктоп) / тап (тач).
+   Слой держит вместе плашку реакций и карточку с пунктами: позиция и подгонка
+   по краям экрана считаются на нём одном. */
+.msg-menu-layer {
+  position: fixed; z-index: 40;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  transform: translateX(-8px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto; overscroll-behavior: contain;
+  /* Слой шире карточки (его ширину задаёт плашка реакций), и пустой промежуток
+     справа от пунктов принадлежал ему же — клик туда считался кликом ВНУТРЬ
+     меню, и закрыть его там было нельзя. Сам слой кликов не принимает,
+     принимают только плашка и карточка. */
+  pointer-events: none;
+}
+.msg-menu-layer > * { pointer-events: auto; }
+.msg-context-menu {
+  background: var(--paper-raised); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); min-width: 250px; padding: 6px 0;
+  /* Пунктов много (пересылка в «Избранное», отметки), и на невысоком окне
+     карточка перестаёт помещаться — тогда прокручиваем её внутри, а не
+     пытаемся сдвинуть выше края экрана. Плашка реакций в прокрутку не
+     попадает: она вынесена из карточки и остаётся на месте. */
+  min-height: 0; overflow-y: auto;
+}
+.msg-context-menu button {
+  width: 100%; text-align: left; border: none; background: none; cursor: pointer;
+  display: flex; align-items: center; gap: 22px;
+  padding: 14px 20px; font-size: 16px; color: var(--ink);
+}
+/* Иконка не должна ужиматься под длинной подписью — ряд выравнивается по
+   одной вертикали во всех пунктах, как в референсе. */
+.msg-context-menu button > svg { flex: none; width: 22px; height: 22px; }
+.msg-menu-label { flex: 1; min-width: 0; }
+.msg-context-menu button:hover { background: var(--paper-sunken); }
+/* «Удалить» в референсе такого же цвета, что и остальные пункты — красным
+   оно было нашим добавлением. Подсветка при наведении остаётся красной:
+   предупредить о разрушающем действии всё-таки стоит. */
+.msg-context-menu button.danger:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); color: var(--unread); }
+/* «Прочитано в …» / «Изменено в …» — отметки, а не действия: не кликаются и
+   не подсвечиваются при наведении. */
+.msg-menu-info {
+  padding: 8px 18px; font-size: 12.5px; color: var(--ink-faint);
+  border-top: 1px solid var(--line); margin-top: 6px;
+}
+.msg-menu-info + .msg-menu-info { border-top: none; margin-top: 0; padding-top: 0; }
+
+/* Управление картиночными смайликами в панели супер-админа */
+.sa-emoji-custom { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: flex-start; }
+.sa-emoji-custom-item {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  border: 1px solid var(--line); background: var(--paper-sunken); border-radius: var(--radius-md);
+  padding: 6px 8px; font-size: 11px; color: var(--ink-muted); max-width: 92px;
+}
+.sa-emoji-custom-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.sa-emoji-custom-order { display: flex; gap: 2px; }
+.sa-emoji-custom-order button {
+  width: 18px; height: 16px; line-height: 1; padding: 0; font-size: 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper);
+  color: var(--ink-muted); cursor: pointer;
+}
+.sa-emoji-custom-order button:disabled { opacity: 0.35; cursor: default; }
+.sa-emoji-custom-order button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+.sa-emoji-custom-image { position: relative; display: block; cursor: pointer; }
+.sa-emoji-custom-image img { width: 32px; height: 32px; object-fit: contain; display: block; }
+.sa-emoji-custom-image-hint {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 9px; text-align: center; line-height: 1.1;
+  opacity: 0; border-radius: var(--radius-sm);
+}
+.sa-emoji-custom-image:hover .sa-emoji-custom-image-hint { opacity: 1; }
+.sa-emoji-fallback {
+  width: 100%; text-align: center; font-size: 14px; padding: 2px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper);
+}
+.sa-emoji-custom-remove {
+  position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; line-height: 1;
+  border: 1px solid var(--line); border-radius: 50%; background: var(--paper);
+  color: var(--ink-muted); cursor: pointer; font-size: 13px; padding: 0;
+}
+.sa-emoji-custom-remove:hover { border-color: var(--danger, #d9534f); color: var(--danger, #d9534f); }
+.sa-emoji-custom-add {
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border: 1px dashed var(--line); border-radius: var(--radius-md);
+  padding: 0 12px; min-height: 60px; font-size: 12px; color: var(--ink-muted);
+}
+.sa-emoji-custom-add:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Поправимый отказ загрузки: имя занято смайликом, который сами же убрали.
+   Не form-error — это не ошибка, а предложение действия, и красным оно
+   читалось бы как «что-то сломалось». */
+.sa-emoji-conflict {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  margin: 8px 0; padding: 8px 10px; font-size: 12px;
+  border: 1px solid var(--accent); border-radius: var(--radius-md);
+  background: var(--paper-sunken); color: var(--ink);
+}
+.sa-emoji-conflict-actions { display: flex; gap: 6px; margin-left: auto; }
+.sa-emoji-conflict-actions button {
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  background: var(--accent); color: #fff;
+}
+.sa-emoji-conflict-actions button:disabled { opacity: 0.6; cursor: default; }
+.sa-emoji-conflict-actions .sa-btn-quiet {
+  background: var(--paper); color: var(--ink-muted); border-color: var(--line);
+}
+/* Вне .sa-emoji-conflict-actions у .sa-btn-quiet своего оформления не было
+   вовсе — кнопка «Заменить старые :u_...:» в разделе структуры эмодзи
+   рендерилась совсем без стиля браузера по умолчанию. */
+.sa-btn-quiet {
+  padding: 6px 11px; font-size: 12.5px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper); color: var(--ink-muted);
+}
+.sa-btn-quiet:hover { background: var(--paper-sunken); }
+.sa-btn-quiet:disabled { opacity: 0.6; cursor: default; }
+
+/* Пак — строка-аккордеон: их немного, но в каждом сотни картинок, и развёрнутые
+   разом они не помещаются никуда. */
+.sa-emoji-pack-toggle {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  padding: 8px 4px; background: none; border: 0; cursor: pointer;
+  color: var(--ink); font-size: 14px; text-align: left;
+}
+.sa-emoji-pack-chevron { width: 12px; color: var(--ink-muted); }
+.sa-emoji-pack-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-emoji-pack.is-open { border-color: var(--accent); }
+.sa-emoji-pack-body { padding-top: 6px; }
+.sa-emoji-pack-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.sa-emoji-pack-tools .sa-emoji-pack-name { flex: 1; min-width: 0; }
+.sa-emoji-pack-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin-top: 10px; }
+.sa-emoji-unicode-add { display: flex; gap: 6px; align-items: center; }
+.sa-emoji-unicode-add input {
+  width: 64px; text-align: center; font-size: 18px; padding: 4px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper);
+}
+
+/* Плитка смайлика — намеренно минимальная: картинка и имя. Всё остальное живёт
+   в карточке по нажатию, иначе полсотни плиток с полями внутри превращают
+   экран в кашу. */
+.sa-emoji-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.sa-emoji-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  width: 72px; padding: 6px 4px; cursor: grab;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--paper-sunken); color: var(--ink-muted); font-size: 10px;
+  /* Палец не должен таскать плитку при обычной прокрутке: перетаскивание
+     начинается только после удержания, и глушится оно вручную (см. сетку). */
+  touch-action: pan-y;
+}
+.sa-emoji-tile:hover { border-color: var(--accent); }
+.sa-emoji-tile.is-dragging { opacity: 0.5; cursor: grabbing; border-style: dashed; }
+.sa-emoji-tile.is-retired { opacity: 0.45; border-style: dashed; }
+.sa-emoji-tile img { width: 32px; height: 32px; object-fit: contain; pointer-events: none; }
+.sa-emoji-tile-char { font-size: 26px; line-height: 32px; }
+.sa-emoji-tile-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Стикерпаки в панели администратора ----
+   Три экрана вместо аккордеона смайликов: у набора есть обложка, а у каждого
+   стикера — обязательный эмодзи, и в раскрывающуюся секцию списка это не
+   помещается, не превращая её в кашу. */
+.sa-sticker-packs { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.sa-sticker-pack-card {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper-sunken);
+}
+.sa-sticker-pack-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  border: none; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left;
+}
+.sa-sticker-pack-cover {
+  flex: none; width: 44px; height: 44px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  background: var(--paper); border: 1px solid var(--line);
+}
+.sa-sticker-pack-cover.is-large { width: 76px; height: 76px; }
+.sa-sticker-pack-cover img { width: 100%; height: 100%; object-fit: contain; }
+.sa-sticker-pack-cover-empty { font-size: 20px; opacity: .5; }
+.sa-sticker-pack-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sa-sticker-pack-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-sticker-pack-actions { flex: none; display: flex; align-items: center; gap: 8px; }
+
+.sa-sticker-head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.sa-sticker-head h2 { flex: 1; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sa-sticker-pack-summary { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.sa-sticker-pack-summary-body { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+
+/* Плитка крупнее эмодзи-плитки: стикер — самостоятельная картинка, и по
+   миниатюре 32px его не узнать. */
+.sa-sticker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px; margin: 12px 0;
+}
+.sa-sticker-tile {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 6px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--paper-sunken);
+  /* Палец не должен таскать плитку при обычной прокрутке: перетаскивание
+     начинается только после удержания (см. useDragReorder). */
+  touch-action: pan-y;
+}
+.sa-sticker-tile.is-dragging { opacity: .5; border-style: dashed; cursor: grabbing; }
+.sa-sticker-tile img { width: 72px; height: 72px; object-fit: contain; pointer-events: none; }
+.sa-sticker-tile-emoji { font-size: 18px; line-height: 1; }
+.sa-sticker-tile-tools { display: flex; align-items: center; gap: 4px; width: 100%; }
+.sa-sticker-emoji {
+  flex: 1; min-width: 0; width: 100%; text-align: center; padding: 3px 4px; font-size: 15px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper); color: var(--ink);
+}
+.sa-sticker-tile-action {
+  flex: none; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--paper); color: var(--ink-muted); font-size: 14px; line-height: 1; padding: 0;
+}
+.sa-sticker-tile-action:hover { border-color: var(--accent); color: var(--accent); }
+.sa-sticker-tile-action.is-danger:hover { border-color: var(--unread); color: var(--unread); }
+
+/* Карточка смайлика */
+.sa-emoji-modal { max-width: 460px; width: 100%; }
+.sa-emoji-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sa-emoji-modal-head h3 { margin: 0; font-size: 16px; }
+.sa-emoji-modal-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.sa-emoji-modal-row > span { width: 120px; flex: none; font-size: 13px; color: var(--ink-muted); }
+.sa-emoji-modal-row input {
+  flex: 1; min-width: 0; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); color: var(--ink);
+}
+.sa-emoji-modal-row input[readonly] { color: var(--ink-muted); background: var(--paper-sunken); }
+.sa-emoji-modal-images { display: flex; gap: 10px; margin: 12px 0; }
+.sa-emoji-modal-image {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px; font-size: 12px; color: var(--ink-muted);
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper-sunken);
+}
+.sa-emoji-modal-image img { width: 48px; height: 48px; object-fit: contain; }
+.sa-emoji-modal-empty {
+  width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm); font-size: 11px;
+}
+.sa-emoji-modal-image label { cursor: pointer; }
+.sa-emoji-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* Кастомный смайлик в тексте: по высоте строки и с выравниванием по базовой
+   линии, иначе он растаскивает межстрочный интервал в абзаце. */
+/* 2× размера шрифта. Прежние правки считали проценты от уже применённого
+   значения («+10%», «+75%») и раздули размер до 3.27× текста. */
+.custom-emoji {
+  display: inline-block; width: 2em; height: 2em; object-fit: contain;
+  vertical-align: -0.55em; margin: 0 1px;
+}
+/* Базовый эмодзи вместо пропавшего файла — на месте картинки, а не мельче:
+   иначе подмена бросалась бы в глаза сильнее самой пропажи. */
+.custom-emoji-fallback { display: inline-block; font-size: 1.5em; line-height: 1; vertical-align: -0.2em; margin: 0 1px; }
+/* Базовый эмодзи на месте ещё не приехавшей картинки. Бокс повторяет
+   `.custom-emoji` до пикселя, иначе подмена после загрузки сдвигала бы строку;
+   font-size: inherit обязателен — без него 2em считались бы от собственного
+   кегля заглушки (1.5em), и место вышло бы в полтора раза больше. */
+/* overflow: hidden здесь не про обрезку, а про выравнивание: у inline-block с
+   видимым содержимым базовой линией считается базовая линия его ПОСЛЕДНЕЙ
+   строки, а у картинки — нижний край. Из-за этого заглушка с эмодзи внутри
+   вставала на 9px ниже картинки, и подмена дёргала строку по вертикали, хотя
+   размеры совпадали. С overflow: hidden базовой линией становится нижний край
+   — как у картинки. */
+.custom-emoji-fallback.is-placeholder {
+  width: 2em; height: 2em; font-size: inherit; line-height: 2em;
+  text-align: center; vertical-align: -0.55em; margin: 0 1px; opacity: .5;
+  overflow: hidden;
+}
+/* Скрытая картинка всё равно загружается — этим и держится подмена. */
+.custom-emoji.is-loading { display: none; }
+/* В панели выбора — по размеру ячейки, а не строки текста. */
+.emoji-cell .custom-emoji { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
+
+/* Свой аватар со статусом в шапке списка чатов. Значок статуса — накладкой на
+   аватар, а не отдельной строкой: шапка низкая, и второй строки там нет. */
+.roster-self { position: relative; border: none; background: none; padding: 0; margin: 0; cursor: pointer; flex: none; border-radius: 50%; }
+.roster-self-status {
+  position: absolute; right: -3px; bottom: -3px; font-size: 12px; line-height: 1;
+  background: var(--sidebar); border-radius: 50%; padding: 1px;
+}
+.status-sheet { max-width: 420px; width: 100%; }
+.status-sheet-body { padding: 14px 16px 18px; }
+
+/* «Кто может писать» в карточке группы */
+.group-info-write { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
+.group-info-write select { width: 100%; }
+.group-info-write-list {
+  display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow-y: auto;
+  background: var(--paper-sunken); border-radius: var(--radius-md); padding: 6px;
+}
+.group-info-write-item {
+  display: flex; align-items: center; gap: 10px; padding: 7px 8px;
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 14px;
+}
+.group-info-write-item:hover { background: var(--row-hover); }
+.group-info-write-empty { padding: 8px; font-size: 13px; color: var(--ink-faint); }
+
+.select-toolbar {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 6; display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; background: var(--sidebar); border-bottom: 1px solid var(--line);
+}
+.select-toolbar-count { flex: 1; font-size: 13.5px; color: var(--ink-muted); }
+.select-toolbar-delete {
+  display: flex; align-items: center; gap: 6px; border: none; cursor: pointer;
+  background: color-mix(in srgb, var(--unread) 14%, transparent); color: var(--unread);
+  border-radius: var(--radius-pill); padding: 7px 14px; font-size: 13px; font-weight: 600;
+}
+.select-toolbar-delete:hover { background: color-mix(in srgb, var(--unread) 22%, transparent); }
+.select-toolbar-delete:disabled { opacity: .5; cursor: default; }
+/* Пока идёт жест выделения, системное выделение текста должно молчать: иначе
+   Android поверх нашего поднимает свои маркеры и меню «Копировать», и человек
+   получает два выделения разом. */
+.conv-body.is-touch-selecting {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.msg.is-selectable { cursor: pointer; padding-left: 30px; }
+.msg.is-selectable.mine { padding-left: 0; padding-right: 30px; }
+.msg-select-check { position: absolute; left: 0; top: 8px; width: 18px; height: 18px; accent-color: var(--accent); }
+.msg.is-selectable.mine .msg-select-check { left: auto; right: 0; }
+.msg.is-selected .bubble { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.muted-banner {
+  flex: none; padding: 10px 18px; font-size: 13px; font-weight: 500; text-align: center; color: var(--unread);
+  background: color-mix(in srgb, var(--unread) 12%, var(--sidebar)); border-top: 1px solid color-mix(in srgb, var(--unread) 30%, var(--line));
+}
+
+/* ---- Поле ввода ---- */
+/* Полоса ввода: смайлик и скрепка живут ВНУТРИ скруглённой полосы, отправка —
+   отдельным кругом снаружи справа (по референсу). Панели правки/ответа и
+   превью картинки идут отдельными строками над полосой, поэтому сам composer —
+   колонка, а строка ввода лежит в .composer-row. */
+.composer {
+  flex: none; display: flex; flex-direction: column; gap: 7px; padding: 6px 10px 9px;
+  background: var(--sidebar); border-top: 1px solid var(--line);
+  /* Панель смайликов позиционируется от composer'а — она разворачивается
+     вверх, поверх ленты сообщений. */
+  position: relative;
+  border-radius: 0; transition: background var(--ease);
+}
+.composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.composer-emoji-suggestions {
+  display: flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 5px 8px; margin: 0 46px 5px 46px; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: color-mix(in srgb, var(--paper-raised) 94%, transparent);
+  box-shadow: var(--shadow-sm, 0 4px 14px rgba(16, 35, 47, .12));
+}
+.composer-emoji-suggestions button {
+  width: 34px; height: 34px; flex: none; padding: 4px; border: none;
+  border-radius: 50%; background: transparent; cursor: pointer;
+  display: grid; place-items: center;
+}
+.composer-emoji-suggestions button:hover { background: var(--row-hover); }
+.composer-emoji-suggestions img { width: 27px; height: 27px; object-fit: contain; }
+
+/* Всплывает над только что вставленным смайликом (position: fixed, left/top
+   выставляются инлайном по координатам самого узла) — тот же принцип, что и
+   у composer-emoji-suggestions, только позиция не в потоке, а точечная. */
+.emoji-variant-popup {
+  z-index: 40; transform: translate(-50%, calc(-100% - 8px));
+  display: flex; align-items: center; gap: 4px; padding: 5px; max-width: min(80vw, 320px);
+  overflow-x: auto; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--paper-raised); box-shadow: var(--shadow-md, 0 8px 24px rgba(16, 35, 47, .22));
+}
+.emoji-variant-option {
+  width: 38px; height: 38px; flex: none; padding: 3px; border: 2px solid transparent;
+  border-radius: 50%; background: transparent; cursor: pointer; display: grid; place-items: center;
+}
+.emoji-variant-option:hover { background: var(--row-hover); }
+.emoji-variant-option.is-current { border-color: var(--accent); }
+.emoji-variant-option img { width: 28px; height: 28px; object-fit: contain; }
+
+.composer-bar {
+  flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 2px;
+  padding: 3px; background: var(--paper-sunken);
+  border-radius: 24px; border: 1px solid transparent;
+  transition: border-color var(--ease), background var(--ease);
+}
+.composer-bar:focus-within { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+/* Перетаскивание картинки прямо на composer — та же метафора, что вставка
+   через Ctrl+V, только мышью. Подсветка всей полосы ввода, чтобы было видно,
+   куда можно бросить файл, ещё до того, как он окажется над textarea. */
+.composer.is-drag-over { background: color-mix(in srgb, var(--accent) 10%, var(--sidebar)); }
+.composer-file-input { display: none; }
+/* Фон и скругление теперь на всей полосе (.composer-bar), поле внутри —
+   прозрачное: иначе получалась бы «плашка в плашке». */
+.composer-field {
+  flex: 1; min-width: 0; position: relative; display: flex; align-items: center;
+}
+
+/* Плашка приложенной картинки над полем ввода — превью до отправки, с
+   индикатором загрузки, пока файл ещё грузится на сервер. */
+/* Картинок может быть много — превью переносятся на новую строку, а не
+   выдавливают композер за край. */
+.composer-attachment { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.composer-attachment-preview {
+  position: relative; width: 52px; height: 52px; border-radius: var(--radius-md); overflow: visible;
+  background: var(--paper-sunken); flex: none;
+}
+.composer-attachment-preview img { border-radius: var(--radius-md); }
+/* Не влезающие в лимит одной отправки — приглушены: видно, что они прикреплены,
+   но уйдут следующей пачкой. */
+.composer-attachment-preview.is-overflow { opacity: .45; }
+.composer-attachment-preview.is-error img { filter: brightness(.58); }
+.composer-attachment-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.composer-attachment-spinner {
+  position: absolute; inset: 0; background: color-mix(in srgb, black 40%, transparent);
+  border: 2px solid transparent; border-top-color: #fff; border-radius: 50%;
+  width: 18px; height: 18px; margin: auto; animation: composer-spin .7s linear infinite;
+}
+@keyframes composer-spin { to { transform: rotate(360deg); } }
+.composer-attachment-error { font-size: 12.5px; color: var(--unread); }
+.composer-attachment-unavailable {
+  position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%;
+  background: var(--unread); color: #fff; font-weight: 700; z-index: 1;
+}
+/* Крестик у каждого превью в углу: одной кнопкой на всю пачку убирать нечего,
+   а рядом с превью он ушёл бы в перенос вместе с картинками. */
+.composer-attachment-remove {
+  position: absolute; top: -6px; right: -6px; z-index: 1;
+  border: none; background: var(--paper-sunken); color: var(--ink-muted); cursor: pointer;
+  width: 20px; height: 20px; border-radius: 50%; font-size: 14px; line-height: 1; flex: none;
+  box-shadow: var(--shadow-sm);
+}
+.composer-attachment-remove:hover { background: var(--row-hover); color: var(--unread); }
+
+/* Панель «Редактирование» над полем ввода — как в Telegram. Раньше правка шла
+   прямо в пузыре, в однострочном поле: у длинного сообщения это была щель на
+   пару слов, где текст не помещался и его нельзя было просмотреть целиком. */
+.composer-editing {
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  border-left: 2px solid var(--accent); background: var(--paper-sunken);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.composer-editing-icon { flex: none; color: var(--accent); }
+.composer-editing-body { flex: 1; min-width: 0; }
+.composer-editing-title { font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.composer-editing-text {
+  font-size: 13px; color: var(--ink-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.composer-editing-cancel {
+  flex: none; border: none; background: none; color: var(--ink-faint); cursor: pointer;
+  width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+.composer-editing-cancel:hover { background: var(--row-hover); color: var(--ink); }
+/* Правящееся сообщение подсвечено в ленте, чтобы было видно, что именно правим. */
+.msg.is-editing .bubble { outline: 2px solid var(--accent); outline-offset: 1px; }
+.composer textarea {
+  width: 100%; border: none; background: transparent; color: var(--ink); resize: none;
+  padding: 9px 4px; font-size: 15px; line-height: 1.35; max-height: 180px; overflow-y: auto;
+}
+.composer textarea:focus { outline: none; }
+.composer textarea:disabled { opacity: .6; }
+.composer textarea::placeholder { color: var(--ink-faint); }
+/* Поле ввода со смайликами-картинками (веб и десктоп; на телефоне — textarea
+   выше). Размеры и отступы совпадают с ней намеренно: это одно и то же поле
+   для человека, различается только тем, что внутри может лежать картинка. */
+.composer-input {
+  width: 100%; color: var(--ink); padding: 9px 4px; font-size: 15px; line-height: 1.35;
+  max-height: 180px; overflow-y: auto; outline: none;
+  /* Перенос строки вставляется литеральным '\A' вместо <br>, показать его
+     может только pre-wrap. Длинное слово без пробелов не должно распирать
+     полосу ввода — отсюда break-word. */
+  white-space: pre-wrap; overflow-wrap: break-word;
+}
+/* У contentEditable нет своего placeholder — рисуем сами. :empty срабатывает,
+   только когда внутри нет ВООБЩЕ ничего, поэтому пустых узлов после очистки
+   поля оставлять нельзя. */
+.composer-input:empty::before {
+  content: attr(data-placeholder); color: var(--ink-faint); pointer-events: none;
+}
+.composer-input[contenteditable='false'] { opacity: .6; }
+.composer-counter {
+  position: absolute; right: 12px; bottom: 4px; font-size: 11px; color: var(--ink-faint);
+  font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.send-btn {
+  flex: none; width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center;
+}
+.send-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.send-btn:disabled { opacity: .45; cursor: default; }
+.send-btn:active:not(:disabled) { transform: scale(.94); }
+
+/* Внутри полосы кнопки без собственного фона — он был бы плашкой на плашке.
+   Подсветка появляется только при наведении. */
+.attach-btn, .emoji-btn {
+  flex: none; width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
+  background: none; color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; align-self: flex-end;
+}
+.attach-btn:hover:not(:disabled), .emoji-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
+.attach-btn:disabled, .emoji-btn:disabled { opacity: .45; cursor: default; }
+.attach-btn:active:not(:disabled), .emoji-btn:active:not(:disabled) { transform: scale(.94); }
+.emoji-btn.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.attach-btn.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* Меню одной кнопки вложений: существующая загрузка изображения остаётся
+   рабочей, файлы честно помечены как будущая функция, опрос открывает свой
+   редактор. На телефоне тот же блок становится широкой нижней карточкой. */
+.composer-attach-menu {
+  position: absolute; right: 58px; bottom: calc(100% + 8px); z-index: 32;
+  width: 286px; padding: 7px; border: 1px solid var(--line);
+  border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: var(--shadow-lg);
+}
+.composer-attach-menu > button {
+  width: 100%; border: none; background: none; color: var(--ink); cursor: pointer;
+  display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: var(--radius-md); text-align: left;
+}
+.composer-attach-menu > button:hover:not(:disabled) { background: var(--row-hover); }
+.composer-attach-menu > button:disabled { cursor: default; opacity: .48; }
+.composer-attach-menu > button > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.composer-attach-menu strong { font-size: 14px; font-weight: 600; }
+.composer-attach-menu small { color: var(--ink-faint); font-size: 11.5px; }
+.composer-attach-menu em {
+  font-style: normal; font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--gold-strong); margin-left: 4px;
+}
+.attach-menu-icon {
+  width: 36px; height: 36px; flex: none; border-radius: 12px; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.attach-menu-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.attach-menu-icon.image { background: linear-gradient(145deg, #55b7f5, #2f83db); }
+.attach-menu-icon.file { background: linear-gradient(145deg, #6f8ca5, #4a6178); }
+.attach-menu-icon.poll { background: linear-gradient(145deg, #2fc7d7, #1599c5); }

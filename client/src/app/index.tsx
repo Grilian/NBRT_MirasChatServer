@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import '@/shared/styles/theme.css';
+import '@/shared/styles/index.css';
 import App from './App';
 import { applyThemePreference, getThemePreference } from '@/shared/lib/theme';
 
