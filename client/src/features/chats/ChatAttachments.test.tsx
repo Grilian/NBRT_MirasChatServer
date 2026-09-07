@@ -1,0 +1,132 @@
+import type { Mock } from 'vitest';
+import React from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import api from '@/shared/api/client';
+import ChatAttachments from './ChatAttachments';
+
+vi.mock('@/shared/api/client', () => ({
+  __esModule: true,
+  default: { get: vi.fn(), post: vi.fn() },
+}));
+
+const mockedApi = api as unknown as { get: Mock; post: Mock };
+
+const MEDIA = [
+  { id: 11, file_path: '/uploads/users/1/images/mine.webp', file_width: 10, file_height: 10, created_at: '2026-08-15 10:00:00', sender_id: 1 },
+  { id: 12, file_path: '/uploads/users/2/images/theirs.webp', file_width: 10, file_height: 10, created_at: '2026-08-15 10:01:00', sender_id: 2 },
+];
+
+const FILES = [
+  { id: 21, document_path: '/uploads/users/1/files/a.pdf', document_name: 'договор.pdf', document_size: 100, category: 'documents', created_at: '2026-08-15 10:00:00', sender_id: 1 },
+  { id: 22, document_path: '/uploads/users/1/files/b.mp3', document_name: 'песня.mp3', document_size: 200, category: 'music', created_at: '2026-08-15 10:01:00', sender_id: 1 },
+];
+
+beforeEach(() => {
+  mockedApi.get.mockReset();
+  mockedApi.post.mockReset();
+  mockedApi.get.mockImplementation((_url: string, config?: any) => {
+    const kind = config?.params?.kind;
+    if (kind === 'files') return Promise.resolve({ data: { kind, items: FILES } });
+    if (kind === 'links') return Promise.resolve({ data: { kind, items: [] } });
+    return Promise.resolve({ data: { kind: 'media', items: MEDIA } });
+  });
+});
+
+const setup = (props: Partial<React.ComponentProps<typeof ChatAttachments>> = {}) => render(
+  <ChatAttachments chatId="chat_1_2" currentUserId={1} onOpenMessage={vi.fn()} {...props} />
+);
+
+test('нажатие на своё изображение открывает меню с удалением', async () => {
+  setup();
+  const tiles = await screen.findAllByRole('button', { name: /^Изображение от/ });
+  // Первая плитка — своя (sender_id === currentUserId).
+  fireEvent.click(tiles[0]);
+
+  expect(screen.getByRole('button', { name: 'Перейти к сообщению' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Скачать' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Удалить' })).toBeInTheDocument();
+});
+
+test('у чужого изображения удаления в меню нет — только переход и скачивание', async () => {
+  setup();
+  const tiles = await screen.findAllByRole('button', { name: /^Изображение от/ });
+  fireEvent.click(tiles[1]);
+
+  expect(screen.getByRole('button', { name: 'Перейти к сообщению' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Удалить' })).not.toBeInTheDocument();
+});
+
+test('переход к сообщению отдаёт наверх чат и id сообщения', async () => {
+  const onOpenMessage = vi.fn();
+  setup({ onOpenMessage });
+  const tiles = await screen.findAllByRole('button', { name: /^Изображение от/ });
+  fireEvent.click(tiles[0]);
+  fireEvent.click(screen.getByRole('button', { name: 'Перейти к сообщению' }));
+
+  expect(onOpenMessage).toHaveBeenCalledWith('chat_1_2', 11);
+});
+
+test('удаление уводит файл в архив и убирает его из списка', async () => {
+  mockedApi.post.mockResolvedValue({ data: {} });
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  setup();
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Файлы' }));
+  const row = await screen.findByText('договор.pdf');
+  fireEvent.click(row);
+  fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+
+  await waitFor(() => expect(mockedApi.post).toHaveBeenCalledWith('/messages/21/attachment/archive'));
+  // Строка пропадает сразу, не дожидаясь перезагрузки списка.
+  await waitFor(() => expect(screen.queryByText('договор.pdf')).not.toBeInTheDocument());
+  confirmSpy.mockRestore();
+});
+
+test('категории отбирают файлы по виду', async () => {
+  setup();
+  fireEvent.click(await screen.findByRole('button', { name: 'Файлы' }));
+
+  expect(await screen.findByText('договор.pdf')).toBeInTheDocument();
+  expect(screen.getByText('песня.mp3')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Категория: Музыка' }));
+  expect(screen.queryByText('договор.pdf')).not.toBeInTheDocument();
+  expect(screen.getByText('песня.mp3')).toBeInTheDocument();
+
+  // Пустая категория говорит об этом, а не показывает пустоту без объяснения.
+  fireEvent.click(screen.getByRole('button', { name: 'Категория: Изображения' }));
+  expect(screen.getByText('В этой категории ничего нет')).toBeInTheDocument();
+});
+
+test('переключение медиа → файлы → медиа не роняет панель', async () => {
+  // Настоящее падение (1.10.3, Windows): между сменой вкладки и приходом новых
+  // данных был кадр, где вкладка уже «Медиа», а список ещё из «Файлов» —
+  // плитка бралась за file_path, которого у файла нет. Ронялось только там, где
+  // во вкладке «Файлы» действительно что-то лежит, поэтому и «падает на одном
+  // конкретном человеке».
+  //
+  // Порядок шагов важен: переключать вкладку нужно ПОСЛЕ того, как содержимое
+  // предыдущей уже показано (loading = false). Если щёлкать быстрее ответа
+  // сервера, тот самый кадр не наступает и тест ничего не проверяет — на этом
+  // первая версия теста и прошла по сломанному коду.
+  setup();
+
+  const tab = (label: string) => screen.getByRole('button', { name: label });
+
+  await screen.findAllByRole('button', { name: /^Изображение от/ });
+
+  fireEvent.click(tab('Файлы'));
+  await screen.findByText('договор.pdf');
+
+  fireEvent.click(tab('Медиа'));
+  await screen.findAllByRole('button', { name: /^Изображение от/ });
+
+  fireEvent.click(tab('Файлы'));
+  await screen.findByText('песня.mp3');
+
+  fireEvent.click(tab('Медиа'));
+  await screen.findAllByRole('button', { name: /^Изображение от/ });
+
+  // Панель на месте: вкладки не размонтировались вместе с упавшим деревом.
+  expect(screen.getByRole('button', { name: 'Ссылки' })).toBeInTheDocument();
+});

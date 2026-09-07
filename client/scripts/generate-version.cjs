@@ -1,4 +1,4 @@
-// Пишет src/version.ts перед каждой сборкой/запуском — короткий git-хэш и
+// Пишет src/app/version.ts перед каждой сборкой/запуском — короткий git-хэш и
 // дата сборки, чтобы после деплоя можно было свериться, какая версия реально
 // выложена (см. .settings-row с версией внизу настроек).
 const { execSync } = require('child_process');
@@ -30,5 +30,5 @@ export const APP_VERSION = ${JSON.stringify(version)};
 export const BUILT_AT = ${JSON.stringify(builtAt)};
 `;
 
-fs.writeFileSync(path.join(__dirname, '..', 'src', 'version.ts'), out);
+fs.writeFileSync(path.join(__dirname, '..', 'src', 'app', 'version.ts'), out);
 console.log(`[version] ${version} (${builtAt})`);

@@ -1,3 +1,4 @@
+import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -17,6 +18,13 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   base: './',
+  // `@` — корень исходников. Импорт между фичами пишется от корня
+  // (`@/shared/lib/time`), а не лесенкой `../../../`: путь тогда не зависит от
+  // того, на какой глубине лежит импортирующий файл, и переезд каталога не
+  // ломает половину импортов в проекте. Внутри своей папки остаётся `./`.
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   build: {
     outDir: process.env.BUILD_PATH || 'build',
     emptyOutDir: true,

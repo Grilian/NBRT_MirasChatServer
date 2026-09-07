@@ -14,7 +14,7 @@
 /build-mobile
 
 # auto-generated at build/start time, see scripts/generate-version.js
-/src/version.ts
+/src/app/version.ts
 
 # misc
 .DS_Store
