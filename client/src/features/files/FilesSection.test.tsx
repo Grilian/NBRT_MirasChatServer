@@ -4,6 +4,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '@/shared/api/client';
 import FilesSection from './FilesSection';
 
+// Имя файла состоит из ДВУХ узлов — начало и хвост с расширением (обрезка
+// посередине, см. shared/ui/FileName). `getByText` смотрит только на прямые
+// текстовые узлы и такое имя не находит, поэтому ищем по обёртке целиком —
+// заодно это и есть проверка «человек видит имя полностью».
+const fileName = (name: string) => (_: string, el: Element | null) =>
+  !!el && el.classList.contains('file-name') && el.textContent === name;
+
 vi.mock('@/shared/api/client', () => ({
   __esModule: true,
   default: { get: vi.fn(), post: vi.fn() },
@@ -51,7 +58,7 @@ beforeEach(() => {
 test('показывает свои файлы, чат-источник и занятое место', async () => {
   render(<FilesSection />);
 
-  expect(await screen.findByText('договор.pdf')).toBeInTheDocument();
+  expect(await screen.findByText(fileName('договор.pdf'))).toBeInTheDocument();
   expect(screen.getByText(/Борис/)).toBeInTheDocument();
   // Подпись склоняется: «2 файла», а не «2 файлов».
   expect(screen.getByText(/2 файла из ваших сообщений/)).toBeInTheDocument();
@@ -59,19 +66,19 @@ test('показывает свои файлы, чат-источник и за�
 
 test('категория отбирает список, не ходя на сервер заново', async () => {
   render(<FilesSection />);
-  await screen.findByText('договор.pdf');
+  await screen.findByText(fileName('договор.pdf'));
   const callsBefore = mockedApi.get.mock.calls.length;
 
   fireEvent.click(screen.getByRole('button', { name: /^Музыка/ }));
 
-  expect(screen.queryByText('договор.pdf')).not.toBeInTheDocument();
-  expect(screen.getByText('песня.mp3')).toBeInTheDocument();
+  expect(screen.queryByText(fileName('договор.pdf'))).not.toBeInTheDocument();
+  expect(screen.getByText(fileName('песня.mp3'))).toBeInTheDocument();
   expect(mockedApi.get.mock.calls.length).toBe(callsBefore);
 });
 
 test('сортировка и архив перезапрашивают список у сервера', async () => {
   render(<FilesSection />);
-  await screen.findByText('договор.pdf');
+  await screen.findByText(fileName('договор.pdf'));
 
   fireEvent.change(screen.getByLabelText('Порядок'), { target: { value: 'big' } });
   await waitFor(() => expect(mockedApi.get).toHaveBeenCalledWith(
@@ -91,13 +98,13 @@ test('удаление уводит файл в архив и обновляет
   mockedApi.post.mockResolvedValue({ data: {} });
   const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
   render(<FilesSection />);
-  await screen.findByText('договор.pdf');
+  await screen.findByText(fileName('договор.pdf'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Действия с договор.pdf' }));
   fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
 
   await waitFor(() => expect(mockedApi.post).toHaveBeenCalledWith('/messages/1/attachment/archive'));
-  await waitFor(() => expect(screen.queryByText('договор.pdf')).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText(fileName('договор.pdf'))).not.toBeInTheDocument());
   // Сводка перечитывается: ради занятого места сюда и приходят.
   expect(mockedApi.get).toHaveBeenCalledWith('/files/summary');
   confirmSpy.mockRestore();
@@ -106,7 +113,7 @@ test('удаление уводит файл в архив и обновляет
 test('переход к сообщению отдаёт наверх чат и сообщение', async () => {
   const onOpenMessage = vi.fn();
   render(<FilesSection onOpenMessage={onOpenMessage} />);
-  await screen.findByText('песня.mp3');
+  await screen.findByText(fileName('песня.mp3'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Действия с песня.mp3' }));
   fireEvent.click(screen.getByRole('button', { name: 'Перейти к сообщению' }));
@@ -116,7 +123,7 @@ test('переход к сообщению отдаёт наверх чат и �
 
 test('массовые действия появляются только при выборе', async () => {
   render(<FilesSection />);
-  await screen.findByText('договор.pdf');
+  await screen.findByText(fileName('договор.pdf'));
   expect(screen.queryByText(/Выбрано:/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать договор.pdf' }));

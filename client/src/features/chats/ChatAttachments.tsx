@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import FileName from '@/shared/ui/FileName';
 import api from '@/shared/api/client';
 import { resolveUploadUrl } from '@/shared/lib/uploads';
 // formatChatListTime, а не formatDate: последняя разбирает дату рождения
@@ -298,7 +299,7 @@ const ChatAttachments: React.FC<Props> = ({ chatId, currentUserId, onOpenMessage
             >
               <span className="attachments-file-glyph" aria-hidden="true">{fileGlyph(item.document_name)}</span>
               <span className="attachments-file-body">
-                <span className="attachments-file-name">{item.document_name || 'Файл'}</span>
+                <FileName name={item.document_name} className="attachments-file-name" />
                 <span className="attachments-file-meta">
                   {formatFileSize(item.document_size)} · {formatChatListTime(item.created_at)}
                 </span>

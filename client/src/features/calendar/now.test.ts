@@ -23,6 +23,12 @@ const at = (over: Partial<CalendarOccurrence>): CalendarOccurrence => ({
   recurrence: null,
   scope_kind: 'personal',
   scope_id: null,
+  owner_id: 1,
+  is_owner: true,
+  can_edit: true,
+  is_guest: false,
+  source: 'calendar',
+  guests: [],
   ...over,
 } as CalendarOccurrence);
 

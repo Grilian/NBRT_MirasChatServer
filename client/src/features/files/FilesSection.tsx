@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import FileName from '@/shared/ui/FileName';
 import api from '@/shared/api/client';
 import { resolveUploadUrl } from '@/shared/lib/uploads';
 import { formatChatListTime } from '@/shared/lib/time';
@@ -389,7 +390,7 @@ const FilesSection: React.FC<Props> = ({ onOpenMessage }) => {
                         : <span className="files-item-glyph">{item.archived_at ? '🗄' : fileGlyph(item.name)}</span>}
                     </span>
                     <span className="files-item-body">
-                      <span className="files-item-name">{item.name}</span>
+                      <FileName name={item.name} className="files-item-name" />
                       <span className="files-item-meta">
                         {item.size ? `${formatFileSize(item.size)} · ` : ''}
                         {item.chat_name} · {formatChatListTime(item.created_at)}

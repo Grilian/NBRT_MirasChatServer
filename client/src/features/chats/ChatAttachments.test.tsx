@@ -4,6 +4,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '@/shared/api/client';
 import ChatAttachments from './ChatAttachments';
 
+// Имя файла состоит из ДВУХ узлов — начало и хвост с расширением (обрезка
+// посередине, см. shared/ui/FileName). `getByText` смотрит только на прямые
+// текстовые узлы и такое имя не находит, поэтому ищем по обёртке целиком —
+// заодно это и есть проверка «человек видит имя полностью».
+const fileName = (name: string) => (_: string, el: Element | null) =>
+  !!el && el.classList.contains('file-name') && el.textContent === name;
+
 vi.mock('@/shared/api/client', () => ({
   __esModule: true,
   default: { get: vi.fn(), post: vi.fn() },
@@ -72,13 +79,13 @@ test('удаление уводит файл в архив и убирает е�
   setup();
 
   fireEvent.click(await screen.findByRole('button', { name: 'Файлы' }));
-  const row = await screen.findByText('договор.pdf');
+  const row = await screen.findByText(fileName('договор.pdf'));
   fireEvent.click(row);
   fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
 
   await waitFor(() => expect(mockedApi.post).toHaveBeenCalledWith('/messages/21/attachment/archive'));
   // Строка пропадает сразу, не дожидаясь перезагрузки списка.
-  await waitFor(() => expect(screen.queryByText('договор.pdf')).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText(fileName('договор.pdf'))).not.toBeInTheDocument());
   confirmSpy.mockRestore();
 });
 
@@ -86,12 +93,12 @@ test('категории отбирают файлы по виду', async () =>
   setup();
   fireEvent.click(await screen.findByRole('button', { name: 'Файлы' }));
 
-  expect(await screen.findByText('договор.pdf')).toBeInTheDocument();
-  expect(screen.getByText('песня.mp3')).toBeInTheDocument();
+  expect(await screen.findByText(fileName('договор.pdf'))).toBeInTheDocument();
+  expect(screen.getByText(fileName('песня.mp3'))).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Категория: Музыка' }));
-  expect(screen.queryByText('договор.pdf')).not.toBeInTheDocument();
-  expect(screen.getByText('песня.mp3')).toBeInTheDocument();
+  expect(screen.queryByText(fileName('договор.pdf'))).not.toBeInTheDocument();
+  expect(screen.getByText(fileName('песня.mp3'))).toBeInTheDocument();
 
   // Пустая категория говорит об этом, а не показывает пустоту без объяснения.
   fireEvent.click(screen.getByRole('button', { name: 'Категория: Изображения' }));
@@ -116,13 +123,13 @@ test('переключение медиа → файлы → медиа не р�
   await screen.findAllByRole('button', { name: /^Изображение от/ });
 
   fireEvent.click(tab('Файлы'));
-  await screen.findByText('договор.pdf');
+  await screen.findByText(fileName('договор.pdf'));
 
   fireEvent.click(tab('Медиа'));
   await screen.findAllByRole('button', { name: /^Изображение от/ });
 
   fireEvent.click(tab('Файлы'));
-  await screen.findByText('песня.mp3');
+  await screen.findByText(fileName('песня.mp3'));
 
   fireEvent.click(tab('Медиа'));
   await screen.findAllByRole('button', { name: /^Изображение от/ });
