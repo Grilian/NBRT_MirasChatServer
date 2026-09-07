@@ -1,41 +1,16 @@
-require('dotenv').config({ quiet: true });
-const express = require('express');
+require('dotenv').config();
 const http = require('http');
-const path = require('path');
 const { Server } = require('socket.io');
-const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
-const authRoutes = require('./routes/auth');
-const messageRoutes = require('./routes/messages');
-const verifyToken = require('./middleware/verifyToken');
-const userRoutes = require('./routes/users');
-const unreadRoutes = require('./routes/unread');
-const favoritesRoutes = require('./routes/favorites');
-const commentsRoutes = require('./routes/comments');
-const superadminRoutes = require('./routes/superadmin');
-const contactsRoutes = require('./routes/contacts');
-const moderationRoutes = require('./routes/moderation');
-const devicesRoutes = require('./routes/devices');
-const updatesRoutes = require('./routes/updates');
-const calendarRoutes = require('./routes/calendar');
-const googleCalendarRoutes = require('./routes/googleCalendar');
-const sessionRoutes = require('./routes/session');
-const departmentsRoutes = require('./routes/departments');
-const groupsRoutes = require('./routes/groups');
-const tasksRoutes = require('./routes/tasks');
-const emojiRoutes = require('./routes/emoji');
-const stickerRoutes = require('./routes/stickers');
-const filesRoutes = require('./routes/files');
-const notificationSettingsRoutes = require('./routes/notificationSettings');
-const requireAdminRole = require('./middleware/requireAdminRole');
+const app = require('./app');
+const db = require('./db');
+
 const { participantsForChatId, isParticipant } = require('./services/chatParticipants');
-const { isSharedChat, markRead, readCountsFor } = require('./services/readReceipts');
+const { isSharedChat, markRead } = require('./services/readReceipts');
 const { isValidEmoji, reactionsFor, setReaction, removeReaction } = require('./services/reactions');
-const { notifyNewMessage } = require('./services/push');
 const { canPostToGroup } = require('./services/chatPermissions');
 const { isValidChatImagePath, isValidChatFilePath } = require('./routes/messages');
-const { canPostAnnouncement } = require('./routes/groups');
 const {
   NotificationPolicyError,
   resolveForceNotification,
@@ -63,156 +38,30 @@ const {
   softDeleteThread,
 } = require('./services/threads');
 
-const db = require('./db');
-
-// Группы, кому можно писать даже в режиме тишины — обращение к администрации
-// напрямую, а не рассылка (general всё равно остаётся заблокирован).
-const MUTE_EXEMPT_GROUPS = ['Администрация', 'Админы'];
-
-const MAX_MESSAGE_LENGTH = 4000;
-const MAX_READ_BATCH = 500;
-
-// engine.io не разбирает X-Forwarded-For сам (socket.handshake.address —
-// это адрес nginx на локалхосте, а не клиента) — достаём реальный IP из
-// заголовка, который nginx уже прокидывает (см. proxy_set_header
-// X-Forwarded-For в конфиге). Он нужен только как метаданные о факте
-// передачи сообщения, в интерфейс не попадает.
-// Канал-объявление: в нём у каждого сообщения показывается «просмотрено» с
-// числом прочитавших, и это число должно расти живьём, а не только после
-// перезагрузки истории (её отдаёт routes/messages.js).
-function isAnnouncementChat(chatId) {
-  const match = String(chatId).match(/^group_(\d+)$/);
-  if (!match) return false;
-  const group = db.prepare('SELECT announcements_only FROM chat_groups WHERE id = ?').get(Number(match[1]));
-  return !!(group && group.announcements_only);
-}
-
-// Довесок к message_status_bulk — только для каналов-объявлений, в обычной
-// переписке счётчик не показывается и считать его незачем.
-function readCountsPayload(chatId, ids) {
-  return isAnnouncementChat(chatId) ? { readCounts: readCountsFor(ids) } : {};
-}
-
-// Цитата исходного сообщения для ответа — та же форма, что отдаёт история
-// (см. routes/messages.js). Удалённое цитируем пустым текстом: строка в базе
-// остаётся навсегда, но её содержимое наружу не отдаётся ни при каких
-// обстоятельствах, включая цитаты.
-function replyPreviewOf(replyToId) {
-  const row = db.prepare(`
-    SELECT m.text, m.file_path, m.sticker_fallback, m.document_name, m.attachment_archived_at, m.deleted,
-           u.username, u.display_name
-    FROM messages m JOIN users u ON u.id = m.sender_id
-    WHERE m.id = ?
-  `).get(replyToId);
-  if (!row) return {};
-  return {
-    reply_to_text: row.deleted ? '' : row.text,
-    reply_to_file: (row.deleted || row.attachment_archived_at) ? null : row.file_path,
-    reply_to_sticker_fallback: row.deleted ? null : row.sticker_fallback,
-    reply_to_document_name: (row.deleted || row.attachment_archived_at) ? null : row.document_name,
-    reply_to_author: row.display_name || row.username,
-    reply_to_deleted: row.deleted ? 1 : 0,
-  };
-}
-
-// Кто может убрать сообщение у ВСЕХ. Своё — всегда. Чужое: в личной переписке
-// любой из двоих (собеседник ровно один, право симметрично), в общем чате и
-// группах — владелец группы либо орг-администрация. Обычному участнику группы
-// чужое доступно только «скрыть у себя»: иначе один человек мог бы вычистить
-// переписку у полусотни людей, и восстановить её смог бы только админ
-// запросом к базе (содержимое-то остаётся, но из интерфейса пропадает).
-function canDeleteForEveryone(message, userId) {
-  if (Number(message.sender_id) === Number(userId)) return true;
-
-  const groupMatch = String(message.chat_id).match(/^group_(\d+)$/);
-  if (groupMatch) {
-    const membership = db.prepare(
-      'SELECT role FROM chat_group_members WHERE chat_group_id = ? AND user_id = ?'
-    ).get(Number(groupMatch[1]), userId);
-    if (membership && membership.role === 'owner') return true;
-    return canPostAnnouncement(userId); // admin/moderator по users.role
-  }
-
-  if (message.chat_id === 'general') return canPostAnnouncement(userId);
-
-  // Личная переписка: участие уже проверено вызывающим кодом.
-  return true;
-}
-
-function clientIpOf(socket) {
-  const forwarded = socket.handshake.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0].trim();
-  }
-  return socket.handshake.address || null;
-}
-
-// Простейшая защита от флуда: не больше FLOOD_MAX_MESSAGES сообщений за
-// FLOOD_WINDOW_MS с одного сокета. Без неё зациклившийся клиент (или кто-то
-// вручную) мог за секунды забить БД и завалить уведомлениями всех участников.
-const FLOOD_WINDOW_MS = 10000;
-const FLOOD_MAX_MESSAGES = 20;
-
-function isFlooding(socket) {
-  const now = Date.now();
-  const recent = (socket.recentMessageTimes || []).filter((t) => now - t < FLOOD_WINDOW_MS);
-  recent.push(now);
-  socket.recentMessageTimes = recent;
-  return recent.length > FLOOD_MAX_MESSAGES;
-}
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// REST API
-app.use('/api/auth', authRoutes);
-app.use('/api/messages', verifyToken, messageRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/unread', unreadRoutes);
-app.use('/api/favorites', favoritesRoutes);
-app.use('/api/comments', commentsRoutes);
-app.use('/api/superadmin', superadminRoutes);
-app.use('/api/contacts', contactsRoutes);
-app.use('/api/moderation', verifyToken, requireAdminRole, moderationRoutes);
-app.use('/api/devices', devicesRoutes);
-app.use('/api/updates', updatesRoutes);
-// Раньше общего календаря: у гугловых ручек своя проверка прав (супер-админ),
-// а у адреса возврата её нет и быть не может — см. комментарий в маршруте.
-app.use('/api/calendar/google', googleCalendarRoutes);
-app.use('/api/calendar', calendarRoutes);
-app.use('/api/session', sessionRoutes);
-app.use('/api/departments', departmentsRoutes);
-app.use('/api/groups', verifyToken, groupsRoutes);
-app.use('/api/tasks', tasksRoutes);
-app.use('/api/emoji', emojiRoutes);
-app.use('/api/stickers', stickerRoutes);
-// Личное хранилище: раздел «Файлы» на рельсе.
-app.use('/api/files', filesRoutes);
-app.use('/api/notification-settings', notificationSettingsRoutes);
-
-// Раздача загруженных аватаров — просто статика, без отдельной авторизации
-// на каждый файл (как публичные CDN-ссылки на фото профиля у большинства
-// мессенджеров), доступ к самому приложению уже закрыт логином/паролем.
-// Смонтировано под /api/uploads (а не просто /uploads): в проде reverse-proxy
-// проксирует на бэкенд только префикс /api — отдельного правила для /uploads
-// нет, и файлы отдавались бы SPA-фолбэком (index.html) вместо самой картинки.
-// Кэш навсегда: по умолчанию express.static шлёт `max-age=0`, и браузер
-// перепроверяет КАЖДЫЙ файл при каждом открытии — пусть ответом и будет 304,
-// но на слабой связи это лишний круговой обход на каждый смайлик, аватар и
-// картинку. Именно это делало открытие группы заметно медленнее личного чата:
-// в группе под каждым сообщением аватар, и таких перепроверок десятки.
-//
-// immutable здесь не допущение, а свойство схемы имён: содержимое по одному и
-// тому же пути не меняется НИКОГДА. Аватар — `user_<id>_<время>.jpg` (новая
-// загрузка = новое имя, старый файл удаляется), картинка сообщения —
-// `msg_<id>_<время>_<случайное>.webp`, смайлик — `emoji_<имя>_<случайное>.webp`
-// (замена картинки под тем же кодом пишет НОВЫЙ файл и удаляет прежний).
-// Заводя загрузку с предсказуемым именем, это правило придётся пересмотреть.
-app.use('/api/uploads', express.static(require('./services/userStorage').UPLOADS_DIR, {
-  maxAge: '365d',
-  immutable: true,
-}));
+const { createRooms } = require('./socket/rooms');
+const { markPendingDelivered: markDelivered } = require('./socket/delivery');
+const {
+  markSocketOnline,
+  markSocketOffline,
+  onlineUserIds,
+  isUserOnline,
+  canReceiveInApp,
+  setBackgrounded,
+  forgetSocket,
+  schedulePush,
+  cancelPendingPush,
+} = require('./socket/presence');
+const {
+  MUTE_EXEMPT_GROUPS,
+  MAX_MESSAGE_LENGTH,
+  MAX_READ_BATCH,
+  isAnnouncementChat,
+  readCountsPayload,
+  replyPreviewOf,
+  canDeleteForEveryone,
+  clientIpOf,
+  isFlooding,
+} = require('./socket/chatHelpers');
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -221,165 +70,15 @@ const io = new Server(server, {
     origin: '*'
   }
 });
-
 // Нужен маршрутам панели супер-админа, чтобы толкать живые обновления
 // (например, режим тишины) в комнату конкретного пользователя — не бродкаст
 // пользовательских данных всем подряд, а адресный пуш от доверенного
 // серверного действия, поэтому это не повторяет ранее убранную уязвимость.
 app.set('io', io);
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// extraUserId — отправитель добавляется в комнату явно, иначе не получал бы
-// эхо собственного сообщения/правки/удаления.
-function emitToChat(chatId, event, payload, extraUserId) {
-  const participants = participantsForChatId(chatId);
-  if (participants === null) {
-    io.emit(event, payload);
-    return;
-  }
-  const rooms = new Set(participants.map((id) => 'user:' + id));
-  if (extraUserId !== undefined && extraUserId !== null) rooms.add('user:' + extraUserId);
-  if (rooms.size) io.to([...rooms]).emit(event, payload);
-}
-
-function broadcastToChat(socket, chatId, event, payload) {
-  const participants = participantsForChatId(chatId);
-  if (participants === null) {
-    socket.broadcast.emit(event, payload);
-  } else if (participants.length) {
-    socket.to(participants.map((id) => 'user:' + id)).emit(event, payload);
-  }
-}
-
-// ===== WebSocket =====
-// userId -> Set<socketId>. Раньше здесь был Map userId -> socketId, и это
-// ломалось при нескольких сессиях одного человека (вторая вкладка, телефон
-// плюс десктоп, а также momentary-переподключение, когда новый сокет успевает
-// подняться раньше, чем отвалится старый): вход со второго устройства затирал
-// запись первого, а его 'disconnect' затем помечал пользователя оффлайн,
-// хотя он оставался на связи. Отсюда мигающий индикатор "в сети" и, что
-// важнее, recipientOnline === false — сообщение не помечалось доставленным.
-const onlineSockets = new Map();
-
-function markSocketOnline(userId, socketId) {
-  const existing = onlineSockets.get(userId);
-  if (existing) existing.add(socketId);
-  else onlineSockets.set(userId, new Set([socketId]));
-}
-
-// Возвращает true, если это была последняя живая сессия пользователя, то есть
-// он действительно ушёл в оффлайн (а не просто закрыл одну из вкладок).
-function markSocketOffline(userId, socketId) {
-  const sockets = onlineSockets.get(userId);
-  if (!sockets) return false;
-  sockets.delete(socketId);
-  if (sockets.size > 0) return false;
-  onlineSockets.delete(userId);
-  return true;
-}
-
-const onlineUserIds = () => Array.from(onlineSockets.keys());
-const isUserOnline = (userId) => onlineSockets.has(Number(userId));
-
-// Сокеты приложений, ушедших в фон (Android свернули кнопкой «Домой»).
-//
-// Живой сокет сам по себе НЕ значит, что человеку есть чем показать
-// уведомление: свёрнутый на Android WebView замораживает таймеры и JS, и
-// клиент физически не обработает пришедшее сообщение — а сокет при этом
-// висит подключённым ещё десятки секунд (пока не отвалится по pingTimeout),
-// и всё это время сервер считал получателя онлайн и пуш не слал. В итоге
-// уведомление не показывал никто: ни клиент (заморожен), ни сервер (думал,
-// что клиент сам справится). Приложение само сообщает о переходе в фон
-// событием 'app_state', и для решения «слать ли пуш» верить надо ему.
-const backgroundedSockets = new Set();
-
-/** Есть ли у человека сокет, который прямо сейчас способен показать уведомление сам. */
-function canReceiveInApp(userId) {
-  const sockets = onlineSockets.get(Number(userId));
-  if (!sockets) return false;
-  for (const socketId of sockets) {
-    if (!backgroundedSockets.has(socketId)) return true;
-  }
-  return false;
-}
-
-// ДВА уведомления на одно сообщение — отсюда.
-//
-// Android сообщает о сворачивании сразу (app_state), но JS в свёрнутом WebView
-// замирает НЕ сразу: секунды, а иногда и минуты приложение продолжает получать
-// сокет-события и рисовать локальные уведомления само. Сервер в этот момент уже
-// считал клиента неспособным показать уведомление и слал пуш — в шторке
-// оказывались обе карточки (у них разная природа: локальная адресуется по id
-// сообщения, пуш — по tag чата, и Android не схлопывает их в одну).
-//
-// Наоборот тоже нельзя: дождаться, пока сокет отвалится по pingTimeout, значит
-// потерять уведомление у тех, кого система заморозила молча.
-//
-// Поэтому свёрнутому, но ещё живому клиенту пуш ОТКЛАДЫВАЕТСЯ: успел показать
-// сам — присылает 'message_notified', и отложенный пуш снимается; замер —
-// пуш уходит с небольшим опозданием. Тем, у кого сокета нет вовсе, шлём сразу:
-// подтверждать там некому, и ждать нечего.
-const PUSH_GRACE_MS = 3000;
-const pendingPushes = new Map();
-
-const pushKey = (userId, messageId) => `${userId}:${messageId}`;
-
-function schedulePush(userId, payload, { defer }) {
-  if (!defer) {
-    notifyNewMessage(userId, payload);
-    return;
-  }
-  const key = pushKey(userId, payload.messageId);
-  if (pendingPushes.has(key)) return;
-  const timer = setTimeout(() => {
-    pendingPushes.delete(key);
-    notifyNewMessage(userId, payload);
-  }, PUSH_GRACE_MS);
-  // Отложенный пуш не должен держать процесс живым при остановке сервера.
-  if (typeof timer.unref === 'function') timer.unref();
-  pendingPushes.set(key, timer);
-}
-
-/** Клиент показал уведомление сам — дублировать его пушем больше не нужно. */
-function cancelPendingPush(userId, messageId) {
-  const key = pushKey(userId, messageId);
-  const timer = pendingPushes.get(key);
-  if (!timer) return;
-  clearTimeout(timer);
-  pendingPushes.delete(key);
-}
-
-// Пока человека не было в сети, входящие сообщения оставались в статусе 'sent'
-// (доставлять было некому). Раньше в 'delivered' их переводил только клиент —
-// событием 'message_delivered' из обработчика показа веб-уведомления, то есть
-// если уведомления запрещены/не показались, статус не менялся вообще никогда.
-// Теперь факт доставки фиксирует сервер, как только клиент появился на связи.
-function markPendingDelivered(userId) {
-  try {
-    const pending = db.prepare(
-      "SELECT id, chat_id FROM messages WHERE sender_id != ? AND status = 'sent'"
-    ).all(userId);
-
-    const byChat = {};
-    for (const row of pending) {
-      if (!isParticipant(row.chat_id, userId)) continue;
-      (byChat[row.chat_id] = byChat[row.chat_id] || []).push(row.id);
-    }
-
-    const allIds = Object.values(byChat).flat();
-    if (!allIds.length) return;
-
-    const placeholders = allIds.map(() => '?').join(',');
-    db.prepare(`UPDATE messages SET status = 'delivered' WHERE id IN (${placeholders})`).run(...allIds);
-
-    for (const [chatId, messageIds] of Object.entries(byChat)) {
-      emitToChat(chatId, 'message_status_bulk', { chatId, messageIds, status: 'delivered' });
-    }
-  } catch (e) {
-    console.error('Ошибка отметки доставленных:', e);
-  }
-}
+const { emitToChat, broadcastToChat } = createRooms(io);
+const markPendingDelivered = (userId) => markDelivered(userId, emitToChat);
 
 io.on('connection', (socket) => {
   console.log(`Подключен: ${socket.id}`);
@@ -1018,8 +717,7 @@ io.on('connection', (socket) => {
   // признак того, что показать уведомление своими силами он уже не сможет.
   socket.on('app_state', (data) => {
     const active = typeof data === 'boolean' ? data : !!(data && data.active);
-    if (active) backgroundedSockets.delete(socket.id);
-    else backgroundedSockets.add(socket.id);
+    setBackgrounded(socket.id, !active);
   });
 
   // Свёрнутый клиент успел показать уведомление сам — снимаем отложенный пуш,
@@ -1323,7 +1021,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    backgroundedSockets.delete(socket.id);
+    forgetSocket(socket.id);
     // Оффлайн объявляем, только когда отвалилась последняя сессия человека —
     // иначе закрытая вкладка гасила индикатор "в сети" у ещё живого клиента.
     if (socket.userId && markSocketOffline(socket.userId, socket.id)) {
