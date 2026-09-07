@@ -64,9 +64,9 @@ vi.mock('../utils/desktopNotify', () => ({
   dismissDesktopNotification: vi.fn(),
   dismissAllDesktopNotifications: vi.fn(),
 }));
-const closeMobileInputSurface = vi.fn(() => false);
+const closeMobileInputSurface = vi.fn((): boolean => false);
 vi.mock('../utils/mobileKeyboard', () => ({
-  closeMobileInputSurface: (...a: any[]) => closeMobileInputSurface(...a),
+  closeMobileInputSurface: () => closeMobileInputSurface(),
   watchMobileKeyboard: vi.fn(() => () => {}),
   hideMobileKeyboard: vi.fn(),
   acquireChatKeyboardResizeMode: vi.fn(() => () => {}),

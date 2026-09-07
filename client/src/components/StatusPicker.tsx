@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api/client';
 import EmojiPicker from './EmojiPicker';
 import {
-  CustomEmojiMap, preferCustomEmojiToken, renderTextWithEmoji,
+  CustomEmojiMap, renderTextWithEmoji,
 } from '../utils/customEmoji';
 import {
   STATUS_PRESETS, STATUS_PRESET_ORDER, StatusPreset,
@@ -46,7 +46,7 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
   customEmoji = {},
 }) => {
   const parsed = splitStatusIcon(statusCustom || '');
-  const [emoji, setEmoji] = useState(parsed.emoji || preferCustomEmojiToken('💬', customEmoji));
+  const [emoji, setEmoji] = useState(parsed.emoji || '💬');
   const [customStatus, setCustomStatus] = useState(parsed.text);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [expiryChoice, setExpiryChoice] = useState<ExpiryChoice>('never');
@@ -176,7 +176,7 @@ const StatusPicker: React.FC<StatusPickerProps> = ({
               >
                 <span className="status-preset-row-icon">
                   {renderTextWithEmoji(
-                    preferCustomEmojiToken(STATUS_PRESETS[preset].emoji, customEmoji),
+                    STATUS_PRESETS[preset].emoji,
                     customEmoji,
                     `status-preset-${preset}`,
                   )}

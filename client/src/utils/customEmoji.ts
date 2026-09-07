@@ -42,7 +42,15 @@ export interface EmojiVariant {
   filePath: string;
 }
 
-/** name → чем его показывать. Плоская карта: в тексте пака нет, только :name:. */
+/**
+ * Чем показывать смайлик.
+ *
+ * Ключ карты — ТОЛЬКО код выбора оформления `e~<unicode_key>~<packKey>`.
+ * Обычные смайлики лежат в тексте самим символом Unicode и находятся по
+ * префиксному дереву, а не по имени. Прежние коды `:name:` сняты 07.09.2026
+ * вместе с картиночными смайликами: под них не осталось ни одного элемента,
+ * а держались они на разъехавшихся регэкспах в девяти местах.
+ */
 export interface EmojiRenderAsset {
   filePath: string;
   animatedPath?: string | null;
@@ -91,13 +99,10 @@ export const buildEmojiMap = (
       keywords: item.keywords || '',
       variants: item.variants,
     };
-    map[item.name] = asset;
     if (item.unicode_key) defaults.set(item.unicode_key, asset);
-    // Явный выбор пака, сделанный при отправке (см. EmojiPickerPopup),
-    // кладётся в текст сообщения тем же :code:-механизмом, что и обычные
-    // кастомные смайлики — только имя составное: e~<unicode_key>~<packKey>.
-    // Тот же плоский map, тот же поиск по shortcode — ничего в рендере или в
-    // обратной сборке текста поля ввода менять для этого не нужно.
+    // Явный выбор оформления, сделанный при отправке (см. EmojiVariantPopup),
+    // кладётся в текст кодом `:e~<unicode_key>~<packKey>:`. Это ЕДИНСТВЕННЫЙ
+    // код, который вообще бывает в тексте сообщения.
     if (item.unicode_key && item.variants) {
       for (const variant of item.variants) {
         map[emojiVariantToken(item.unicode_key, variant.packKey)] = {
@@ -137,20 +142,6 @@ export const buildEmojiMap = (
 export const emojiVariantToken = (unicodeKey: string, packKey: string): string => `e~${unicodeKey}~${packKey}`;
 
 /**
- * Если для системного эмодзи загружено изображение с таким fallback, в UI
- * используем его shortcode. Сам Unicode остаётся резервом: когда каталог ещё
- * не загрузился, подходящего изображения нет или файл сломан, вызывающий код
- * по-прежнему сможет показать исходный символ.
- */
-export const preferCustomEmojiToken = (fallback: string, map: CustomEmojiMap): string => {
-  const shortcode = /^:([a-z0-9_~-]{2,128}):$/.exec(fallback);
-  if (shortcode) return map[shortcode[1]] ? fallback : DEFAULT_EMOJI_FALLBACK;
-
-  const match = Object.entries(map).find(([, item]) => item.fallback === fallback);
-  return match ? (match[1].unicodeKey ? fallback : `:${match[0]}:`) : fallback;
-};
-
-/**
  * Показывать ли анимированные версии. Читается на каждой отрисовке из общей
  * настройки устройства, а не прокидывается пропсом через всю переписку: смайлики
  * рисуются в десятке разных мест (лента, цитаты, превью, реакции), и тащить
@@ -163,7 +154,9 @@ export const isEmojiAnimationEnabled = (): boolean => animationEnabled;
 // Тот же формат, что на сервере (routes/emoji.js): только латиница нижнего
 // регистра, цифры и подчёркивание, от двух символов. Специально узкий, чтобы
 // не цеплять ни смайлики-двоеточия (":D"), ни порты в ссылках ("host:8080").
-const SHORTCODE = /:([a-z0-9_~-]{2,128}):/g;
+// Единственный код, который бывает в тексте: выбор оформления.
+// `~` разделяет части, поэтому в unicode_key и ключе набора его быть не может.
+const VARIANT_TOKEN = /:(e~[a-z0-9_~-]{1,126}):/g;
 
 interface EmojiMatch {
   start: number;
@@ -203,21 +196,20 @@ function emojiMatches(text: string, map: CustomEmojiMap): EmojiMatch[] {
   let index = 0;
   while (index < text.length) {
     if (text[index] === ':') {
-      const shortcode = /^:([a-z0-9_~-]{2,128}):/.exec(text.slice(index));
-      if (shortcode) {
-        const name = shortcode[1];
+      const token = /^:(e~[a-z0-9_~-]{1,126}):/.exec(text.slice(index));
+      if (token) {
+        const name = token[1];
         let item: EmojiRenderAsset | undefined = map[name];
-        // Явный выбор пака (e~<unicode_key>~<packKey>), но конкретно ЭТОТ
-        // пак с тех пор пропал (админ удалил набор или выключил его) — вместо
-        // технической строки кода показываем актуальное оформление того же
-        // unicode_key по умолчанию, а не оставляем код как есть текстом.
-        if (!item && name.startsWith('e~')) {
+        // Оформление выбрали явно, но конкретно ЭТОТ набор с тех пор пропал
+        // (админ удалил или выключил его) — показываем актуальное оформление
+        // того же unicode_key, а не техническую строку кода.
+        if (!item) {
           const unicodeKey = name.split('~')[1];
           item = unicodeKey ? unicodeDefaults.get(map)?.get(unicodeKey) : undefined;
         }
         if (item) {
-          matches.push({ start: index, end: index + shortcode[0].length, name, token: shortcode[0], item });
-          index += shortcode[0].length;
+          matches.push({ start: index, end: index + token[0].length, name, token: token[0], item });
+          index += token[0].length;
           continue;
         }
       }
@@ -238,7 +230,7 @@ function emojiMatches(text: string, map: CustomEmojiMap): EmojiMatch[] {
  * Хвост оборванного кода в конце строки. Обрезка текста по длине не должна
  * оставлять на виду огрызок вида ":cat" — он уже не станет картинкой.
  */
-export const trimDanglingShortcode = (text: string): string => text.replace(/:[a-z0-9_~-]{1,128}$/, '');
+export const trimDanglingShortcode = (text: string): string => text.replace(/:e~[a-z0-9_~-]{0,126}$/, '');
 
 /** Есть ли в тексте хоть один ИЗВЕСТНЫЙ код — чтобы зря не резать строку. */
 export const hasCustomEmoji = (text: string, map: CustomEmojiMap): boolean => {
@@ -510,13 +502,10 @@ const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'TR', 'BLOCKQUOTE', 'H1', 'H2', 'H
  */
 export function toPlainText(text: string, map: CustomEmojiMap): string {
   if (!text) return text;
-  return text.replace(SHORTCODE, (whole, name) => {
+  return text.replace(VARIANT_TOKEN, (whole, name) => {
     if (map[name]) return map[name].fallback;
-    if (name.startsWith('e~')) {
-      const fallback = unicodeDefaults.get(map)?.get(name.split('~')[1])?.fallback;
-      if (fallback) return fallback;
-    }
-    return whole;
+    const fallback = unicodeDefaults.get(map)?.get(name.split('~')[1])?.fallback;
+    return fallback || whole;
   });
 }
 

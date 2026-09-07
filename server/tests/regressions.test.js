@@ -328,27 +328,36 @@ function seedEmojiItem(packId, { name = null, fallback = null, unicodeKey = null
   return itemId;
 }
 
-test('reaction settings accept the full uploaded selection without a 12-item limit', () => {
+test('набор реакций не ограничен двенадцатью и берётся из живого каталога', () => {
   db.prepare("DELETE FROM app_settings WHERE key = 'reaction_emoji'").run();
   const packId = db.prepare(
     'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, ?, 1, ?)'
   ).run('Unlimited reactions test', 999, Date.now()).lastInsertRowid;
-  // Оформление живёт в emoji_assets, а не колонкой на элементе: путь считает
-  // представление emoji_items_resolved. Поэтому сеем пару «элемент + ресурс».
-  const tokens = [];
-  for (let index = 0; index < 15; index += 1) {
-    const name = `reaction_test_${index}`;
-    seedEmojiItem(packId, {
-      name, fallback: index === 0 ? '👍' : '🙂', position: index,
-      filePath: `/uploads/emoji/${name}.webp`,
-    });
-    tokens.push(`:${name}:`);
-  }
 
-  assert.equal(getReactionEmoji()[0], ':reaction_test_0:');
-  assert.deepEqual(setReactionEmoji([...tokens, ':missing:']), tokens);
-  assert.equal(isValidEmoji(`:${'a'.repeat(32)}:`), true);
-  assert.equal(isValidEmoji(`:${'a'.repeat(33)}:`), false);
+  // Реакции хранятся обычными символами Unicode. Коды `:u_1f601:` сняты
+  // 07.09.2026 вместе со всей подсистемой имён; показывается реакция всё равно
+  // картинкой — клиент находит символ в каталоге отрисовки.
+  const symbols = ['🥇', '🥈', '🥉', '🏅', '🎖️', '🏆', '🎗️', '🎀', '🎁', '🎈', '🎉', '🎊', '🪅', '🧨', '✨'];
+  symbols.forEach((symbol, index) => {
+    seedEmojiItem(packId, {
+      name: `reaction_test_${index}`, fallback: symbol, position: index,
+      filePath: `/uploads/emoji/reaction_test_${index}.webp`,
+    });
+  });
+
+  // Пятнадцать штук — больше прежнего предела в двенадцать, и все сохраняются.
+  assert.deepEqual(setReactionEmoji(symbols), symbols);
+  assert.deepEqual(getReactionEmoji(), symbols);
+
+  // Того, чего нет в каталоге, в наборе не будет: список задаётся выбором из
+  // каталога, произвольная строка сюда попасть не должна.
+  assert.deepEqual(setReactionEmoji([...symbols, '🛸']), symbols);
+
+  // Пустой набор возвращает значения по умолчанию, а не оставляет пустоту.
+  assert.ok(setReactionEmoji([]).length > 0);
+
+  assert.equal(isValidEmoji('👍'), true);
+  assert.equal(isValidEmoji('a'.repeat(35)), false);
 });
 
 test('порядок паков смайликов сохраняется полным списком', async () => {

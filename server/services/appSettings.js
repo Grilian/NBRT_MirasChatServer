@@ -78,64 +78,51 @@ function setInternetSeenAt(ms) {
 // только резервом на случай отсутствующей или сломанной картинки.
 const REACTION_EMOJI = 'reaction_emoji';
 const DEFAULT_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-const SHORTCODE = /^:([a-z0-9_]{2,32}):$/;
 
+// Набор реакций — обычные символы Unicode. Прежде здесь хранились коды вида
+// `:u_1f601:` (след системы, где смайлик жил картинкой с именем), и на каждом
+// чтении их приходилось сверять с каталогом по имени. Коды сняты 07.09.2026
+// вместе со всей подсистемой; разовая нормализация в db.js перевела уже
+// сохранённый набор в символы.
+//
+// Показывается реакция всё равно картинкой: клиент находит символ в каталоге
+// отрисовки. Сам символ тут — и хранение, и запасной вид, если картинки нет.
 function reactionCatalog() {
   const rows = db.prepare(`
-    SELECT i.name, i.fallback_emoji, i.unicode_key, i.retired, p.enabled
+    SELECT i.fallback_emoji, i.retired, p.enabled
     FROM emoji_items_resolved i
     JOIN emoji_packs p ON p.id = i.pack_id
-    WHERE i.file_path IS NOT NULL AND i.name IS NOT NULL
+    WHERE i.file_path IS NOT NULL AND i.fallback_emoji IS NOT NULL
     ORDER BY p.position, i.position, i.id
   `).all();
-  const allByName = new Map();
-  const enabledByFallback = new Map();
+  const available = new Set();
   for (const row of rows) {
-    allByName.set(row.name, row);
-    if (row.enabled && !row.retired && row.fallback_emoji && !enabledByFallback.has(row.fallback_emoji)) {
-      enabledByFallback.set(row.fallback_emoji, row);
-    }
+    if (row.enabled && !row.retired) available.add(row.fallback_emoji);
   }
-  return { allByName, enabledByFallback };
+  return available;
 }
 
 const unique = (values) => [...new Set(values)];
 
-function defaultsForCatalog(catalog) {
-  return unique(DEFAULT_REACTIONS.map((fallback) => {
-    const row = catalog.enabledByFallback.get(fallback);
-    return row ? (row.unicode_key ? fallback : `:${row.name}:`) : fallback;
-  }));
-}
-
 function getReactionEmoji() {
-  const catalog = reactionCatalog();
   const raw = getSetting(REACTION_EMOJI);
-  if (!raw) return defaultsForCatalog(catalog);
-  const list = raw.split(/\s+/).filter(Boolean).map((value) => {
-    const shortcode = SHORTCODE.exec(value);
-    if (shortcode) return catalog.allByName.has(shortcode[1]) ? value : null;
-    const row = catalog.enabledByFallback.get(value);
-    return row ? (row.unicode_key ? value : `:${row.name}:`) : value;
-  }).filter(Boolean);
-  return list.length ? unique(list) : defaultsForCatalog(catalog);
+  if (!raw) return unique(DEFAULT_REACTIONS);
+  const list = unique(raw.split(/\s+/).filter(Boolean));
+  return list.length ? list : unique(DEFAULT_REACTIONS);
 }
 
 function setReactionEmoji(value) {
-  const catalog = reactionCatalog();
+  const available = reactionCatalog();
   const source = Array.isArray(value) ? value : String(value || '').split(/\s+/);
-  const list = unique(source.map((raw) => String(raw || '').trim()).filter(Boolean).map((item) => {
-    const shortcode = SHORTCODE.exec(item);
-    if (shortcode) {
-      const row = catalog.allByName.get(shortcode[1]);
-      return row && row.enabled && !row.retired ? item : null;
-    }
-    const row = catalog.enabledByFallback.get(item);
-    return row ? (row.unicode_key ? item : `:${row.name}:`) : null;
-  }).filter(Boolean));
+  // Оставляем только то, для чего в каталоге есть живая картинка: набор
+  // задаётся в панели выбором из каталога, и произвольная строка сюда попасть
+  // не должна.
+  const list = unique(
+    source.map((raw) => String(raw || '').trim()).filter((item) => item && available.has(item))
+  );
   if (!list.length) {
     setSetting(REACTION_EMOJI, null); // пусто — возвращаемся к набору по умолчанию
-    return defaultsForCatalog(catalog);
+    return unique(DEFAULT_REACTIONS);
   }
   setSetting(REACTION_EMOJI, list.join(' '));
   return list;

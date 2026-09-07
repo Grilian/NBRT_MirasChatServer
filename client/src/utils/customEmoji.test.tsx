@@ -20,10 +20,12 @@ describe('renderMessageText', () => {
     expect(container.querySelector('.message-email')).toHaveTextContent('user.name+chat@example.com');
   });
 
-  test('renders links and custom emoji in the same message', () => {
-    const map = { smile: { filePath: '/uploads/smile.webp', fallback: '🙂' } };
+  test('ссылка и смайлик в одном сообщении рисуются оба', () => {
+    const map = buildEmojiMap([{
+      name: 'u_1f642', file_path: '/uploads/smile.webp', fallback: '🙂', unicode_key: '1f642',
+    }]);
     const { container } = render(
-      <div>{renderMessageText(':smile: https://example.com', map)}</div>,
+      <div>{renderMessageText('🙂 https://example.com', map)}</div>,
     );
 
     expect(container.querySelector('img.custom-emoji')).toBeInTheDocument();
@@ -56,8 +58,10 @@ describe('renderMessageText', () => {
   // На слабой связи анимированный webp приезжает заметно позже текста. Пока он
   // в пути, место держит базовый эмодзи — иначе в предложении зияла бы дыра.
   test('пока картинка смайлика не пришла, на её месте базовый эмодзи', () => {
-    const map = { cat: { filePath: '/uploads/emoji/cat_ab12.webp', fallback: '🐱' } };
-    const { container } = render(<div>{renderMessageText('Привет :cat:', map)}</div>);
+    const map = buildEmojiMap([{
+      name: 'u_1f431', file_path: '/uploads/emoji/cat_ab12.webp', fallback: '🐱', unicode_key: '1f431',
+    }]);
+    const { container } = render(<div>{renderMessageText('Привет 🐱', map)}</div>);
 
     const image = container.querySelector('img.custom-emoji');
     expect(image).toHaveClass('is-loading');
@@ -70,8 +74,10 @@ describe('renderMessageText', () => {
   });
 
   test('пропавший файл заменяется базовым эмодзи, а не битой картинкой', () => {
-    const map = { dog: { filePath: '/uploads/emoji/dog_cd34.webp', fallback: '🐶' } };
-    const { container } = render(<div>{renderMessageText(':dog:', map)}</div>);
+    const map = buildEmojiMap([{
+      name: 'u_1f436', file_path: '/uploads/emoji/dog_cd34.webp', fallback: '🐶', unicode_key: '1f436',
+    }]);
+    const { container } = render(<div>{renderMessageText('🐶', map)}</div>);
 
     fireEvent.error(container.querySelector('img.custom-emoji')!);
     expect(container.querySelector('img.custom-emoji')).not.toBeInTheDocument();
@@ -79,10 +85,9 @@ describe('renderMessageText', () => {
   });
 });
 
-// Явный выбор пака при отправке (см. попап выбора «Apple/Google Fonts» в
-// композере): сообщение по-прежнему хранит короткий код в тексте, но теперь
-// это не user-defined :name:, а машинный e~<unicode_key>~<packKey> — тот же
-// плоский механизм подстановки, что и для обычных кастомных смайликов.
+// Явный выбор оформления при отправке (попап «Apple / Google Fonts» в
+// композере). Это ЕДИНСТВЕННЫЙ код, который бывает в тексте сообщения:
+// пользовательские :name: сняты 07.09.2026 вместе с картиночными смайликами.
 describe('выбор конкретного пака оформления (e~<unicode_key>~<packKey>)', () => {
   const items = [{
     name: 'u_1f973', file_path: '/uploads/emoji/apple_1f973.webp', fallback: '🥳',

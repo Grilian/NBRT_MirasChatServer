@@ -1,4 +1,4 @@
-import { CustomEmojiMap, preferCustomEmojiToken } from './customEmoji';
+import { CustomEmojiMap } from './customEmoji';
 
 // Пресеты статуса профиля — фиксированным набором, а не тем, что пришлёт
 // сервер: эмодзи и подпись живут только здесь, в базе хранится лишь ключ
@@ -76,13 +76,13 @@ export function describeStatus(
   if (custom && custom.trim()) {
     const parsed = splitStatusIcon(custom);
     if (parsed.emoji && parsed.text) {
-      return { emoji: preferCustomEmojiToken(parsed.emoji, customEmoji), label: parsed.text };
+      return { emoji: parsed.emoji, label: parsed.text };
     }
-    return { emoji: preferCustomEmojiToken('💬', customEmoji), label: custom.trim() };
+    return { emoji: '💬', label: custom.trim() };
   }
   if (preset && preset in STATUS_PRESETS) {
     const value = STATUS_PRESETS[preset as StatusPreset];
-    return { emoji: preferCustomEmojiToken(value.emoji, customEmoji), label: value.label };
+    return { emoji: value.emoji, label: value.label };
   }
   return null;
 }

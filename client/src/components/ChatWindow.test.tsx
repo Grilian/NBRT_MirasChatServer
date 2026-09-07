@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import ChatWindow from './ChatWindow';
 import { runTopBackInterceptor } from '../utils/backInterceptors';
+import { buildEmojiMap } from '../utils/customEmoji';
 
 const message = {
   id: 1,
@@ -25,7 +26,10 @@ function renderWindow() {
 }
 
 describe('ChatWindow context menu', () => {
-  test('renders a custom quick reaction as an image instead of its shortcode', () => {
+  test('быстрая реакция показывается картинкой, а не системным глифом', () => {
+    // Набор реакций хранится обычными символами Unicode (коды :name: сняты
+    // 07.09.2026). Картинку клиент находит по самому символу через каталог
+    // отрисовки — именно она и должна оказаться в меню.
     const { container } = render(
       <ChatWindow
         chatId="test"
@@ -33,13 +37,13 @@ describe('ChatWindow context menu', () => {
         currentUserId={1}
         onStartEdit={() => {}}
         onDeleteMessage={() => {}}
-        reactionEmoji={[':ink_happy:']}
-        customEmoji={{
-          ink_happy: {
-            filePath: '/uploads/emoji/ink_happy.webp',
-            fallback: '🙂',
-          },
-        }}
+        reactionEmoji={['🙂']}
+        customEmoji={buildEmojiMap([{
+          name: 'u_1f642',
+          file_path: '/uploads/emoji/ink_happy.webp',
+          fallback: '🙂',
+          unicode_key: '1f642',
+        }])}
         onToggleReaction={() => {}}
       />,
     );
@@ -48,11 +52,7 @@ describe('ChatWindow context menu', () => {
     fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
 
     const reaction = container.querySelector('.msg-menu-reaction') as HTMLElement;
-    expect(reaction).toBeInTheDocument();
-    expect(reaction).not.toHaveTextContent(':ink_happy:');
-    expect(reaction.querySelector('img.custom-emoji')).toHaveAttribute(
-      'src', expect.stringContaining('/uploads/emoji/ink_happy.webp'),
-    );
+    expect(reaction.querySelector('img')).toHaveAttribute('src', expect.stringContaining('/uploads/emoji/ink_happy.webp'));
   });
 
   test('first tap on an image outside the menu only dismisses the menu', () => {
