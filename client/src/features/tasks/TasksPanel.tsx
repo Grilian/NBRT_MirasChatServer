@@ -1,9 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { dayKeyOf, formatDayLong, todayKey } from '@/features/calendar/dates';
 import { nameFor } from '@/shared/lib/user';
-import { createTask, deleteTask, fetchTasks, setTaskArchived, setTaskStatus, updateTask } from './api';
+import Avatar from '@/shared/ui/Avatar';
+import {
+  createTask, deleteTask, fetchTaskJournal, fetchTasks, restoreTask,
+  setTaskArchived, setTaskStatus, updateTask,
+} from './api';
 import TaskDialog from './TaskDialog';
-import { TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskItem, TaskStatus } from './types';
+import TaskDeleteDialog from './TaskDeleteDialog';
+import {
+  TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskItem, TaskJournalEntry, TaskStatus,
+} from './types';
 
 interface TasksPanelProps {
   currentUserId: number;
@@ -28,7 +35,22 @@ interface TasksPanelProps {
 const STATUS_LABELS = TASK_STATUS_LABELS;
 const STATUS_ORDER = TASK_STATUS_ORDER;
 
-type Tab = 'mine' | 'authored' | 'archive';
+/**
+ * Вкладки — по РОЛИ в задаче, а не по её состоянию.
+ *
+ * «Моя работа» и «Поставленные» отвечают на разные вопросы: «что делать мне» и
+ * «что я поручил и чем это кончилось». Архив и журнал — состояния, но у них
+ * своя раскладка (в архиве нет колонок, в журнале таблица), поэтому они здесь
+ * же, а не отдельным переключателем.
+ */
+type Tab = 'work' | 'authored' | 'archive' | 'journal';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'work', label: 'Моя работа' },
+  { id: 'authored', label: 'Поставленные' },
+  { id: 'archive', label: 'Архив' },
+  { id: 'journal', label: 'Журнал' },
+];
 
 function dueLabel(task: TaskItem): { text: string; overdue: boolean } | null {
   if (task.due_at === null) return null;
@@ -36,20 +58,49 @@ function dueLabel(task: TaskItem): { text: string; overdue: boolean } | null {
   return { text: formatDayLong(dayKeyOf(task.due_at)), overdue };
 }
 
+/** Подпись источника на карточке. */
+function sourceLabel(task: TaskItem): string {
+  if (task.source.kind === 'chat') {
+    return task.source.label ? `Из чата «${task.source.label}»` : 'Из переписки';
+  }
+  if (task.source.kind === 'order') {
+    return task.source.ref ? `Заказ книг · № ${task.source.ref}` : 'Заказ книг';
+  }
+  return 'Создана вручную';
+}
+
+function whenLabel(ms: number): string {
+  const day = dayKeyOf(ms);
+  const time = new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return `${formatDayLong(day)}, ${time}`;
+}
+
 const TasksPanel: React.FC<TasksPanelProps> = ({
   currentUserId, changeToken = 0, draftDescription = null, onDraftConsumed, onClose
 }) => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<TaskItem[]>([]);
+  const [journal, setJournal] = useState<TaskJournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [tab, setTab] = useState<Tab>('mine');
+  const [tab, setTab] = useState<Tab>('work');
+  /**
+   * «Мои» или «Все, к чему причастен».
+   *
+   * Без этого переключателя задача, где человек лишь наблюдатель, не попадала
+   * бы НИ В ОДНУ вкладку: в «Моей работе» её нет (он не исполнитель), в
+   * «Поставленных» тоже (он не автор). Видеть её он при этом вправе.
+   */
+  const [wideScope, setWideScope] = useState(false);
   const [editing, setEditing] = useState<TaskItem | null | 'new'>(null);
+  const [deleting, setDeleting] = useState<TaskItem | null>(null);
 
   const load = () => {
     setLoading(true);
-    Promise.all([fetchTasks(false), fetchTasks(true)])
-      .then(([active, archived]) => { setTasks(active); setArchivedTasks(archived); setError(false); })
+    Promise.all([fetchTasks(false), fetchTasks(true), fetchTaskJournal()])
+      .then(([active, archived, log]) => {
+        setTasks(active); setArchivedTasks(archived); setJournal(log); setError(false);
+      })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   };
@@ -62,9 +113,25 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
     if (draftDescription) setEditing('new');
   }, [draftDescription]);
 
-  const mine = tasks.filter((t) => t.created_by.id !== currentUserId);
-  const authored = tasks.filter((t) => t.created_by.id === currentUserId);
-  const list = tab === 'mine' ? mine : tab === 'authored' ? authored : archivedTasks;
+  // «Моя работа» — то, за что спрашивают с меня: где я исполнитель, а также
+  // ничьи задачи, которые я вправе взять. Переключатель «Все» расширяет до
+  // всего, к чему я причастен.
+  const myWork = useMemo(() => tasks.filter((t) => (
+    wideScope
+      ? t.created_by.id !== currentUserId || t.assignee?.id === currentUserId
+      : t.assignee?.id === currentUserId || (!t.assignee && t.created_by.id !== currentUserId)
+  )), [tasks, wideScope, currentUserId]);
+
+  const authored = useMemo(
+    () => tasks.filter((t) => t.created_by.id === currentUserId),
+    [tasks, currentUserId],
+  );
+
+  const boardTasks = tab === 'work' ? myWork : authored;
+  const overdueCount = tasks.filter((t) => {
+    const due = dueLabel(t);
+    return due?.overdue;
+  }).length;
 
   const changeStatus = async (taskId: number, next: TaskStatus) => {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: next } : t)));
@@ -74,11 +141,6 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
       load(); // откатываем оптимистичное изменение, перечитав с сервера
       throw e;
     }
-  };
-
-  const cycleStatus = (task: TaskItem) => {
-    const nextIndex = (STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length;
-    changeStatus(task.id, STATUS_ORDER[nextIndex]).catch(() => {});
   };
 
   const archiveTask = async (task: TaskItem, archived: boolean) => {
@@ -92,20 +154,77 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
     load();
   };
 
-  const handleDelete = async () => {
-    if (editing === 'new' || !editing) return;
-    if (!window.confirm(`Удалить задачу «${editing.title}»?`)) return;
-    await deleteTask(editing.id);
+  const handleDelete = async (reason: string) => {
+    if (!deleting) return;
+    await deleteTask(deleting.id, reason);
+    setDeleting(null);
     setEditing(null);
     load();
   };
 
+  const handleRestore = async (entry: TaskJournalEntry) => {
+    await restoreTask(entry.id);
+    load();
+  };
+
+  const renderCard = (task: TaskItem) => {
+    const due = dueLabel(task);
+    const nextStatus = STATUS_ORDER[(STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length];
+    return (
+      <article key={task.id} className={'task-card' + (task.status === 'done' ? ' is-done' : '')}>
+        <div className="task-card-source">{sourceLabel(task)}</div>
+        <button type="button" className="task-card-main" onClick={() => setEditing(task)}>
+          {/* Название не обрезается: в списке поручений оно и есть суть. */}
+          <span className="task-card-title">{task.title}</span>
+          {task.description && <span className="task-card-desc">{task.description}</span>}
+        </button>
+        <div className="task-card-foot">
+          {due && (
+            <span className={'task-due' + (due.overdue ? ' is-overdue' : '')}>
+              {due.overdue ? 'Просрочено: ' : 'До '}{due.text}
+            </span>
+          )}
+          {/* Исполнитель — один, и это ответ на вопрос «с кого спрос».
+              Не назначен — так и написано: пустое место читалось бы как
+              «данные не загрузились». */}
+          {task.assignee ? (
+            <span className="task-card-assignee" title={`Исполнитель: ${nameFor(task.assignee)}`}>
+              <Avatar name={nameFor(task.assignee)} avatarPath={task.assignee.avatar_path} size="sm" />
+            </span>
+          ) : (
+            <span className="task-card-free">Не поручена</span>
+          )}
+        </div>
+        {tab !== 'archive' && (
+          <button
+            type="button"
+            className="task-card-move"
+            onClick={() => changeStatus(task.id, nextStatus).catch(() => {})}
+            title={`Перенести в «${STATUS_LABELS[nextStatus]}»`}
+          >
+            {/* Перенос кнопкой, а не перетаскиванием: тащить карточку пальцем
+                по трём колонкам на 360px невозможно, а второй способ ради
+                десктопа развёл бы поведение по устройствам. */}
+            → {STATUS_LABELS[nextStatus]}
+          </button>
+        )}
+      </article>
+    );
+  };
+
   return (
-    <div className="section-pane">
+    <div className="section-pane tasks-pane">
       <div className="conv-head">
         <div className="conv-title">
           <div className="name">Задачи</div>
-          <div className="status">{loading ? 'Загрузка…' : `${list.length} шт.`}</div>
+          <div className="status">
+            {loading ? 'Загрузка…' : (
+              <>
+                {tasks.length} активных
+                {overdueCount > 0 && <span className="task-overdue-note"> · {overdueCount} просрочено</span>}
+              </>
+            )}
+          </div>
         </div>
         <div className="task-head-actions">
           <button type="button" className="btn-primary task-create-btn" onClick={() => setEditing('new')}>
@@ -121,68 +240,133 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
       </div>
 
       <div className="task-tabs">
-        <button type="button" className={'task-tab' + (tab === 'mine' ? ' is-active' : '')} onClick={() => setTab('mine')}>
-          Мне {mine.length > 0 && <span className="task-tab-count">{mine.length}</span>}
-        </button>
-        <button type="button" className={'task-tab' + (tab === 'authored' ? ' is-active' : '')} onClick={() => setTab('authored')}>
-          От меня {authored.length > 0 && <span className="task-tab-count">{authored.length}</span>}
-        </button>
-        <button type="button" className={'task-tab' + (tab === 'archive' ? ' is-active' : '')} onClick={() => setTab('archive')}>
-          Архив {archivedTasks.length > 0 && <span className="task-tab-count">{archivedTasks.length}</span>}
-        </button>
+        {TABS.map((item) => {
+          const count = item.id === 'work' ? myWork.length
+            : item.id === 'authored' ? authored.length
+              : item.id === 'archive' ? archivedTasks.length
+                : journal.length;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={'task-tab' + (tab === item.id ? ' is-active' : '')}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+              {count > 0 && <span className="task-tab-count">{count}</span>}
+            </button>
+          );
+        })}
       </div>
 
+      {tab === 'work' && (
+        <div className="task-scope">
+          <button
+            type="button"
+            className={'task-scope-btn' + (wideScope ? '' : ' is-active')}
+            onClick={() => setWideScope(false)}
+          >
+            Мои
+          </button>
+          <button
+            type="button"
+            className={'task-scope-btn' + (wideScope ? ' is-active' : '')}
+            onClick={() => setWideScope(true)}
+          >
+            Все, к чему причастен
+          </button>
+        </div>
+      )}
+
       <div className="section-scroll">
-        <div className="section-column">
-          {error && <div className="roster-empty">Не удалось загрузить задачи</div>}
-          {!loading && !error && list.length === 0 && (
-            <div className="roster-empty">
-              {tab === 'mine' && 'Пока никто не поручил вам задачу'}
-              {tab === 'authored' && 'Вы ещё не ставили задач'}
-              {tab === 'archive' && 'Архив пуст'}
-            </div>
-          )}
+        {error && <div className="roster-empty">Не удалось загрузить задачи</div>}
 
-          {list.map((task) => {
-            const due = dueLabel(task);
-            const otherPerson = task.created_by.id !== currentUserId ? task.created_by : null;
-            return (
-              <div key={task.id} className={'task-row' + (task.status === 'done' ? ' is-done' : '')}>
-                <button
-                  type="button"
-                  className={`task-status-pill is-${task.status}`}
-                  onClick={() => cycleStatus(task)}
-                  title="Сменить статус"
-                  disabled={tab === 'archive'}
-                >
-                  {STATUS_LABELS[task.status]}
-                </button>
+        {!error && (tab === 'work' || tab === 'authored') && (
+          <div className="task-board">
+            {STATUS_ORDER.map((status) => {
+              const column = boardTasks.filter((t) => t.status === status);
+              return (
+                <section key={status} className={'task-column is-' + status}>
+                  <header className="task-column-head">
+                    <span className="task-column-name">{STATUS_LABELS[status]}</span>
+                    <span className="task-column-count">{column.length}</span>
+                  </header>
+                  <div className="task-column-body">
+                    {column.map(renderCard)}
+                    {column.length === 0 && <div className="task-column-empty">Пусто</div>}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
 
+        {!error && tab === 'archive' && (
+          <div className="section-column">
+            {!loading && archivedTasks.length === 0 && <div className="roster-empty">Архив пуст</div>}
+            {archivedTasks.map((task) => (
+              <div key={task.id} className="task-row is-done">
                 <div className="task-row-body" onClick={() => setEditing(task)} role="button" tabIndex={0}>
                   <div className="task-row-title">{task.title}</div>
                   <div className="task-row-meta">
-                    {otherPerson && <span>от {nameFor(otherPerson)}</span>}
-                    {!otherPerson && task.participants.length > 0 && (
-                      <span>{task.participants.map((p) => nameFor(p)).join(', ')}</span>
-                    )}
-                    {!otherPerson && task.participants.length === 0 && <span className="task-hint">только для вас</span>}
-                    {due && <span className={due.overdue ? 'task-due is-overdue' : 'task-due'}>до {due.text}</span>}
+                    <span>{sourceLabel(task)}</span>
+                    {task.assignee && <span>{nameFor(task.assignee)}</span>}
                   </div>
                 </div>
-
-                {tab === 'archive' ? (
-                  <button type="button" className="icon-btn-ghost task-archive-btn" title="Вернуть из архива" onClick={() => archiveTask(task, false).catch(console.error)}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h18M11 6l-6 6 6 6" /></svg>
-                  </button>
-                ) : task.status === 'done' && (
-                  <button type="button" className="icon-btn-ghost task-archive-btn" title="В архив" onClick={() => archiveTask(task, true).catch(console.error)}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" /></svg>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="icon-btn-ghost task-archive-btn"
+                  title="Вернуть из архива"
+                  onClick={() => archiveTask(task, false).catch(console.error)}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h18M11 6l-6 6 6 6" /></svg>
+                </button>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {!error && tab === 'journal' && (
+          <div className="section-column">
+            {!loading && journal.length === 0 && (
+              <div className="roster-empty">Удалённых задач нет</div>
+            )}
+            {journal.map((entry) => (
+              <div key={entry.id} className="task-journal-row">
+                <div className="task-journal-main">
+                  <div className="task-journal-title">{entry.title}</div>
+                  <div className="task-journal-sub">
+                    {sourceLabel(entry)}
+                    {entry.assignee && ` · исполнитель ${nameFor(entry.assignee)}`}
+                  </div>
+                </div>
+                <div className="task-journal-cell">
+                  <span className="task-journal-label">Последний статус</span>
+                  {STATUS_LABELS[entry.deleted_status]}
+                </div>
+                <div className="task-journal-cell">
+                  <span className="task-journal-label">Удалил</span>
+                  {entry.deleted_by ? nameFor(entry.deleted_by) : '—'}
+                </div>
+                <div className="task-journal-cell">
+                  <span className="task-journal-label">Когда</span>
+                  {whenLabel(entry.deleted_at)}
+                </div>
+                <div className="task-journal-cell task-journal-reason">
+                  <span className="task-journal-label">Причина</span>
+                  {entry.delete_reason || '—'}
+                </div>
+                <button
+                  type="button"
+                  className="sa-btn-ghost task-journal-restore"
+                  onClick={() => handleRestore(entry).catch(console.error)}
+                >
+                  Вернуть
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {editing !== null && (
@@ -192,9 +376,17 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
           initialDescription={editing === 'new' ? (draftDescription || undefined) : undefined}
           onClose={() => { setEditing(null); onDraftConsumed?.(); }}
           onSave={handleSave}
-          onDelete={editing !== 'new' && editing?.can_edit ? handleDelete : undefined}
+          onDelete={editing !== 'new' && editing ? () => setDeleting(editing) : undefined}
           onStatusChange={editing !== 'new' && editing && !editing.archived ? (status) => changeStatus(editing.id, status) : undefined}
           onArchiveChange={editing !== 'new' && editing ? (archived) => archiveTask(editing, archived) : undefined}
+        />
+      )}
+
+      {deleting && (
+        <TaskDeleteDialog
+          title={deleting.title}
+          onCancel={() => setDeleting(null)}
+          onConfirm={handleDelete}
         />
       )}
     </div>

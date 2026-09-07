@@ -16,7 +16,11 @@ interface TaskDialogProps {
   currentUserId: number;
   onClose: () => void;
   onSave: (draft: TaskDraft) => Promise<void>;
-  onDelete?: () => Promise<void>;
+  /**
+   * Удалить задачу. Возвращает void: само удаление теперь идёт через отдельное
+   * окно с обязательной причиной, а этот обработчик его лишь открывает.
+   */
+  onDelete?: () => void | Promise<void>;
   onStatusChange?: (status: TaskStatus) => Promise<void>;
   onArchiveChange?: (archived: boolean) => Promise<void>;
   /** Текст сообщения, из которого заводят задачу (пункт меню в переписке). */
@@ -234,7 +238,10 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
           </div>
 
           <div className="task-dialog-actions">
-            {task?.can_edit && onDelete && (
+            {/* Удалить может ЛЮБОЙ причастный, а не только постановщик
+                (решение пользователя от 07.09.2026). Прежнее условие
+                `can_edit` — это право ПРАВИТЬ, и оно осталось у автора. */}
+            {onDelete && (
               <button type="button" className="cal-dialog-delete" onClick={onDelete}>Удалить</button>
             )}
             <button type="submit" className="btn-primary" disabled={saving}>

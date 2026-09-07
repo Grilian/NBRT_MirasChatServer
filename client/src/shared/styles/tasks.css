@@ -124,3 +124,150 @@
 }
 .sa-release.is-current { border-color: var(--accent); }
 .sa-release-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+
+/* ===== Доска задач =====
+   Три колонки по статусам. Свои колонки, как в Trello, не заводим: три статуса
+   и архив зафиксированы отдельным решением («суть остаётся такой же»).
+
+   На узком экране колонки становятся друг под другом. Три колонки на 360px —
+   это по 110px на карточку, куда не помещается ни название, ни срок; вертикаль
+   же читается как обычный список с заголовками. */
+.task-board {
+  display: grid; gap: var(--space-3); align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: var(--space-4);
+}
+.task-column {
+  min-width: 0; display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-3); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); background: var(--paper-sunken);
+}
+.task-column-head { display: flex; align-items: center; gap: var(--space-2); }
+.task-column-name {
+  flex: 1; min-width: 0;
+  font: 600 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink);
+}
+/* Точка цвета статуса у названия колонки: доска читается боковым зрением. */
+.task-column-name::before {
+  content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 7px;
+  border-radius: 50%; background: var(--col-tone, var(--ink-faint));
+}
+.task-column.is-not_started { --col-tone: var(--ink-faint); }
+.task-column.is-in_progress { --col-tone: var(--accent); }
+.task-column.is-done { --col-tone: var(--green); }
+.task-column-count {
+  flex: none; min-width: 20px; padding: 1px 6px; text-align: center;
+  border-radius: var(--radius-pill); background: var(--paper);
+  font: 600 var(--text-xs)/1.6 var(--font-ui); color: var(--ink-muted);
+}
+.task-column-body { display: flex; flex-direction: column; gap: var(--space-2); }
+.task-column-empty {
+  padding: var(--space-4) 0; text-align: center;
+  color: var(--ink-faint); font: 400 var(--text-xs)/1.4 var(--font-ui);
+}
+
+.task-card {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-3); border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--paper);
+}
+.task-card.is-done .task-card-title { color: var(--ink-muted); }
+.task-card-source {
+  font: 500 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-faint);
+}
+.task-card-main {
+  display: flex; flex-direction: column; gap: 2px; width: 100%;
+  padding: 0; border: none; background: none; cursor: pointer; text-align: left;
+}
+/* Название НЕ обрезается: в списке поручений оно и есть суть, а карточек в
+   колонке немного — высота от содержимого тут ничего не ломает. */
+.task-card-title {
+  font: 600 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink);
+}
+.task-card-desc {
+  font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.task-card-foot {
+  display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1);
+}
+.task-card-foot .task-due { flex: 1; min-width: 0; font: 500 var(--text-xs)/1.4 var(--font-ui); color: var(--ink-muted); }
+.task-card-foot .task-due.is-overdue { color: var(--danger); }
+.task-card-assignee { flex: none; line-height: 0; }
+.task-card-free {
+  flex: none; padding: 1px 7px; border-radius: var(--radius-pill);
+  background: var(--paper-sunken); color: var(--ink-faint);
+  font: 500 var(--text-xs)/1.6 var(--font-ui);
+}
+.task-card-move {
+  align-self: flex-start; margin-top: var(--space-1); padding: 3px 8px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: none; cursor: pointer; color: var(--ink-muted);
+  font: 500 var(--text-xs)/1.5 var(--font-ui);
+}
+.task-card-move:hover { background: var(--row-hover); color: var(--ink); }
+
+/* Переключатель охвата в «Моей работе». Без него задача, где человек лишь
+   наблюдатель, не попадала бы ни в одну вкладку. */
+.task-scope { display: flex; gap: var(--space-2); padding: 0 var(--space-4) var(--space-1); }
+.task-scope-btn {
+  padding: 4px 11px; border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: none; cursor: pointer; color: var(--ink-muted);
+  font: 500 var(--text-xs)/1.6 var(--font-ui);
+}
+.task-scope-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.task-overdue-note { color: var(--danger); }
+
+/* ===== Журнал удалений =====
+   Таблица на широком экране, карточки на узком: пять колонок на 360px
+   превращаются в пять нечитаемых столбиков. Подписи полей поэтому есть всегда
+   в разметке — на широком их прячет CSS, на узком они и объясняют, что за
+   значение перед тобой. */
+.task-journal-row {
+  display: grid; align-items: start; gap: var(--space-3);
+  grid-template-columns: minmax(0, 2fr) 110px 130px 150px minmax(0, 1.4fr) auto;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink-muted);
+}
+.task-journal-main { min-width: 0; }
+.task-journal-title { font: 600 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink); }
+.task-journal-sub { font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-faint); }
+.task-journal-cell { min-width: 0; }
+.task-journal-reason { color: var(--ink); }
+.task-journal-label { display: none; }
+.task-journal-restore { flex: none; align-self: center; }
+
+@media (max-width: 900px) {
+  .task-board { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 760px) {
+  .task-board { padding: var(--space-3); }
+  .task-scope { padding: 0 var(--space-3) var(--space-1); }
+  .task-journal-row {
+    grid-template-columns: minmax(0, 1fr); gap: var(--space-1);
+    padding: var(--space-3);
+  }
+  /* На узком экране подписи полей обязательны: без них «В работе» и
+     «Михаил Т.» идут подряд одинаковым текстом и не различаются. */
+  .task-journal-label {
+    display: block;
+    font: 600 var(--text-xs)/var(--leading-xs) var(--font-ui);
+    letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .task-journal-restore { align-self: flex-start; margin-top: var(--space-2); }
+}
+
+/* ===== Окно удаления с причиной ===== */
+.task-delete-modal { width: min(440px, calc(100vw - 32px)); }
+.task-delete-body { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); }
+.task-delete-label { font: 500 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink); }
+.task-delete-input {
+  width: 100%; resize: vertical; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--paper-sunken); color: var(--ink);
+  font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui);
+}
+.task-delete-input:focus { outline: none; border-color: var(--accent); }
+.task-delete-note { margin: 0; font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-muted); }
