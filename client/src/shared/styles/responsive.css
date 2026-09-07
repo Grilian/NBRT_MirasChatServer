@@ -38,6 +38,8 @@
   /* В нижней панели ровно шесть разделов (MOBILE_SECTIONS) — они делят строку
      поровну (flex:1 1 0, min-width:0). «Пространства» и «Файлы» туда не
      помещаются и остаются на десктопном рельсе. */
+  /* В нижней панели четыре закреплённых раздела плюс «Ещё» — они делят
+     строку поровну. Остальные разделы живут за «Ещё», а не пропадают. */
   .rail-item-desktop-only { display: none; }
   .roster-search-open-btn {
     display: flex; transition: width .22s ease, opacity .18s ease, background var(--ease), color var(--ease);

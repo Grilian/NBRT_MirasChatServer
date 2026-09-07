@@ -67,3 +67,107 @@
    оставлено выключающим, а не вырезано из разметки, потому что тот же класс
    носит общий счётчик в шапке списка — там аватара нет. */
 .row .row-side-bottom .row-unread { display: none; }
+
+/* ===== Шторка снизу =====
+ *
+ * Для коротких списков, которым не нужен отдельный экран: «Ещё» в нижней
+ * навигации, выбор действия. Тянется от нижнего края — палец там и находится,
+ * а центрированное окно на телефоне заставляет тянуться к середине экрана.
+ */
+.sheet-overlay {
+  position: fixed; inset: 0; z-index: 52;
+  background: color-mix(in srgb, black 45%, transparent);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: flex-end; justify-content: center;
+  overscroll-behavior: contain;
+}
+.sheet-card {
+  width: 100%; max-width: 520px;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  background: var(--paper-raised);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-lg);
+  /* Под жестовой полосой Android и «домашней» чертой iPhone: без запаса
+     последний пункт списка оказывается ровно под ней. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* Полоска-ручка — признак того, что панель пришла снизу и туда же уйдёт.
+   Не кнопка: тянуть шторку пальцем пока нельзя, и делать вид, что можно,
+   не нужно. */
+.sheet-grip {
+  width: 36px; height: 4px; flex: none;
+  margin: var(--space-2) auto var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--ink-faint);
+  opacity: .5;
+}
+.sheet-title {
+  flex: none;
+  padding: var(--space-2) var(--space-5) var(--space-1);
+  font: 600 var(--text-lg)/var(--leading-lg) var(--font-display);
+}
+.sheet-body {
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3) var(--space-4);
+}
+
+/* Пункт шторки: значок, подпись, необязательный счётчик. */
+.sheet-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  width: 100%; padding: var(--space-3) var(--space-3);
+  border: none; background: none; cursor: pointer;
+  border-radius: var(--radius-md);
+  color: var(--ink); font: 500 var(--text-md)/var(--leading-md) var(--font-ui);
+  text-align: left;
+}
+.sheet-item:hover { background: var(--row-hover); }
+.sheet-item.is-active { background: var(--accent-soft); color: var(--accent-strong); }
+.sheet-item-icon { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--ink-muted); }
+.sheet-item.is-active .sheet-item-icon { color: var(--accent-strong); }
+.sheet-item-label { flex: 1; min-width: 0; }
+.sheet-item-badge {
+  flex: none; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--unread-badge); color: #fff;
+  font: 600 11px/18px var(--font-ui); text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Нижняя навигация: «Ещё» и группа «Работа» ===== */
+
+/* На десктопном рельсе кнопки «Ещё» нет — там все разделы видны сразу.
+ *
+ * Показ и скрытие живут ОДНИМ куском намеренно: ui.css подключается последним,
+ * и правило отсюда перебивает медиазапрос из responsive.css при равной
+ * специфичности. Разнеси их по файлам — и кнопка исчезнет ровно там, где
+ * должна появляться. */
+.rail-item-mobile-only { display: none; }
+@media (max-width: 760px) {
+  .rail-item-mobile-only { display: flex; }
+  /* Заголовок группы «Работа» — только для десктопного рельса: в строке из
+     пяти значков ему негде стоять. */
+  .rail-group { display: none; }
+}
+
+/* Заголовок группы на десктопном рельсе. По концепции рядом с перепиской
+   живут календарь, задачи, файлы и будущая проектная работа — они отделены
+   подписью, а не пустотой. */
+.rail-group {
+  padding: var(--space-4) var(--space-2) var(--space-1);
+  font: 600 var(--text-xs)/var(--leading-xs) var(--font-ui);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+/* В свёрнутом рельсе подписи нет — вместо неё разделительная черта: место
+   под текст там всё равно занято значками. */
+.nav-rail.is-icons .rail-group {
+  height: 1px; padding: 0; margin: var(--space-3) var(--space-3);
+  overflow: hidden; background: var(--line); color: transparent;
+}
+.sheet-item-soon {
+  flex: none; padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--paper-sunken); color: var(--ink-faint);
+  font: 500 var(--text-xs)/1.5 var(--font-ui);
+}

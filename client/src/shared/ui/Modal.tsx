@@ -1,6 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { registerBackInterceptor } from '@/shared/hooks/backInterceptors';
-import { acquireStandardKeyboardResizeMode } from '@/shared/platform/mobileKeyboard';
+import React from 'react';
+import { useDismissibleLayer } from './useDismissibleLayer';
 
 /**
  * Окно поверх приложения.
@@ -49,25 +48,7 @@ interface ModalProps {
 const Modal: React.FC<ModalProps> = ({
   onClose, children, className = '', nested = false, persistent = false, label,
 }) => {
-  // Держим последнюю версию обработчика: перехватчик «Назад» и слушатель
-  // Escape регистрируются один раз, а onClose у вызывающего кода может
-  // пересоздаваться на каждой отрисовке.
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-
-  useEffect(() => {
-    const release = acquireStandardKeyboardResizeMode();
-    const unregister = registerBackInterceptor(() => { closeRef.current(); return true; });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      unregister();
-      release();
-    };
-  }, []);
+  useDismissibleLayer(onClose);
 
   return (
     <div

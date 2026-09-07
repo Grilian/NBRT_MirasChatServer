@@ -17,7 +17,8 @@ import CreateGroupModal, { CreatedGroup } from '@/features/groups/CreateGroupMod
 import GroupInfoModal from '@/features/groups/GroupInfoModal';
 import GeneralChatInfoModal from '@/features/groups/GeneralChatInfoModal';
 import Avatar from '@/shared/ui/Avatar';
-import NavRail, { SectionId, isSectionAllowedFor, mobileSectionsFor, sectionById } from '@/app/NavRail';
+import NavRail, { SectionId, isSectionAllowedFor, mobileOverflowFor, mobileSectionsFor, sectionById } from '@/app/NavRail';
+import Sheet from '@/shared/ui/Sheet';
 import AppMenuDrawer from '@/app/AppMenuDrawer';
 import SectionStub from '@/app/SectionStub';
 import FilesSection from '@/features/files/FilesSection';
@@ -411,6 +412,9 @@ const Chat: React.FC = () => {
   // действия из него открываются компактными окнами, не уводя человека со
   // страницы, на которой он работал.
   const [appMenuOpen, setAppMenuOpen] = useState(false);
+  // Шторка «Ещё» — пятый слот нижней панели на телефоне. Разделов восемь,
+  // слотов пять; остальные живут здесь, а не пропадают из навигации.
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [tasksModalOpen, setTasksModalOpen] = useState(false);
   const [profilePreviewOpen, setProfilePreviewOpen] = useState(false);
@@ -3021,7 +3025,34 @@ const Chat: React.FC = () => {
         onOpenMenu={() => setAppMenuOpen(true)}
         menuOpen={appMenuOpen}
         accountType={currentAccountType}
+        onOpenMore={narrowLayout ? () => setMoreSheetOpen(true) : undefined}
+        moreActive={moreSheetOpen || mobileOverflowFor(currentAccountType).includes(section)}
       />
+
+      {moreSheetOpen && (
+        <Sheet onClose={() => setMoreSheetOpen(false)} title="Ещё">
+          {mobileOverflowFor(currentAccountType).map((id) => {
+            const meta = sectionById(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={'sheet-item' + (section === id ? ' is-active' : '')}
+                onClick={() => {
+                  setMoreSheetOpen(false);
+                  // «Контакты» на узком экране — полноценный раздел, а не окно:
+                  // окно поверх шторки читалось бы как два слоя подряд.
+                  goToSection(id);
+                }}
+              >
+                <span className="sheet-item-icon">{meta.icon}</span>
+                <span className="sheet-item-label">{meta.label}</span>
+                {!meta.ready && <span className="sheet-item-soon">скоро</span>}
+              </button>
+            );
+          })}
+        </Sheet>
+      )}
 
       {!narrowLayout && (
         <AppMenuDrawer

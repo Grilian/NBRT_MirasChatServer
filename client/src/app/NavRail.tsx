@@ -92,12 +92,46 @@ export function isSectionAllowedFor(accountType: string | undefined, id: Section
   return accountType !== 'internet' || INTERNET_VISIBLE_SECTIONS.includes(id);
 }
 
-const MOBILE_SECTION_SET = new Set<SectionId>(['home', 'chats', 'people', 'tasks', 'settings']);
+/**
+ * Что стоит в нижней панели на телефоне.
+ *
+ * Разделов восемь, слотов пять — пятый занимает «Ещё» со шторкой. Прежний
+ * набор из пяти закреплённых прятал «Календарь» и «Файлы» так, что попасть в
+ * них можно было только плитками с «Главной»; макеты редизайна при этом дают
+ * четыре разных ответа на вопрос «что показать пятым». «Ещё» — единственный
+ * вариант, который вмещает ВСЕ разделы и не меняется от экрана к экрану.
+ */
+const MOBILE_PINNED: SectionId[] = ['home', 'chats', 'tasks', 'calendar'];
 
-export function mobileSectionsFor(accountType: string | undefined): SectionId[] {
+/** С какого раздела начинается группа «Работа» на десктопном рельсе. */
+const WORK_GROUP_STARTS_AT: SectionId = 'spaces';
+
+/** Разделы для нижней панели: закреплённые в порядке SECTIONS. */
+export function mobilePinnedFor(accountType: string | undefined): SectionId[] {
   return SECTIONS
-    .filter((s) => MOBILE_SECTION_SET.has(s.id) && isSectionAllowedFor(accountType, s.id))
+    .filter((s) => MOBILE_PINNED.includes(s.id) && isSectionAllowedFor(accountType, s.id))
     .map((s) => s.id);
+}
+
+/** Всё остальное — за кнопкой «Ещё». */
+export function mobileOverflowFor(accountType: string | undefined): SectionId[] {
+  return SECTIONS
+    .filter((s) => !MOBILE_PINNED.includes(s.id) && isSectionAllowedFor(accountType, s.id))
+    .map((s) => s.id);
+}
+
+const MOBILE_SECTION_SET = new Set<SectionId>(MOBILE_PINNED);
+
+/**
+ * Порядок разделов для перелистывания смахиванием.
+ *
+ * Берётся из SECTIONS, а не из отдельного списка: два независимых перечня
+ * одного и того же уже приводили к тому, что жест уводил не к соседу.
+ * «Контакты» из перелистывания исключены в самом обработчике — тап по ним
+ * открывает окно поверх экрана, а не меняет раздел.
+ */
+export function mobileSectionsFor(accountType: string | undefined): SectionId[] {
+  return mobilePinnedFor(accountType);
 }
 
 interface NavRailProps {
@@ -107,9 +141,13 @@ interface NavRailProps {
   onOpenMenu: () => void;
   menuOpen?: boolean;
   accountType?: string;
+  /** Открыть шторку «Ещё» — только нижняя панель на телефоне. */
+  onOpenMore?: () => void;
+  /** Открытый сейчас раздел лежит за «Ещё» — подсвечиваем саму кнопку. */
+  moreActive?: boolean;
 }
 
-const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, onOpenMenu, menuOpen = false, accountType }) => {
+const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, onOpenMenu, menuOpen = false, accountType, onOpenMore, moreActive = false }) => {
   const sections = SECTIONS.filter((s) => isSectionAllowedFor(accountType, s.id));
 
   return (
@@ -133,9 +171,16 @@ const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, onOpen
         {sections.map((section) => {
           const isActive = active === section.id;
           const badge = section.id === 'chats' ? unreadTotal : 0;
+          // Заголовок группы «Работа» по концепции: рядом с перепиской живут
+          // календарь, задачи, файлы и будущая проектная работа, и они
+          // отделены от «Главная / Чаты / Контакты» подписью, а не пустотой.
+          const groupHead = section.id === WORK_GROUP_STARTS_AT
+            ? <div key="work-head" className="rail-group">Работа</div>
+            : null;
           return (
+            <React.Fragment key={section.id}>
+            {groupHead}
             <button
-              key={section.id}
               type="button"
               className={'rail-item rail-item-' + section.id + (isActive ? ' is-active' : '')
                 + (MOBILE_SECTION_SET.has(section.id) ? '' : ' rail-item-desktop-only')}
@@ -151,8 +196,26 @@ const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, onOpen
               <span className="rail-label">{section.label}</span>
               {!section.ready && <span className="rail-soon" aria-hidden="true" />}
             </button>
+            </React.Fragment>
           );
         })}
+
+        {/* «Ещё» — пятый слот нижней панели на телефоне. На десктопном рельсе
+            его нет: там видны все разделы сразу. */}
+        {onOpenMore && (
+          <button
+            type="button"
+            className={'rail-item rail-item-more rail-item-mobile-only' + (moreActive ? ' is-active' : '')}
+            onClick={onOpenMore}
+            aria-label="Ещё разделы"
+            aria-haspopup="dialog"
+          >
+            <span className="rail-icon">
+              <svg {...stroke}><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+            </span>
+            <span className="rail-label">Ещё</span>
+          </button>
+        )}
       </div>
     </nav>
   );
