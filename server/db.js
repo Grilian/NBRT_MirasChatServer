@@ -475,11 +475,6 @@ try {
 } catch (e) {
   // Колонка уже есть
 }
-try {
-  db.exec(`ALTER TABLE emoji_items ADD COLUMN file_path TEXT`);
-} catch (e) {
-  // Колонка уже есть
-}
 // Имя уникально глобально, а не внутри пака: в тексте сообщения пака нет —
 // там только :name:, и по нему нужно однозначно найти картинку.
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_emoji_items_name ON emoji_items(name) WHERE name IS NOT NULL`);
@@ -502,21 +497,10 @@ try {
 } catch (e) {
   // Колонка уже есть
 }
-// Анимированная версия смайлика — ОТДЕЛЬНЫМ файлом, а не заменой статичной.
-// Нужны обе сразу: в панели выбора десятки смайликов на экране, и если каждый
-// будет дёргаться, выбрать из них ничего нельзя — там всегда показывается
-// статичная. Анимация появляется только в переписке, и только если человек не
-// выключил её у себя (личная настройка, не общая).
-try {
-  db.exec(`ALTER TABLE emoji_items ADD COLUMN animated_path TEXT`);
-} catch (e) {
-  // Колонка уже есть
-}
-
-// Новая модель каталога: emoji_items — логический Unicode-смайлик, а файлы
-// Apple / Telegram / Google Fonts являются его взаимозаменяемыми вариантами.
-// Старые file_path/animated_path пока остаются как совместимый «срез» активных
-// наборов: это позволяет обновлять сервер отдельно от уже установленных клиентов.
+// Каталог: emoji_items — ЛОГИЧЕСКИЙ Unicode-смайлик, а файлы Apple / Telegram /
+// Google Fonts — его взаимозаменяемые оформления в emoji_assets. Ровно один
+// источник правды: колонок-среза file_path/animated_path на элементе больше
+// нет, путь считает представление emoji_items_resolved (см. ниже).
 for (const sql of [
   `ALTER TABLE emoji_items ADD COLUMN unicode_key TEXT`,
   `ALTER TABLE emoji_items ADD COLUMN label TEXT`,
@@ -585,55 +569,51 @@ db.prepare(`
   VALUES ('animation', 'Telegram Animation', 'animation', 1, 1, 1, ?)
 `).run(nowForEmojiAssets);
 
-// Уже загруженные u_... связываем с Unicode без повторной загрузки. Обычные
-// пользовательские :name: остаются как были и не участвуют в смене оформления.
-const keyFromLegacyEmojiName = (name) => {
-  const match = /^u_([0-9a-f_]+)$/i.exec(String(name || ''));
-  if (!match) return null;
-  const parts = match[1].toLowerCase().split('_').filter(Boolean);
-  if (!parts.length || parts.some((part) => !/^[0-9a-f]{2,6}$/.test(part))) return null;
-  return parts.join('-');
-};
-const appleAssetPackId = db.prepare("SELECT id FROM emoji_asset_packs WHERE key = 'apple'").get().id;
-const animationAssetPackId = db.prepare("SELECT id FROM emoji_asset_packs WHERE key = 'animation'").get().id;
-const setLegacyUnicodeKey = db.prepare('UPDATE emoji_items SET unicode_key = ? WHERE id = ? AND unicode_key IS NULL');
-const addLegacyAsset = db.prepare(`
-  INSERT OR IGNORE INTO emoji_assets (item_id, asset_pack_id, file_path, created_at)
-  VALUES (?, ?, ?, ?)
-`);
-for (const item of db.prepare(`
-  SELECT id, name, file_path, animated_path FROM emoji_items
-  WHERE name IS NOT NULL AND (file_path IS NOT NULL OR animated_path IS NOT NULL)
-`).all()) {
-  const key = keyFromLegacyEmojiName(item.name);
-  if (key) setLegacyUnicodeKey.run(key, item.id);
-  if (item.file_path) addLegacyAsset.run(item.id, appleAssetPackId, item.file_path, nowForEmojiAssets);
-  if (item.animated_path) addLegacyAsset.run(item.id, animationAssetPackId, item.animated_path, nowForEmojiAssets);
+// Бэкфилл emoji_assets из прежних колонок-среза и разбор служебного пака
+// «Архив смайликов» удалены 07.09.2026: обе миграции своё отработали (на проде
+// 3770 ресурсов Apple, 481 анимации, архивного пака нет), а колонок, из
+// которых они читали, больше не существует.
+
+// ===== Один источник правды об оформлении смайлика =====
+//
+// До 07.09.2026 emoji_items несла собственные file_path/animated_path —
+// «совместимый срез» активных наборов, который пересчитывался функцией
+// syncResolvedAssets после каждого импорта и каждого переключения. Срез был
+// нужен ради уже выкаченных клиентов, читавших путь прямо из элемента, и
+// ровно он делал данные двухголовыми: один и тот же факт лежал и в
+// emoji_assets, и на элементе, и расходился при любой пропущенной синхронизации.
+//
+// Обратная совместимость снята, поэтому колонки удалены, а путь считается на
+// лету представлением. Побочный выигрыш: удаление смайлика теперь убирает с
+// диска ВСЕ его файлы, а не только файлы активного набора — прежде картинка
+// неактивного оформления оставалась сиротой.
+for (const sql of [
+  'ALTER TABLE emoji_items DROP COLUMN file_path',
+  'ALTER TABLE emoji_items DROP COLUMN animated_path',
+]) {
+  try { db.exec(sql); } catch (e) { /* колонки уже нет */ }
 }
 
-// Архив смайликов больше не существует как понятие (удаление пака теперь
-// настоящее — см. routes/emoji.js). У кого он уже успел завестись до этого
-// фикса, разбираем его точно так же, как обычное удаление пака: элементы и
-// картинки с диска долой, старые сообщения с такими кодами покажут текст
-// :name: — тот же компромисс, что и для любого другого удалённого смайлика.
-const legacyArchivePack = db.prepare("SELECT id FROM emoji_packs WHERE name = 'Архив смайликов'").get();
-if (legacyArchivePack) {
-  const archiveFiles = db.prepare(
-    'SELECT file_path, animated_path FROM emoji_items WHERE pack_id = ? AND file_path IS NOT NULL'
-  ).all(legacyArchivePack.id);
-  db.prepare(
-    'DELETE FROM emoji_assets WHERE item_id IN (SELECT id FROM emoji_items WHERE pack_id = ?)'
-  ).run(legacyArchivePack.id);
-  db.prepare('DELETE FROM emoji_items WHERE pack_id = ?').run(legacyArchivePack.id);
-  db.prepare('DELETE FROM emoji_packs WHERE id = ?').run(legacyArchivePack.id);
-  const fsForCleanup = require('fs');
-  archiveFiles.forEach((row) => {
-    [row.file_path, row.animated_path].filter(Boolean).forEach((p) => {
-      const onDisk = path.join(process.env.MIRAS_UPLOADS_DIR || path.join(__dirname, 'uploads'), String(p).replace(/^\/uploads\//, ''));
-      fsForCleanup.unlink(onDisk, () => {});
-    });
-  });
-}
+// Порядок выбора тот же, что был у syncResolvedAssets: сначала активный набор,
+// потом остальные включённые по своей позиции. Поэтому неполный Google Fonts
+// можно наложить поверх полного Apple, не получив дыр. `a.enabled = 1` —
+// выключенная ВЕРСИЯ конкретного смайлика пропускается, и он опускается на
+// следующий набор, а не пропадает.
+db.exec('DROP VIEW IF EXISTS emoji_items_resolved');
+db.exec(`
+  CREATE VIEW emoji_items_resolved AS
+  SELECT
+    ei.*,
+    (SELECT a.file_path FROM emoji_assets a
+       JOIN emoji_asset_packs p ON p.id = a.asset_pack_id
+      WHERE a.item_id = ei.id AND p.role = 'base' AND p.enabled = 1 AND a.enabled = 1
+      ORDER BY p.active DESC, p.position, p.id LIMIT 1) AS file_path,
+    (SELECT a.file_path FROM emoji_assets a
+       JOIN emoji_asset_packs p ON p.id = a.asset_pack_id
+      WHERE a.item_id = ei.id AND p.role = 'animation' AND p.enabled = 1 AND a.enabled = 1
+      ORDER BY p.active DESC, p.position, p.id LIMIT 1) AS animated_path
+  FROM emoji_items ei
+`);
 
 // FK в этой базе движком не проверяются нигде (PRAGMA foreign_keys выключена
 // во всём проекте, см. комментарий у sticker_id ниже) — ON DELETE CASCADE в

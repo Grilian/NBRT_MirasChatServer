@@ -308,19 +308,40 @@ test('client message ids are idempotent per sender', () => {
   assert.doesNotThrow(() => insert.run(otherSenderId, 'msg_queue_test_123456'));
 });
 
+/**
+ * Смайлик вместе с его оформлением.
+ *
+ * С 07.09.2026 путь к картинке принадлежит emoji_assets, а не колонке на
+ * элементе: у emoji_items нет ни file_path, ни animated_path, их считает
+ * представление emoji_items_resolved. Поэтому засеять «смайлик с картинкой»
+ * одним INSERT больше нельзя — нужна пара строк.
+ */
+function seedEmojiItem(packId, { name = null, fallback = null, unicodeKey = null, position = 0, filePath, packKey = 'apple' }) {
+  const itemId = Number(db.prepare(`
+    INSERT INTO emoji_items (pack_id, emoji, name, fallback_emoji, unicode_key, retired, position)
+    VALUES (?, '', ?, ?, ?, 0, ?)
+  `).run(packId, name, fallback, unicodeKey, position).lastInsertRowid);
+  const assetPackId = db.prepare('SELECT id FROM emoji_asset_packs WHERE key = ?').get(packKey).id;
+  db.prepare(
+    'INSERT INTO emoji_assets (item_id, asset_pack_id, file_path, created_at) VALUES (?, ?, ?, ?)'
+  ).run(itemId, assetPackId, filePath, Date.now());
+  return itemId;
+}
+
 test('reaction settings accept the full uploaded selection without a 12-item limit', () => {
   db.prepare("DELETE FROM app_settings WHERE key = 'reaction_emoji'").run();
   const packId = db.prepare(
     'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, ?, 1, ?)'
   ).run('Unlimited reactions test', 999, Date.now()).lastInsertRowid;
-  const insert = db.prepare(`
-    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, retired, position)
-    VALUES (?, '', ?, ?, ?, 0, ?)
-  `);
+  // Оформление живёт в emoji_assets, а не колонкой на элементе: путь считает
+  // представление emoji_items_resolved. Поэтому сеем пару «элемент + ресурс».
   const tokens = [];
   for (let index = 0; index < 15; index += 1) {
     const name = `reaction_test_${index}`;
-    insert.run(packId, name, `/uploads/emoji/${name}.webp`, index === 0 ? '👍' : '🙂', index);
+    seedEmojiItem(packId, {
+      name, fallback: index === 0 ? '👍' : '🙂', position: index,
+      filePath: `/uploads/emoji/${name}.webp`,
+    });
     tokens.push(`:${name}:`);
   }
 
@@ -388,27 +409,30 @@ test('удаление пака — настоящее, без архива: ф�
   });
   const packId = created.data.find((p) => p.name === 'Пак под снос').id;
 
+  // Элемент с настоящим файлом на диске. Раньше он заводился через ручку
+  // загрузки картиночного смайлика — её больше нет вместе с самим понятием,
+  // поэтому кладём напрямую: проверяем удаление пака, а не загрузку.
   const image = await sharp({
     create: { width: 8, height: 8, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } },
-  }).png().toBuffer();
-  const uploadForm = new FormData();
-  uploadForm.append('image', new Blob([image], { type: 'image/png' }), 'icon.png');
-  uploadForm.append('name', 'doomed_custom');
-  const uploaded = await fetch(`${baseUrl}/api/emoji/admin/${packId}/custom`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${admin}` },
-    body: uploadForm,
-  });
-  assert.equal(uploaded.status, 201);
-  const item = db.prepare('SELECT id, file_path FROM emoji_items WHERE name = ?').get('doomed_custom');
-  assert.ok(item.file_path);
-  const onDisk = path.join(process.env.MIRAS_UPLOADS_DIR, item.file_path.replace(/^\/uploads\//, ''));
-  assert.ok(fs.existsSync(onDisk), 'файл должен быть на диске сразу после загрузки');
+  }).webp().toBuffer();
+  const filename = `emoji_doomed_${Date.now()}.webp`;
+  const dir = path.join(process.env.MIRAS_UPLOADS_DIR, 'emoji');
+  fs.mkdirSync(dir, { recursive: true });
+  const onDisk = path.join(dir, filename);
+  fs.writeFileSync(onDisk, image);
+  const publicPath = `/uploads/emoji/${filename}`;
 
-  // Юникодный элемент того же пака — без картинки: раньше на такой опирался
-  // ТОЛЬКО декоративный ON DELETE CASCADE (PRAGMA foreign_keys выключена во
-  // всём проекте), и без явной подчистки он повис бы сиротой после удаления
-  // родительского пака.
+  db.prepare(
+    "INSERT INTO emoji_items (pack_id, emoji, unicode_key, fallback_emoji, position) VALUES (?, '', 'test-doomed-key', '🧪', 998)"
+  ).run(packId);
+  const itemId = db.prepare('SELECT id FROM emoji_items WHERE unicode_key = ?').get('test-doomed-key').id;
+  db.prepare(
+    'INSERT INTO emoji_assets (item_id, asset_pack_id, file_path, created_at) VALUES (?, 1, ?, ?)'
+  ).run(itemId, publicPath, Date.now());
+
+  // Второй элемент — с ресурсом, но без файла на диске: раньше на такой
+  // опирался ТОЛЬКО декоративный ON DELETE CASCADE (PRAGMA foreign_keys
+  // выключена во всём проекте), и без явной подчистки он повис бы сиротой.
   db.prepare(
     "INSERT INTO emoji_items (pack_id, emoji, unicode_key, fallback_emoji, position) VALUES (?, '', 'test-orphan-key', '🧪', 999)"
   ).run(packId);
@@ -473,11 +497,11 @@ test('юникодный элемент без картинки виден ка�
   const packId = db.prepare(
     'INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES (?, ?, 1, ?)'
   ).run('Смешанный пак', 998, Date.now()).lastInsertRowid;
-  // С картинкой — как обычный custom-элемент новой системы.
-  db.prepare(`
-    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, unicode_key, position)
-    VALUES (?, '', 'u_mixed_test_a', '/uploads/emoji/u_mixed_test_a.webp', '😀', 'mixed-test-key-a', 0)
-  `).run(packId);
+  // С картинкой — элемент, у которого есть ресурс во включённом базовом наборе.
+  seedEmojiItem(packId, {
+    name: 'u_mixed_test_a', fallback: '😀', unicodeKey: 'mixed-test-key-a', position: 0,
+    filePath: '/uploads/emoji/u_mixed_test_a.webp',
+  });
   // Без картинки — структура импортирована, но конкретный набор оформления
   // для этого ключа ещё не загружен. Раньше такой элемент не показывался НИ
   // картинкой, ни текстом: код смотрел на item.emoji (у новой системы это
@@ -545,13 +569,10 @@ test('элемент с картинками из двух наборов нес
   const single = db.prepare(`
     INSERT INTO emoji_packs (name, position, enabled, created_at) VALUES ('Одиночный', 997, 1, ?)
   `).run(Date.now()).lastInsertRowid;
-  const soloItemId = db.prepare(`
-    INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, unicode_key, position)
-    VALUES (?, '', 'u_solo_test', '/uploads/emoji/u_solo_test.webp', '🧊', 'solo-test-key', 0)
-  `).run(single).lastInsertRowid;
-  db.prepare(
-    'INSERT INTO emoji_assets (item_id, asset_pack_id, file_path, created_at) VALUES (?, 1, ?, ?)'
-  ).run(soloItemId, '/uploads/emoji/u_solo_test.webp', Date.now());
+  seedEmojiItem(single, {
+    name: 'u_solo_test', fallback: '🧊', unicodeKey: 'solo-test-key', position: 0,
+    filePath: '/uploads/emoji/u_solo_test.webp',
+  });
 
   const list2 = await request('/api/emoji', { token: tokenFor(createUser('emoji_variants_viewer_2')) });
   const soloItem = list2.data.flatMap((p) => p.custom || []).find((c) => c.unicode_key === 'solo-test-key');

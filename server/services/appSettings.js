@@ -83,7 +83,7 @@ const SHORTCODE = /^:([a-z0-9_]{2,32}):$/;
 function reactionCatalog() {
   const rows = db.prepare(`
     SELECT i.name, i.fallback_emoji, i.unicode_key, i.retired, p.enabled
-    FROM emoji_items i
+    FROM emoji_items_resolved i
     JOIN emoji_packs p ON p.id = i.pack_id
     WHERE i.file_path IS NOT NULL AND i.name IS NOT NULL
     ORDER BY p.position, i.position, i.id

@@ -16,7 +16,6 @@ const {
   skinToneIndex,
   ensureLogicalItem,
   listAssetPacks,
-  syncResolvedAssets,
   parseStructureFile,
   applyStructure,
 } = require('../services/emojiCatalog');
@@ -49,8 +48,6 @@ const structureUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 12 * 1024 * 1024 },
 });
-
-syncResolvedAssets(db);
 
 // Имя должно надёжно отличаться от обычного текста: в сообщении оно живёт как
 // :name:, и рядом ходят и смайлики-двоеточия, и ссылки вида http://host:8080.
@@ -162,7 +159,7 @@ function packsWithItems({ onlyEnabled, includeRaw = false }) {
   const items = db.prepare(
     `SELECT id, pack_id, emoji, name, file_path, animated_path, fallback_emoji, position,
             unicode_key, label, keywords, retired
-     FROM emoji_items
+     FROM emoji_items_resolved
      ${onlyEnabled ? 'WHERE retired = 0' : ''}
      ORDER BY position, id`
   ).all();
@@ -352,18 +349,17 @@ function parseEmojiList(raw) {
   return [];
 }
 
+// Состав категории задаётся строкой смайликов целиком. Прежде отсюда
+// вычищались только элементы «без картинки» — так отличали юникодные от
+// картиночных. Картиночных больше нет, значит и деления нет: заменяется весь
+// состав. FK в этой базе движком не проверяются, поэтому emoji_assets чистим
+// явно и ПЕРВЫМИ — они ссылаются на элементы.
 function replaceItems(packId, list) {
-  // Только юникодные: картиночные элементы правятся отдельными ручками, и
-  // сохранение строки со смайликами не должно сносить загруженные файлы.
-  // FK в этой базе движком не проверяются (см. комментарий у sticker_id в
-  // db.js) — если среди удаляемых окажется элемент новой системы с ещё не
-  // синхронизированной картинкой (file_path временно NULL, но emoji_assets
-  // на него уже ссылается), сама строка emoji_assets переживёт его молча.
   db.transaction(() => {
     db.prepare(
-      'DELETE FROM emoji_assets WHERE item_id IN (SELECT id FROM emoji_items WHERE pack_id = ? AND file_path IS NULL)'
+      'DELETE FROM emoji_assets WHERE item_id IN (SELECT id FROM emoji_items WHERE pack_id = ?)'
     ).run(packId);
-    db.prepare('DELETE FROM emoji_items WHERE pack_id = ? AND file_path IS NULL').run(packId);
+    db.prepare('DELETE FROM emoji_items WHERE pack_id = ?').run(packId);
   })();
   const insert = db.prepare('INSERT INTO emoji_items (pack_id, emoji, position) VALUES (?, ?, ?)');
   list.slice(0, MAX_ITEMS_PER_PACK)
@@ -405,7 +401,7 @@ router.get('/catalog', verifyToken, (req, res) => {
     const items = db.prepare(`
       SELECT id, name, file_path, animated_path, fallback_emoji AS fallback,
              unicode_key, label, keywords
-      FROM emoji_items
+      FROM emoji_items_resolved
       WHERE name IS NOT NULL AND file_path IS NOT NULL
     `).all();
     const variants = variantsByItem(db);
@@ -534,8 +530,6 @@ router.post('/admin/assets/import', verifySuperAdmin, (req, res) => {
           if (errors.length < 20) errors.push(`${entry.entryName}: ${entryError.message}`);
         }
       }
-
-      syncResolvedAssets(db);
       notifyEmojiChanged(req);
       res.json({
         report: { imported, skipped, total: images.length, errors },
@@ -549,7 +543,7 @@ router.post('/admin/assets/import', verifySuperAdmin, (req, res) => {
 });
 
 // Порядок наборов оформления. Это НЕ косметика: позиция решает, откуда взять
-// картинку, если в активном наборе её нет (см. syncResolvedAssets — сначала
+// картинку, если в активном наборе её нет (представление emoji_items_resolved берёт сначала
 // активный, потом по позиции). До сих пор порядок задавался только тем, в
 // какой очерёдности наборы загружали, и поменять его было нечем.
 router.put('/admin/assets/reorder', verifySuperAdmin, (req, res) => {
@@ -562,8 +556,6 @@ router.put('/admin/assets/reorder', verifySuperAdmin, (req, res) => {
     }
     const setPosition = db.prepare('UPDATE emoji_asset_packs SET position = ? WHERE id = ?');
     db.transaction(() => order.forEach((id, index) => setPosition.run(index, id)))();
-
-    syncResolvedAssets(db);
     notifyEmojiChanged(req);
     res.json({ assetPacks: listAssetPacks(db), packs: adminPacks() });
   } catch (e) {
@@ -584,7 +576,6 @@ router.put('/admin/assets/:packId/items/:itemId', verifySuperAdmin, (req, res) =
     if (!asset) return res.status(404).json({ error: 'У этого смайлика нет версии из такого набора' });
 
     db.prepare('UPDATE emoji_assets SET enabled = ? WHERE id = ?').run(req.body.enabled ? 1 : 0, asset.id);
-    syncResolvedAssets(db);
     notifyEmojiChanged(req);
     res.json(adminPacks());
   } catch (e) {
@@ -661,7 +652,6 @@ router.put('/admin/assets/:id', verifySuperAdmin, (req, res) => {
         db.prepare('UPDATE emoji_asset_packs SET active = 1, enabled = 1 WHERE id = ?').run(id);
       })();
     }
-    syncResolvedAssets(db);
     notifyEmojiChanged(req);
     res.json({ assetPacks: listAssetPacks(db), packs: adminPacks() });
   } catch (e) {
@@ -675,7 +665,7 @@ router.put('/admin/assets/:id', verifySuperAdmin, (req, res) => {
 // нерабочей блокировки. Удаление настоящее: сами файлы с диска, строки из
 // emoji_assets и сама строка набора. Активная роль после удаления передаётся
 // следующему включённому набору той же роли, если такой остался, — иначе роль
-// просто не имеет активного набора, и syncResolvedAssets честно оставит
+// просто не имеет активного набора, и представление честно оставит
 // элементы без картинки этой роли (они всё равно останутся видны как обычный
 // Unicode-символ, см. packsWithItems).
 //
@@ -702,7 +692,6 @@ router.delete('/admin/assets/:id', verifySuperAdmin, (req, res) => {
     })();
 
     files.forEach((row) => unlinkEmojiFile(row.file_path));
-    syncResolvedAssets(db);
     notifyEmojiChanged(req);
     res.json({ assetPacks: listAssetPacks(db), packs: adminPacks() });
   } catch (e) {
@@ -710,26 +699,13 @@ router.delete('/admin/assets/:id', verifySuperAdmin, (req, res) => {
   }
 });
 
-// Одноразовая миграция старого формата сообщений :u_1f600: → 😀. Она
-// запускается явно из админки и не затрагивает произвольные :name: смайлики.
-router.post('/admin/migrate-unicode-tokens', verifySuperAdmin, (req, res) => {
-  try {
-    const byName = new Map(db.prepare(`
-      SELECT name, fallback_emoji, unicode_key FROM emoji_items
-      WHERE unicode_key IS NOT NULL AND name LIKE 'u\\_%' ESCAPE '\\'
-    `).all().map((item) => [item.name, item.fallback_emoji || emojiFromUnicodeKey(item.unicode_key)]));
-    const rows = db.prepare("SELECT id, text FROM messages WHERE text LIKE '%:u\\_%:%' ESCAPE '\\'").all();
-    const update = db.prepare('UPDATE messages SET text = ? WHERE id = ?');
-    let changed = 0;
-    db.transaction(() => rows.forEach((row) => {
-      const text = String(row.text || '').replace(/:([a-z0-9_]{2,128}):/g, (whole, name) => byName.get(name) || whole);
-      if (text !== row.text) { update.run(text, row.id); changed += 1; }
-    }))();
-    res.json({ changed });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// Ручки картиночных смайликов (загрузка, замена файла, базовый эмодзи,
+// снятие анимации, счётчик употреблений, свой порядок) удалены 07.09.2026
+// вместе с самим понятием. Способ их СОЗДАНИЯ был закрыт ещё раньше, на
+// проде не осталось ни одного такого элемента (все 3770 — юникодные), а
+// новая панель правки не звала ни одну из них. Туда же ушла разовая
+// миграция /admin/migrate-unicode-tokens: единственное место во всём
+// проекте, которое переписывало текст уже отправленных сообщений.
 
 router.post('/admin', verifySuperAdmin, (req, res) => {
   try {
@@ -797,10 +773,8 @@ router.put('/admin/:id', verifySuperAdmin, (req, res) => {
     // Список смайликов заменяется целиком, а не патчится по одному: править
     // набор строкой в поле проще, чем гонять отдельные запросы на каждый знак.
     //
-    // Но НЕ у авто-категории. Категории из загруженной структуры (structure_key)
-    // наполняет импорт, и `replaceItems` снёс бы оттуда все элементы без
-    // картинки — то есть логические Unicode-смайлики, у которых оформление
-    // ещё не синхронизировалось. Рукотворные паки правятся как раньше.
+    // Но НЕ у авто-категории: категории из загруженной структуры (structure_key)
+    // наполняет импорт, и замена состава руками снесла бы оттуда всё.
     if (req.body.emoji !== undefined) {
       if (pack.structure_key) {
         return res.status(400).json({
@@ -817,204 +791,6 @@ router.put('/admin/:id', verifySuperAdmin, (req, res) => {
   }
 });
 
-// Загрузка кастомного смайлика картинкой. Имя задаётся при загрузке и дальше
-// не меняется: оно уже уехало в тексты отправленных сообщений, и переименование
-// превратило бы их в мёртвые ссылки.
-router.post('/admin/:id/custom', verifySuperAdmin, (req, res) => {
-  emojiUpload.single('image')(req, res, async (err) => {
-    if (err) return res.status(400).json({ error: err.message || 'Не удалось загрузить файл' });
-    if (!req.file) return res.status(400).json({ error: 'Файл не распознан как изображение (jpeg/png/webp/gif)' });
-
-    const packId = Number(req.params.id);
-    const pack = db.prepare('SELECT id FROM emoji_packs WHERE id = ?').get(packId);
-    if (!pack) return res.status(404).json({ error: 'Пак не найден' });
-
-    const name = normalizeName(req.body.name);
-    if (!EMOJI_NAME_PATTERN.test(name)) {
-      return res.status(400).json({ error: 'Имя: латиница, цифры и подчёркивание, от 2 до 32 символов' });
-    }
-    // Имя занято чем угодно — своим или чужим паком: раз удаление настоящее,
-    // а не в архив, второй смысл (можно вернуть убранное) больше не нужен.
-    const taken = db.prepare('SELECT id FROM emoji_items WHERE name = ?').get(name);
-    if (taken) {
-      return res.status(409).json({ error: `Смайлик :${name}: уже существует`, code: 'name_taken' });
-    }
-
-    const count = db.prepare('SELECT COUNT(*) AS c FROM emoji_items WHERE pack_id = ?').get(packId).c;
-    if (count >= MAX_ITEMS_PER_PACK) return res.status(400).json({ error: 'В паке слишком много элементов' });
-
-    try {
-      const filePath = await saveEmojiImage(req.file.buffer, name, { animated: false });
-
-      const nextPosition = db.prepare(
-        'SELECT COALESCE(MAX(position), -1) + 1 AS p FROM emoji_items WHERE pack_id = ?'
-      ).get(packId).p;
-      // emoji объявлена NOT NULL ещё в исходной схеме — у картиночного
-      // элемента её роль играет пустая строка, а вид определяется по file_path.
-      // Базовый эмодзи: что прислали, иначе выводим из имени (`u_1f4a2` → 💢).
-      const fallback = normalizeFallback(req.body.fallback) || fallbackFromName(name);
-      db.prepare("INSERT INTO emoji_items (pack_id, emoji, name, file_path, fallback_emoji, position) VALUES (?, '', ?, ?, ?, ?)")
-        .run(packId, name, filePath, fallback, nextPosition);
-
-      notifyEmojiChanged(req);
-      res.status(201).json(adminPacks());
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-});
-
-// Юникодный смайлик — элемент без картинки: в панели выбора показывается сам
-// символ, и в сообщение уезжает он же, а не код. Поэтому имя такому элементу не
-// нужно вовсе и удаление его ничего не ломает: в тексте сообщения лежит символ,
-// а не ссылка на строку в базе.
-router.post('/admin/:id/unicode', verifySuperAdmin, (req, res) => {
-  try {
-    const packId = Number(req.params.id);
-    if (!db.prepare('SELECT id FROM emoji_packs WHERE id = ?').get(packId)) {
-      return res.status(404).json({ error: 'Пак не найден' });
-    }
-    const emoji = String(req.body.emoji || '').trim();
-    if (!emoji) return res.status(400).json({ error: 'Укажите смайлик' });
-    if ([...emoji].length > MAX_EMOJI_LENGTH) return res.status(400).json({ error: 'Это не похоже на смайлик' });
-
-    const count = db.prepare('SELECT COUNT(*) AS c FROM emoji_items WHERE pack_id = ?').get(packId).c;
-    if (count >= MAX_ITEMS_PER_PACK) return res.status(400).json({ error: 'В паке слишком много элементов' });
-
-    const nextPosition = db.prepare(
-      'SELECT COALESCE(MAX(position), -1) + 1 AS p FROM emoji_items WHERE pack_id = ?'
-    ).get(packId).p;
-    db.prepare('INSERT INTO emoji_items (pack_id, emoji, position) VALUES (?, ?, ?)').run(packId, emoji, nextPosition);
-
-    notifyEmojiChanged(req);
-    res.status(201).json(adminPacks());
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Правка элемента: базовый эмодзи у картиночного, сам символ у юникодного. Имя
-// не правится ничем и никогда — оно уехало в тексты отправленных сообщений, и
-// переименование превратило бы их в мёртвые коды.
-router.put('/admin/custom/:itemId', verifySuperAdmin, (req, res) => {
-  try {
-    const itemId = Number(req.params.itemId);
-    const item = db.prepare('SELECT id, file_path FROM emoji_items WHERE id = ?').get(itemId);
-    if (!item) return res.status(404).json({ error: 'Смайлик не найден' });
-
-    if (item.file_path) {
-      db.prepare('UPDATE emoji_items SET fallback_emoji = ? WHERE id = ?')
-        .run(normalizeFallback(req.body.fallback), itemId);
-    } else if (req.body.emoji !== undefined) {
-      const emoji = String(req.body.emoji || '').trim();
-      if (!emoji) return res.status(400).json({ error: 'Укажите смайлик' });
-      if ([...emoji].length > MAX_EMOJI_LENGTH) return res.status(400).json({ error: 'Это не похоже на смайлик' });
-      db.prepare('UPDATE emoji_items SET emoji = ? WHERE id = ?').run(emoji, itemId);
-    }
-
-    notifyEmojiChanged(req);
-    res.json(adminPacks());
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Замена картинки под тем же именем и кодом. В отличие от загрузки нового
-// смайлика, это НЕ заводит новую строку: код :name: в старых сообщениях
-// один и тот же, меняется только то, что за ним показывается — как правка
-// опечатки в уже отправленной картинке, а не новый смайлик.
-//
-// `kind` выбирает версию: `static` — та, что видна в панели выбора и вообще
-// везде; `animated` — та, что показывается только в переписке.
-router.post('/admin/custom/:itemId/image', verifySuperAdmin, (req, res) => {
-  emojiUpload.single('image')(req, res, async (err) => {
-    if (err) return res.status(400).json({ error: err.message || 'Не удалось загрузить файл' });
-    if (!req.file) return res.status(400).json({ error: 'Файл не распознан как изображение (jpeg/png/webp/gif)' });
-
-    const itemId = Number(req.params.itemId);
-    const animated = String(req.body.kind || req.query.kind || 'static') === 'animated';
-    const item = db.prepare('SELECT name, file_path, animated_path FROM emoji_items WHERE id = ? AND file_path IS NOT NULL').get(itemId);
-    if (!item) return res.status(404).json({ error: 'Смайлик не найден' });
-
-    try {
-      const saved = await saveEmojiImage(req.file.buffer, item.name, { animated });
-      const column = animated ? 'animated_path' : 'file_path';
-      db.prepare(`UPDATE emoji_items SET ${column} = ? WHERE id = ?`).run(saved, itemId);
-
-      // Прежний файл больше ни на что не ссылается: код :name: разрешается в
-      // путь на лету, и старая переписка со следующего запроса каталога покажет
-      // уже новую картинку. Оставлять его незачем — только копится мусор.
-      unlinkEmojiFile(animated ? item.animated_path : item.file_path);
-
-      notifyEmojiChanged(req);
-      res.json(adminPacks());
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-});
-
-// Снять анимацию, оставив смайлик: статичная версия — обязательная, анимация
-// поверх неё необязательна, и убирать их надо порознь.
-router.delete('/admin/custom/:itemId/animated', verifySuperAdmin, (req, res) => {
-  try {
-    const itemId = Number(req.params.itemId);
-    const item = db.prepare('SELECT animated_path FROM emoji_items WHERE id = ?').get(itemId);
-    if (!item) return res.status(404).json({ error: 'Смайлик не найден' });
-
-    db.prepare('UPDATE emoji_items SET animated_path = NULL WHERE id = ?').run(itemId);
-    unlinkEmojiFile(item.animated_path);
-
-    notifyEmojiChanged(req);
-    res.json(adminPacks());
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Во скольких отправленных сообщениях встречается код смайлика. Спрашивается
-// перед удалением: решение необратимое, и цену видно заранее.
-router.get('/admin/custom/:itemId/usage', verifySuperAdmin, (req, res) => {
-  try {
-    const item = db.prepare('SELECT name FROM emoji_items WHERE id = ?').get(Number(req.params.itemId));
-    if (!item) return res.status(404).json({ error: 'Смайлик не найден' });
-    res.json({ count: usageCount(item.name) });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Порядок элементов внутри пака — целиком по присланному списку id: список
-// задать проще, чем гонять запрос на каждую перестановку, и при перетаскивании
-// всё равно меняется вся последовательность. Порядок ОБЩИЙ для обоих видов:
-// в панели они лежат вперемешку одними карточками, и перетаскивание про виды
-// не знает.
-router.put('/admin/:packId/custom/reorder', verifySuperAdmin, (req, res) => {
-  try {
-    const packId = Number(req.params.packId);
-    const order = Array.isArray(req.body.order) ? req.body.order.map(Number) : [];
-    if (!order.length) return res.status(400).json({ error: 'Пустой порядок' });
-
-    const belongs = db.prepare(
-      'SELECT COUNT(*) AS c FROM emoji_items WHERE pack_id = ? AND id IN (' +
-      order.map(() => '?').join(',') + ')'
-    ).get(packId, ...order).c;
-    if (belongs !== order.length) return res.status(400).json({ error: 'Список не совпадает с содержимым пака' });
-
-    const setPosition = db.prepare('UPDATE emoji_items SET position = ? WHERE id = ? AND pack_id = ?');
-    const applyOrder = db.transaction(() => {
-      order.forEach((id, index) => setPosition.run(index, id, packId));
-    });
-    applyOrder();
-
-    notifyEmojiChanged(req);
-    res.json(adminPacks());
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Удаление смайлика — НАСТОЯЩЕЕ: строка из БД и оба файла с диска. Так решено
 // 12.08.2026: «удалили — значит больше не нужен», резервирование имени навсегда
 // признано лишним. Цена решения: в уже отправленных сообщениях на месте
 // картинки останется текст :name: (само сообщение не меняется — там и лежит
@@ -1025,8 +801,13 @@ router.put('/admin/:packId/custom/reorder', verifySuperAdmin, (req, res) => {
 router.delete('/admin/custom/:itemId', verifySuperAdmin, (req, res) => {
   try {
     const itemId = Number(req.params.itemId);
-    const item = db.prepare('SELECT file_path, animated_path FROM emoji_items WHERE id = ?').get(itemId);
+    const item = db.prepare('SELECT id FROM emoji_items WHERE id = ?').get(itemId);
     if (!item) return res.status(404).json({ error: 'Смайлик не найден' });
+
+    // Файлы берём из emoji_assets — ВСЕ оформления, а не только активное.
+    // Прежний код читал file_path/animated_path со среза и уносил лишь две
+    // картинки из трёх: версия неактивного набора оставалась на диске сиротой.
+    const files = db.prepare('SELECT file_path FROM emoji_assets WHERE item_id = ?').all(itemId);
 
     // FK в этой базе движком не проверяются (см. комментарий у sticker_id в
     // db.js) — ON DELETE CASCADE у emoji_assets декоративный, чистим сами.
@@ -1034,8 +815,7 @@ router.delete('/admin/custom/:itemId', verifySuperAdmin, (req, res) => {
       db.prepare('DELETE FROM emoji_assets WHERE item_id = ?').run(itemId);
       db.prepare('DELETE FROM emoji_items WHERE id = ?').run(itemId);
     })();
-    unlinkEmojiFile(item.file_path);
-    unlinkEmojiFile(item.animated_path);
+    files.forEach((row) => unlinkEmojiFile(row.file_path));
 
     notifyEmojiChanged(req);
     res.json(adminPacks());
@@ -1067,9 +847,10 @@ router.delete('/admin/:id', verifySuperAdmin, (req, res) => {
     // картиночные элементы удаляются вместе с файлами с диска, а не переезжают
     // в архив. В уже отправленных сообщениях на месте картинки останется текст
     // :name: — тот же компромисс, что и при удалении одного смайлика.
-    const files = db.prepare(
-      'SELECT file_path, animated_path FROM emoji_items WHERE pack_id = ? AND file_path IS NOT NULL'
-    ).all(packId);
+    const files = db.prepare(`
+      SELECT a.file_path FROM emoji_assets a
+      WHERE a.item_id IN (SELECT id FROM emoji_items WHERE pack_id = ?)
+    `).all(packId);
 
     // FK в этой базе движком не проверяются (PRAGMA foreign_keys выключена во
     // всём проекте — см. комментарий у sticker_id в db.js), поэтому все
@@ -1084,10 +865,7 @@ router.delete('/admin/:id', verifySuperAdmin, (req, res) => {
       db.prepare('DELETE FROM emoji_packs WHERE id = ?').run(packId);
     })();
 
-    files.forEach((row) => {
-      unlinkEmojiFile(row.file_path);
-      unlinkEmojiFile(row.animated_path);
-    });
+    files.forEach((row) => unlinkEmojiFile(row.file_path));
 
     notifyEmojiChanged(req);
     res.json(adminPacks());
