@@ -1,6 +1,5 @@
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import EmojiPicker from './EmojiPicker';
 
 // Тона кожи приезжают ВЛОЖЕННО в базовую карточку (сервер схлопывает их в
@@ -74,7 +73,7 @@ const touch = (el: Element, type: 'touchStart' | 'touchEnd' | 'touchMove', x = 5
 };
 
 test('после удержания обычные смайлики остаются нажимаемыми', () => {
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   const picked: any[] = [];
   render(
     <EmojiPicker
@@ -102,7 +101,7 @@ test('после удержания обычные смайлики остают
   // Удержание на смайлике с тонами: клик гасится — и это правильно, иначе
   // поверх открытого выбора вставился бы базовый.
   touch(toned, 'touchStart');
-  act(() => { jest.advanceTimersByTime(300); });
+  act(() => { vi.advanceTimersByTime(300); });
   expect(touch(toned, 'touchEnd').defaultPrevented).toBe(true);
 
   // Закрываем выбор. Пока он открыт, первое касание мимо штатно уходит на
@@ -118,11 +117,11 @@ test('после удержания обычные смайлики остают
   touch(plain, 'touchStart');
   expect(touch(plain, 'touchEnd').defaultPrevented).toBe(false);
 
-  jest.useRealTimers();
+  vi.useRealTimers();
 });
 
 test('дрожание пальца удержание не отменяет, а настоящая прокрутка — отменяет', () => {
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   render(<EmojiPicker embedded packsOverride={packWithTones} onPick={() => {}} onClose={() => {}} />);
   const cell = screen.getByRole('button', { name: /:u_1f44d:/ });
 
@@ -130,17 +129,17 @@ test('дрожание пальца удержание не отменяет, а
   // движение отменяло жест, и удержание не срабатывало вовсе.
   touch(cell, 'touchStart', 5, 5);
   touch(cell, 'touchMove', 8, 7);
-  act(() => { jest.advanceTimersByTime(300); });
+  act(() => { vi.advanceTimersByTime(300); });
   expect(touch(cell, 'touchEnd').defaultPrevented).toBe(true);
   act(() => { fireEvent.keyDown(window, { key: 'Escape' }); });
 
   // 40 px — это уже прокрутка сетки: жест отменяется, тап проходит как обычно.
   touch(cell, 'touchStart', 5, 5);
   touch(cell, 'touchMove', 5, 45);
-  act(() => { jest.advanceTimersByTime(300); });
+  act(() => { vi.advanceTimersByTime(300); });
   expect(touch(cell, 'touchEnd').defaultPrevented).toBe(false);
 
-  jest.useRealTimers();
+  vi.useRealTimers();
 });
 
 test('у смайлика без тонов выбора не появляется вовсе', () => {

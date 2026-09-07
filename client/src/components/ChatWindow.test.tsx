@@ -1,6 +1,5 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import ChatWindow from './ChatWindow';
 import { runTopBackInterceptor } from '../utils/backInterceptors';
 
@@ -74,7 +73,7 @@ describe('ChatWindow context menu', () => {
   });
 
   test('tap on another message closes the old menu without opening a new one', () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     const second = { ...message, id: 2, text: 'Второе', file_path: null };
     const { container } = render(
       <ChatWindow
@@ -100,11 +99,11 @@ describe('ChatWindow context menu', () => {
 
     // WebView после preventDefault может не прислать click. Следующий тап всё
     // равно обязан сработать с первого раза, сразу после завершения жеста.
-    act(() => { jest.advanceTimersByTime(40); });
+    act(() => { vi.advanceTimersByTime(40); });
     fireEvent.touchStart(secondRow, { touches: [{ clientX: 120, clientY: 180 }] });
     fireEvent.touchEnd(secondRow, { changedTouches: [{ clientX: 120, clientY: 180 }] });
     expect(container.querySelector('.msg-context-menu')).toBeInTheDocument();
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   test('uses the visible chat area as the context-menu height limit', () => {
@@ -124,7 +123,7 @@ describe('ChatWindow context menu', () => {
 
 describe('ChatWindow threads', () => {
   test('shows an accessible reply entry and focuses a new thread composer', () => {
-    const onOpenThread = jest.fn();
+    const onOpenThread = vi.fn();
     const { getByRole } = render(
       <ChatWindow
         chatId="group_1"
@@ -143,7 +142,7 @@ describe('ChatWindow threads', () => {
   });
 
   test('opens an existing thread without forcing the keyboard', () => {
-    const onOpenThread = jest.fn();
+    const onOpenThread = vi.fn();
     const { getByRole } = render(
       <ChatWindow
         chatId="group_1"
@@ -165,7 +164,7 @@ describe('ChatWindow threads', () => {
   });
 
   test('keeps a personal-chat thread in the context menu without an inline entry', () => {
-    const onOpenThread = jest.fn();
+    const onOpenThread = vi.fn();
     const { container, getByRole, queryByRole } = render(
       <ChatWindow
         chatId="1_2"
@@ -188,7 +187,7 @@ describe('ChatWindow threads', () => {
   });
 
   test('shows an existing thread inline in a personal chat', () => {
-    const onOpenThread = jest.fn();
+    const onOpenThread = vi.fn();
     const { getByRole } = render(
       <ChatWindow
         chatId="1_2"
@@ -267,7 +266,7 @@ describe('ChatWindow неотправленные сообщения', () => {
   };
 
   test('меню предлагает отменить отправку и повторить, но не удалить', () => {
-    const onCancelOutgoing = jest.fn();
+    const onCancelOutgoing = vi.fn();
     const { container, getByRole, queryByRole } = render(
       <ChatWindow
         chatId="1_2"
@@ -296,7 +295,7 @@ describe('ChatWindow неотправленные сообщения', () => {
   });
 
   test('удержание на неотправленном не включает режим выделения', () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     try {
       const { container } = render(
         <ChatWindow
@@ -311,11 +310,11 @@ describe('ChatWindow неотправленные сообщения', () => {
 
       const row = container.querySelector('[data-msg-id="-1"]') as HTMLElement;
       fireEvent.touchStart(row, { touches: [{ clientX: 10, clientY: 10 }] });
-      act(() => { jest.advanceTimersByTime(900); });
+      act(() => { vi.advanceTimersByTime(900); });
 
       expect(container.querySelector('.msg-select-check')).not.toBeInTheDocument();
     } finally {
-      jest.useRealTimers();
+      vi.useRealTimers();
     }
   });
 });

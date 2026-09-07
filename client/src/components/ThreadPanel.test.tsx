@@ -1,17 +1,17 @@
+import type { Mock } from 'vitest';
 import React from 'react';
 import { render, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import ThreadPanel from './ThreadPanel';
 
-jest.mock('../api/client', () => ({
+vi.mock('../api/client', () => ({
   __esModule: true,
-  default: { get: jest.fn(), post: jest.fn() },
+  default: { get: vi.fn(), post: vi.fn() },
 }));
-jest.mock('./ChatWindow', () => () => <div data-testid="thread-messages" />);
-jest.mock('./MessageInput', () => () => <div data-testid="thread-input" />);
-jest.mock('./PollCreator', () => () => null);
-jest.mock('./PollCard', () => () => null);
-
+vi.mock('./ChatWindow', () => ({ default: () => <div data-testid="thread-messages" /> }));
+vi.mock('./MessageInput', () => ({ default: () => <div data-testid="thread-input" /> }));
+vi.mock('./PollCreator', () => ({ default: () => null }));
+vi.mock('./PollCard', () => ({ default: () => null }));
 const response = {
   root: {
     id: 10,
@@ -26,15 +26,15 @@ const response = {
 };
 
 const socket = {
-  on: jest.fn(),
-  off: jest.fn(),
-  emit: jest.fn(),
-  timeout: jest.fn(() => ({ emit: jest.fn() })),
+  on: vi.fn(),
+  off: vi.fn(),
+  emit: vi.fn(),
+  timeout: vi.fn(() => ({ emit: vi.fn() })),
 } as any;
 
 test('не отмечает ветку прочитанной в фоне и делает это после возврата фокуса', async () => {
-  (api.get as jest.Mock).mockResolvedValue({ data: response });
-  (api.post as jest.Mock).mockResolvedValue({ data: { ok: true } });
+  (api.get as Mock).mockResolvedValue({ data: response });
+  (api.post as Mock).mockResolvedValue({ data: { ok: true } });
 
   const props = {
     rootId: 10,
@@ -42,10 +42,10 @@ test('не отмечает ветку прочитанной в фоне и д�
     socket,
     customEmoji: {},
     readActive: false,
-    onClose: jest.fn(),
-    onSummary: jest.fn(),
-    onRead: jest.fn(),
-    onRequestDelete: jest.fn(),
+    onClose: vi.fn(),
+    onSummary: vi.fn(),
+    onRead: vi.fn(),
+    onRequestDelete: vi.fn(),
   };
   const { rerender } = render(<ThreadPanel {...props} />);
 

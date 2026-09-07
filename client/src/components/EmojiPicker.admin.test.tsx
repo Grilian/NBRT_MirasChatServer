@@ -1,10 +1,9 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import EmojiPicker from './EmojiPicker';
 
 test('admin reaction picker uses uploaded packs and keeps multi-selection open', () => {
-  const onPick = jest.fn();
+  const onPick = vi.fn();
   const { getByRole } = render(
     <EmojiPicker
       embedded

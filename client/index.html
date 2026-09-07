@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <link rel="icon" href="./favicon.ico" />
     <!--
       viewport-fit=cover нужен ярлыку на iPhone: в режиме «с рабочего стола»
       страница занимает весь экран, включая области под «чёлкой» и полосой
@@ -24,7 +24,7 @@
       ярлык открывался бы обычной вкладкой Safari с адресной строкой поверх
       переписки. apple-touch-icon уже был, остальное добавлено.
     -->
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="apple-touch-icon" href="./logo192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <!-- Тёмная полоса статуса под цвет шапки, а не белая поверх неё. -->
@@ -32,11 +32,12 @@
     <!-- Подпись под значком: длинное имя iOS обрежет, поэтому короткое. -->
     <meta name="apple-mobile-web-app-title" content="MirasChat" />
 
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link rel="manifest" href="./manifest.json" />
     <title>MirasChat</title>
   </head>
   <body>
     <noscript>Для работы приложения нужен включённый JavaScript.</noscript>
     <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>

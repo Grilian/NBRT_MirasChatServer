@@ -2,27 +2,27 @@
 // возвращается текстом: молчащая кнопка на Android («нажимаю на файл — ничего
 // не происходит») и была настоящей жалобой.
 
-// Файл использует require после моков и потому не имеет импортов — пустой
-// export делает его модулем, иначе сборка спотыкается об isolatedModules.
+// Модуль догружается через `await import` ПОСЛЕ объявления моков: плагин
+// регистрируется в момент импорта, и обычный import наверху файла успел бы
+// схватить настоящий @capacitor/core. Пустой export делает файл модулем.
 export {};
 
-// Имя обязано начинаться с mock — иначе jest не пускает переменную внутрь
-// фабрики jest.mock (защита от неинициализированных моков).
-const mockDownload = jest.fn();
+// Имя обязано начинаться с mock — иначе vitest не пускает переменную внутрь
+// фабрики vi.mock (защита от неинициализированных моков).
+const mockDownload = vi.fn();
 
-jest.mock('@capacitor/core', () => ({
+vi.mock('@capacitor/core', () => ({
   registerPlugin: () => ({ download: (...args: unknown[]) => mockDownload(...args) }),
 }));
 
 const mockState = { nativeMobile: false };
-jest.mock('./mobileNotify', () => ({
+vi.mock('./mobileNotify', () => ({
   get isNativeMobile() { return mockState.nativeMobile; },
 }));
 
 // Модуль читает isNativeMobile при вызове, но плагин регистрирует при импорте,
 // поэтому импортируем после моков.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { downloadFile, safeDownloadName } = require('./downloadFile');
+const { downloadFile, safeDownloadName } = await import('./downloadFile');
 
 beforeEach(() => {
   mockDownload.mockReset();
@@ -61,7 +61,7 @@ test('отказ загрузчика возвращается человеку 
 });
 
 test('в десктопе скачивает главный процесс и отдаёт путь', async () => {
-  const desktop = jest.fn().mockResolvedValue({ ok: true, path: 'C:\\Users\\Gri\\Downloads\\a.pdf' });
+  const desktop = vi.fn().mockResolvedValue({ ok: true, path: 'C:\\Users\\Gri\\Downloads\\a.pdf' });
   (window as any).electronAPI = { downloadFile: desktop };
 
   const result = await downloadFile('https://example.com/a.pdf', 'a.pdf');

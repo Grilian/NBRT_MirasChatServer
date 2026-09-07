@@ -1,10 +1,9 @@
-import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 import PollCreator from './PollCreator';
 
 test('creates a valid poll with participant-added options enabled', () => {
-  const onCreate = jest.fn();
-  render(<PollCreator onClose={jest.fn()} onCreate={onCreate} />);
+  const onCreate = vi.fn();
+  render(<PollCreator onClose={vi.fn()} onCreate={onCreate} />);
 
   const create = screen.getByRole('button', { name: 'Создать' });
   expect(create).toBeDisabled();
@@ -25,7 +24,7 @@ test('creates a valid poll with participant-added options enabled', () => {
 });
 
 test('does not allow duplicate options ignoring Russian letter case', () => {
-  render(<PollCreator onClose={jest.fn()} onCreate={jest.fn()} />);
+  render(<PollCreator onClose={vi.fn()} onCreate={vi.fn()} />);
   fireEvent.change(screen.getByPlaceholderText('Текст вопроса'), { target: { value: 'Вопрос' } });
   fireEvent.change(screen.getByPlaceholderText('Ответ 1'), { target: { value: 'Москва' } });
   fireEvent.change(screen.getByPlaceholderText('Ответ 2'), { target: { value: 'МОСКВА' } });
@@ -34,8 +33,8 @@ test('does not allow duplicate options ignoring Russian letter case', () => {
 });
 
 test('closes only after a completed backdrop click', () => {
-  const onClose = jest.fn();
-  const { container } = render(<PollCreator onClose={onClose} onCreate={jest.fn()} />);
+  const onClose = vi.fn();
+  const { container } = render(<PollCreator onClose={onClose} onCreate={vi.fn()} />);
   const layer = container.querySelector('.poll-creator-layer') as HTMLElement;
 
   fireEvent.mouseDown(layer);

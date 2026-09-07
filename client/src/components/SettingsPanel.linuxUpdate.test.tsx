@@ -1,14 +1,13 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import SettingsPanel from './SettingsPanel';
 
-jest.mock('../api/client', () => ({
+vi.mock('../api/client', () => ({
   __esModule: true,
   default: {
-    get: jest.fn(() => Promise.resolve({ data: {} })),
-    post: jest.fn(() => Promise.resolve({ data: {} })),
-    delete: jest.fn(() => Promise.resolve({ data: {} })),
+    get: vi.fn(() => Promise.resolve({ data: {} })),
+    post: vi.fn(() => Promise.resolve({ data: {} })),
+    delete: vi.fn(() => Promise.resolve({ data: {} })),
   },
 }));
 
@@ -29,28 +28,28 @@ const baseProps = {
 function mockElectronAPI(updateState: any, overrides: Record<string, any> = {}) {
   (window as any).electronAPI = {
     platform: 'linux',
-    minimize: jest.fn(),
-    toggleMaximize: jest.fn(),
-    close: jest.fn(),
-    isMaximized: jest.fn(() => Promise.resolve(false)),
-    onMaximizedChange: jest.fn(() => () => {}),
-    getAutoLaunch: jest.fn(() => Promise.resolve(false)),
-    setAutoLaunch: jest.fn((v: boolean) => Promise.resolve(v)),
-    setUnreadBadge: jest.fn(),
-    focusWindow: jest.fn(),
-    flashWindow: jest.fn(),
-    onFocusChange: jest.fn(() => () => {}),
-    getAppVersion: jest.fn(() => Promise.resolve('1.11.5')),
-    checkForUpdate: jest.fn(),
-    installUpdate: jest.fn(),
-    onUpdateState: jest.fn((cb: (s: any) => void) => { cb(updateState); return () => {}; }),
-    getProxyState: jest.fn(() => Promise.resolve({
+    minimize: vi.fn(),
+    toggleMaximize: vi.fn(),
+    close: vi.fn(),
+    isMaximized: vi.fn(() => Promise.resolve(false)),
+    onMaximizedChange: vi.fn(() => () => {}),
+    getAutoLaunch: vi.fn(() => Promise.resolve(false)),
+    setAutoLaunch: vi.fn((v: boolean) => Promise.resolve(v)),
+    setUnreadBadge: vi.fn(),
+    focusWindow: vi.fn(),
+    flashWindow: vi.fn(),
+    onFocusChange: vi.fn(() => () => {}),
+    getAppVersion: vi.fn(() => Promise.resolve('1.11.5')),
+    checkForUpdate: vi.fn(),
+    installUpdate: vi.fn(),
+    onUpdateState: vi.fn((cb: (s: any) => void) => { cb(updateState); return () => {}; }),
+    getProxyState: vi.fn(() => Promise.resolve({
       enabled: false, mode: 'cit', manualHost: '', manualPort: '',
       citPacUrl: 'http://i.tatar.ru/wpad.dat', citReachable: false,
     })),
-    setProxyState: jest.fn(),
-    checkCitProxy: jest.fn(() => Promise.resolve(false)),
-    onProxyStateChanged: jest.fn(() => () => {}),
+    setProxyState: vi.fn(),
+    checkCitProxy: vi.fn(() => Promise.resolve(false)),
+    onProxyStateChanged: vi.fn(() => () => {}),
     ...overrides,
   };
 }
@@ -70,7 +69,7 @@ describe('SettingsPanel — обновления на Linux', () => {
   });
 
   test('linux-ready показывает кнопку «Установить», которая вызывает installUpdate', async () => {
-    const installUpdate = jest.fn();
+    const installUpdate = vi.fn();
     mockElectronAPI({ status: 'linux-ready', version: '1.12.0' }, { installUpdate });
     render(<SettingsPanel {...baseProps} />);
 

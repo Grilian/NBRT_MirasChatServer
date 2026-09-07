@@ -1,23 +1,22 @@
-const mockSetOverlay = jest.fn().mockResolvedValue({ navigationBarHeight: 24 });
+const mockSetOverlay = vi.fn().mockResolvedValue({ navigationBarHeight: 24 });
 
 export {};
 
-jest.mock('@capacitor/core', () => ({
+vi.mock('@capacitor/core', () => ({
   registerPlugin: () => ({ setOverlay: mockSetOverlay }),
 }));
-jest.mock('@capacitor/keyboard', () => ({
+vi.mock('@capacitor/keyboard', () => ({
   Keyboard: {
-    addListener: jest.fn().mockResolvedValue({ remove: jest.fn() }),
-    hide: jest.fn().mockResolvedValue(undefined),
-    show: jest.fn().mockResolvedValue(undefined),
+    addListener: vi.fn().mockResolvedValue({ remove: vi.fn() }),
+    hide: vi.fn().mockResolvedValue(undefined),
+    show: vi.fn().mockResolvedValue(undefined),
   },
 }));
-jest.mock('./mobileNotify', () => ({ isNativeMobile: true }));
-
+vi.mock('./mobileNotify', () => ({ isNativeMobile: true }));
 const {
   acquireChatKeyboardResizeMode,
   acquireStandardKeyboardResizeMode,
-} = require('./mobileKeyboard');
+} = await import('./mobileKeyboard');
 
 beforeEach(() => mockSetOverlay.mockClear());
 

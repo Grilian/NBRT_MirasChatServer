@@ -22,7 +22,7 @@ interface Manifest {
 // Манифест лежит рядом с обновлениями десктопа. Адрес выводим из базового
 // URL API, чтобы хост не был прописан в приложении вторым местом.
 function manifestUrl(): string | null {
-  const apiBase = process.env.REACT_APP_API_BASE_URL;
+  const apiBase = import.meta.env.VITE_API_BASE_URL;
   if (!apiBase) return null;
   try {
     return new URL('../updates/android.json', `${apiBase.replace(/\/+$/, '')}/`).toString();

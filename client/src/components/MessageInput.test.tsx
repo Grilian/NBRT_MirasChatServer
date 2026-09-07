@@ -1,6 +1,5 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import MessageInput from './MessageInput';
 import ChatWindow from './ChatWindow';
 import { buildEmojiMap } from '../utils/customEmoji';
@@ -8,14 +7,14 @@ import { buildEmojiMap } from '../utils/customEmoji';
 // Фокус ставится внутри requestAnimationFrame (композер в этот момент ещё
 // меняет высоту под появившуюся панель), поэтому в тестах кадр прогоняем руками.
 function flushFrame() {
-  act(() => { jest.advanceTimersByTime(32); });
+  act(() => { vi.advanceTimersByTime(32); });
 }
 
 const noopSend = async () => ({ ok: true });
 
 describe('MessageInput отправка', () => {
   test('кнопка отправки не забирает фокус у поля ввода', async () => {
-    const onSend = jest.fn(noopSend);
+    const onSend = vi.fn(noopSend);
     const { container } = render(<MessageInput onSend={onSend} />);
 
     const field = container.querySelector('.composer-input') as HTMLElement;
@@ -36,7 +35,7 @@ describe('MessageInput отправка', () => {
   });
 
   test('одно нажатие отправляет ровно одно сообщение', async () => {
-    const onSend = jest.fn(noopSend);
+    const onSend = vi.fn(noopSend);
     const { container } = render(<MessageInput onSend={onSend} />);
 
     const field = container.querySelector('.composer-input') as HTMLElement;
@@ -55,8 +54,8 @@ describe('MessageInput отправка', () => {
 });
 
 describe('MessageInput ответ на сообщение', () => {
-  beforeEach(() => { jest.useFakeTimers(); });
-  afterEach(() => { jest.useRealTimers(); });
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
 
   test('появление панели ответа само отдаёт фокус полю', () => {
     const { container, rerender } = render(<MessageInput onSend={noopSend} />);
@@ -96,8 +95,8 @@ describe('MessageInput прикрепление картинки', () => {
   // jsdom не реализует объектные URL вовсе — без заглушки падал бы сам
   // предпросмотр, а не проверяемое поведение.
   beforeAll(() => {
-    (URL as any).createObjectURL = jest.fn(() => 'blob:preview');
-    (URL as any).revokeObjectURL = jest.fn();
+    (URL as any).createObjectURL = vi.fn(() => 'blob:preview');
+    (URL as any).revokeObjectURL = vi.fn();
   });
   // Настоящий баг: File — это только ссылка на файл системы. Между выбором
   // картинки и нажатием «Отправить» Android успевает убрать временный файл
@@ -125,7 +124,7 @@ describe('MessageInput прикрепление картинки', () => {
   }
 
   test('исчезнувший после выбора файл всё равно отправляется — байты уже свои', async () => {
-    const onSend = jest.fn(noopSend);
+    const onSend = vi.fn(noopSend);
     const { container } = render(<MessageInput onSend={onSend} />);
 
     const { file, vanish } = volatileFile();
@@ -153,7 +152,7 @@ describe('MessageInput прикрепление картинки', () => {
   });
 
   test('нечитаемый уже при выборе файл объясняется сразу, а не при отправке', async () => {
-    const onSend = jest.fn(noopSend);
+    const onSend = vi.fn(noopSend);
     const { container } = render(<MessageInput onSend={onSend} />);
 
     const { file, vanish } = volatileFile('gone.jpg');
@@ -208,8 +207,8 @@ describe('MessageInput всплывающие панели', () => {
 
 describe('MessageInput перетаскивание файлов', () => {
   beforeAll(() => {
-    (URL as any).createObjectURL = jest.fn(() => 'blob:preview');
-    (URL as any).revokeObjectURL = jest.fn();
+    (URL as any).createObjectURL = vi.fn(() => 'blob:preview');
+    (URL as any).revokeObjectURL = vi.fn();
   });
 
   function dropFiles(container: HTMLElement, files: File[]) {
@@ -224,7 +223,7 @@ describe('MessageInput перетаскивание файлов', () => {
   // другого пути. Человек видел, что с картинками перетаскивание работает,
   // а с «некоторыми расширениями» — нет, без единой подсказки почему.
   test('перетащенный документ уходит файлом, а не пропадает молча', async () => {
-    const onSendFile = jest.fn(async () => ({ ok: true }));
+    const onSendFile = vi.fn(async () => ({ ok: true }));
     const { container } = render(<MessageInput onSend={noopSend} onSendFile={onSendFile} />);
 
     const doc = new File([new Uint8Array([1, 2, 3])], 'смета.pdf', { type: 'application/pdf' });
@@ -236,7 +235,7 @@ describe('MessageInput перетаскивание файлов', () => {
   });
 
   test('перетащенные картинка и документ одним броском расходятся по своим путям', async () => {
-    const onSendFile = jest.fn(async () => ({ ok: true }));
+    const onSendFile = vi.fn(async () => ({ ok: true }));
     const { container } = render(<MessageInput onSend={noopSend} onSendFile={onSendFile} />);
 
     const image = new File([new Uint8Array([1, 2, 3])], 'photo.jpg', { type: 'image/jpeg' });
@@ -252,7 +251,7 @@ describe('MessageInput перетаскивание файлов', () => {
   });
 
   test('перетаскивание в отключённое поле ничего не отправляет', async () => {
-    const onSendFile = jest.fn(async () => ({ ok: true }));
+    const onSendFile = vi.fn(async () => ({ ok: true }));
     const { container } = render(<MessageInput onSend={noopSend} onSendFile={onSendFile} disabled />);
 
     const doc = new File([new Uint8Array([1, 2, 3])], 'смета.pdf', { type: 'application/pdf' });

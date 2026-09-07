@@ -1,6 +1,6 @@
+import type { Mock } from 'vitest';
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import ChatList, { Chat } from './ChatList';
 
 const chats: Chat[] = [
@@ -8,7 +8,7 @@ const chats: Chat[] = [
   { id: 'chat_1_2', name: 'Анна', section: 'staff', groupLabel: null, userId: 2 },
 ];
 
-function renderList(onSelectChat = jest.fn()) {
+function renderList(onSelectChat = vi.fn()) {
   const result = render(
     <ChatList
       selfName="Я"
@@ -41,7 +41,7 @@ function renderList(onSelectChat = jest.fn()) {
 beforeEach(() => {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
-    value: jest.fn().mockReturnValue({ matches: false }),
+    value: vi.fn().mockReturnValue({ matches: false }),
   });
   window.requestAnimationFrame = (callback: FrameRequestCallback) => {
     callback(0);
@@ -50,7 +50,7 @@ beforeEach(() => {
 });
 
 test('opens a chat from the recent strip', () => {
-  const onSelectChat = jest.fn();
+  const onSelectChat = vi.fn();
   const { container } = renderList(onSelectChat);
 
   const recentButtons = container.querySelectorAll<HTMLButtonElement>('.recent-chat');
@@ -70,7 +70,7 @@ test('maps the mouse wheel to horizontal recent-chat scrolling', () => {
 });
 
 test('collapses mobile search on list scroll and restores focus from the magnifier', () => {
-  (window.matchMedia as jest.Mock).mockReturnValue({ matches: true });
+  (window.matchMedia as Mock).mockReturnValue({ matches: true });
   const { container } = renderList();
   const list = container.querySelector('.roster-list') as HTMLDivElement;
   Object.defineProperty(list, 'scrollTop', { configurable: true, value: 30 });
@@ -91,11 +91,11 @@ test('collapses mobile search on list scroll and restores focus from the magnifi
 
 function renderWithMenu(overrides: Partial<React.ComponentProps<typeof ChatList>> = {}) {
   const handlers = {
-    onToggleFavorite: jest.fn(),
-    onRemoveContact: jest.fn(),
-    onToggleMute: jest.fn(),
-    onMarkChatRead: jest.fn(),
-    onClearChat: jest.fn(),
+    onToggleFavorite: vi.fn(),
+    onRemoveContact: vi.fn(),
+    onToggleMute: vi.fn(),
+    onMarkChatRead: vi.fn(),
+    onClearChat: vi.fn(),
   };
   render(
     <ChatList

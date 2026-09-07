@@ -1,17 +1,17 @@
-import '@testing-library/jest-dom';
+import type { Mock } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import StatusPicker from './StatusPicker';
 import { describeStatus, statusExpiryOn } from '../utils/statusMeta';
 import { invalidateEmojiPackCache } from './EmojiPicker';
 
-jest.mock('../api/client', () => ({
+vi.mock('../api/client', () => ({
   __esModule: true,
-  default: { get: jest.fn(), put: jest.fn() },
+  default: { get: vi.fn(), put: vi.fn() },
 }));
 
-const get = api.get as jest.Mock;
-const put = api.put as jest.Mock;
+const get = api.get as Mock;
+const put = api.put as Mock;
 
 beforeEach(() => {
   get.mockReset();
@@ -22,7 +22,7 @@ beforeEach(() => {
 
 test('панель загруженных смайликов закрывается явной кнопкой', async () => {
   render(
-    <StatusPicker statusPreset={null} statusCustom={null} onStatusChanged={jest.fn()} />,
+    <StatusPicker statusPreset={null} statusCustom={null} onStatusChanged={vi.fn()} />,
   );
 
   fireEvent.click(screen.getByRole('button', { name: 'Выбрать эмодзи' }));
@@ -47,7 +47,7 @@ test('загруженный смайлик сохраняется в стату
       statusPreset={null}
       statusCustom={null}
       customEmoji={{ ink_smile: { filePath: '/uploads/emoji/ink_smile.webp', fallback: '😊' } }}
-      onStatusChanged={jest.fn()}
+      onStatusChanged={vi.fn()}
     />,
   );
 
@@ -68,7 +68,7 @@ test('загруженный смайлик сохраняется в стату
 
 test('sets a preset status through the server and updates the UI state', async () => {
   put.mockResolvedValue({ data: { status_preset: 'vacation', status_custom: null } });
-  const onStatusChanged = jest.fn();
+  const onStatusChanged = vi.fn();
   render(
     <StatusPicker
       statusPreset={null}
@@ -89,7 +89,7 @@ test('sets a preset status through the server and updates the UI state', async (
 
 test('removes an active status through the server', async () => {
   put.mockResolvedValue({ data: { status_preset: null, status_custom: null } });
-  const onStatusChanged = jest.fn();
+  const onStatusChanged = vi.fn();
   render(
     <StatusPicker
       statusPreset="vacation"
@@ -111,7 +111,7 @@ describe('срок статуса', () => {
   test('дата со временем принимается, прошедший момент — нет', () => {
     const now = new Date();
     now.setHours(12, 0, 0, 0);
-    jest.useFakeTimers().setSystemTime(now);
+    vi.useFakeTimers().setSystemTime(now);
 
     const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const later = statusExpiryOn(`${iso(now)}T18:30`)!;
@@ -126,7 +126,7 @@ describe('срок статуса', () => {
     // Прошедший момент снял бы статус мгновенно — такой не принимаем.
     expect(statusExpiryOn(`${iso(now)}T09:00`)).toBeNull();
     expect(statusExpiryOn('мусор')).toBeNull();
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   test('свой эмодзи в начале статуса становится значком, а не частью подписи', () => {

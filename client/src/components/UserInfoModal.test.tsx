@@ -1,18 +1,17 @@
-import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import UserInfoModal from './UserInfoModal';
 
 const user = { id: 2, username: 'tester', display_name: 'Тестировщик' };
 
 test('notification action calls the real handler without a development label', async () => {
-  const onToggleNotifications = jest.fn().mockResolvedValue(undefined);
+  const onToggleNotifications = vi.fn().mockResolvedValue(undefined);
   render(
     <UserInfoModal
       user={user}
       notificationsMuted={false}
       onToggleNotifications={onToggleNotifications}
       currentUserId={1}
-      onClose={jest.fn()}
+      onClose={vi.fn()}
     />,
   );
 
@@ -24,7 +23,7 @@ test('notification action calls the real handler without a development label', a
 });
 
 test('unfinished profile actions still keep their development label', () => {
-  render(<UserInfoModal user={user} currentUserId={1} onClose={jest.fn()} />);
+  render(<UserInfoModal user={user} currentUserId={1} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'Звонок' }));
   expect(screen.getByRole('status')).toHaveTextContent('Звонок — в разработке');
 });

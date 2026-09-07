@@ -1,15 +1,15 @@
+import type { Mock } from 'vitest';
 import React from 'react';
-import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import ChatAttachments from './ChatAttachments';
 
-jest.mock('../api/client', () => ({
+vi.mock('../api/client', () => ({
   __esModule: true,
-  default: { get: jest.fn(), post: jest.fn() },
+  default: { get: vi.fn(), post: vi.fn() },
 }));
 
-const mockedApi = api as unknown as { get: jest.Mock; post: jest.Mock };
+const mockedApi = api as unknown as { get: Mock; post: Mock };
 
 const MEDIA = [
   { id: 11, file_path: '/uploads/users/1/images/mine.webp', file_width: 10, file_height: 10, created_at: '2026-08-15 10:00:00', sender_id: 1 },
@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 const setup = (props: Partial<React.ComponentProps<typeof ChatAttachments>> = {}) => render(
-  <ChatAttachments chatId="chat_1_2" currentUserId={1} onOpenMessage={jest.fn()} {...props} />
+  <ChatAttachments chatId="chat_1_2" currentUserId={1} onOpenMessage={vi.fn()} {...props} />
 );
 
 test('нажатие на своё изображение открывает меню с удалением', async () => {
@@ -57,7 +57,7 @@ test('у чужого изображения удаления в меню нет
 });
 
 test('переход к сообщению отдаёт наверх чат и id сообщения', async () => {
-  const onOpenMessage = jest.fn();
+  const onOpenMessage = vi.fn();
   setup({ onOpenMessage });
   const tiles = await screen.findAllByRole('button', { name: /^Изображение от/ });
   fireEvent.click(tiles[0]);
@@ -68,7 +68,7 @@ test('переход к сообщению отдаёт наверх чат и i
 
 test('удаление уводит файл в архив и убирает его из списка', async () => {
   mockedApi.post.mockResolvedValue({ data: {} });
-  const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
   setup();
 
   fireEvent.click(await screen.findByRole('button', { name: 'Файлы' }));

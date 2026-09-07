@@ -1,18 +1,18 @@
+import type { Mock } from 'vitest';
 import React from 'react';
-import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import FilesSection from './FilesSection';
 
-jest.mock('../api/client', () => ({
+vi.mock('../api/client', () => ({
   __esModule: true,
-  default: { get: jest.fn(), post: jest.fn() },
+  default: { get: vi.fn(), post: vi.fn() },
 }));
-jest.mock('../utils/downloadFile', () => ({
-  downloadFile: jest.fn().mockResolvedValue({ ok: true, location: 'Загрузки' }),
+vi.mock('../utils/downloadFile', () => ({
+  downloadFile: vi.fn().mockResolvedValue({ ok: true, location: 'Загрузки' }),
 }));
 
-const mockedApi = api as unknown as { get: jest.Mock; post: jest.Mock };
+const mockedApi = api as unknown as { get: Mock; post: Mock };
 
 const ITEMS = [
   {
@@ -89,7 +89,7 @@ test('сортировка и архив перезапрашивают спис
 
 test('удаление уводит файл в архив и обновляет сводку', async () => {
   mockedApi.post.mockResolvedValue({ data: {} });
-  const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
   render(<FilesSection />);
   await screen.findByText('договор.pdf');
 
@@ -104,7 +104,7 @@ test('удаление уводит файл в архив и обновляет
 });
 
 test('переход к сообщению отдаёт наверх чат и сообщение', async () => {
-  const onOpenMessage = jest.fn();
+  const onOpenMessage = vi.fn();
   render(<FilesSection onOpenMessage={onOpenMessage} />);
   await screen.findByText('песня.mp3');
 

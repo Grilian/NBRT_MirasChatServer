@@ -1,15 +1,15 @@
+import type { Mock } from 'vitest';
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import api from '../api/client';
 import StickerPicker, { invalidateStickerPackCache } from './StickerPicker';
 
-jest.mock('../api/client', () => ({
+vi.mock('../api/client', () => ({
   __esModule: true,
-  default: { get: jest.fn() },
+  default: { get: vi.fn() },
 }));
 
-const mockedGet = api.get as jest.Mock;
+const mockedGet = api.get as Mock;
 
 beforeEach(() => {
   invalidateStickerPackCache();

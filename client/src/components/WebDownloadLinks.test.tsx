@@ -1,6 +1,5 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import WebDownloadLinks from './WebDownloadLinks';
 
 const response = (body: string | object) => Promise.resolve({
@@ -10,7 +9,7 @@ const response = (body: string | object) => Promise.resolve({
 } as Response);
 
 beforeEach(() => {
-  (global as any).fetch = jest.fn((input: string | URL) => {
+  (global as any).fetch = vi.fn((input: string | URL) => {
     const url = String(input);
     if (url.endsWith('latest.yml')) return response('version: 1.2.3\npath: MirasChat Setup 1.2.3.exe\n');
     if (url.endsWith('android.json')) return response({ url: '/miraschat/updates/MirasChat-1.2.3.apk' });
@@ -19,7 +18,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { jest.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 test('в веб-настройках показывает все три дистрибутива и установку на iPhone', async () => {
   render(<WebDownloadLinks variant="settings" />);

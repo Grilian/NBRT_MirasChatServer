@@ -1,6 +1,5 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import ThreadInbox from './ThreadInbox';
 import { ThreadInboxItem } from '../types/thread';
 
@@ -18,7 +17,7 @@ const item: ThreadInboxItem = {
 };
 
 test('shows participating threads and opens the selected discussion', () => {
-  const onOpen = jest.fn();
+  const onOpen = vi.fn();
   render(<ThreadInbox items={[item]} loading={false} onBack={() => {}} onOpen={onOpen} />);
   expect(screen.getByText('Рабочая группа')).toBeInTheDocument();
   expect(screen.getByText('Корневое сообщение')).toBeInTheDocument();

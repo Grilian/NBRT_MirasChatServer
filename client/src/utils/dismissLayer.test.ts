@@ -2,8 +2,8 @@ import { dismissLayerWithoutUnderlayActivation } from './dismissLayer';
 
 test('dismisses a layer without activating the element underneath', () => {
   const button = document.createElement('button');
-  const activated = jest.fn();
-  const dismissed = jest.fn();
+  const activated = vi.fn();
+  const dismissed = vi.fn();
   button.addEventListener('click', activated);
   document.body.appendChild(button);
 
@@ -22,10 +22,10 @@ test('dismisses a layer without activating the element underneath', () => {
 
 test('swallows the Android pointer/touch/mouse tail of the dismissed gesture', () => {
   const target = document.createElement('button');
-  const touchStarted = jest.fn();
-  const touchEnded = jest.fn();
-  const activated = jest.fn();
-  const dismissed = jest.fn();
+  const touchStarted = vi.fn();
+  const touchEnded = vi.fn();
+  const activated = vi.fn();
+  const dismissed = vi.fn();
   target.addEventListener('touchstart', touchStarted);
   target.addEventListener('touchend', touchEnded);
   target.addEventListener('click', activated);
@@ -50,11 +50,11 @@ test('swallows the Android pointer/touch/mouse tail of the dismissed gesture', (
 });
 
 test('does not swallow the next tap when Android omits the synthetic click', () => {
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   const closingTarget = document.createElement('button');
   const nextTarget = document.createElement('button');
-  const dismissed = jest.fn();
-  const nextTouchStarted = jest.fn();
+  const dismissed = vi.fn();
+  const nextTouchStarted = vi.fn();
   closingTarget.addEventListener('pointerdown', (event) => {
     dismissLayerWithoutUnderlayActivation(event, dismissed);
   }, { once: true });
@@ -66,7 +66,7 @@ test('does not swallow the next tap when Android omits the synthetic click', () 
   closingTarget.dispatchEvent(new Event('pointerup', { bubbles: true, cancelable: true }));
   closingTarget.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
   // click намеренно отсутствует — именно так воспроизводится WebView-баг.
-  jest.advanceTimersByTime(40);
+  vi.advanceTimersByTime(40);
 
   nextTarget.dispatchEvent(new Event('touchstart', { bubbles: true, cancelable: true }));
 
@@ -74,5 +74,5 @@ test('does not swallow the next tap when Android omits the synthetic click', () 
   expect(nextTouchStarted).toHaveBeenCalledTimes(1);
   closingTarget.remove();
   nextTarget.remove();
-  jest.useRealTimers();
+  vi.useRealTimers();
 });

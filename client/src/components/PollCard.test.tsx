@@ -1,4 +1,3 @@
-import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 import PollCard from './PollCard';
 import { Poll } from '../types/poll';
@@ -31,8 +30,8 @@ function pollFixture(overrides: Partial<Poll> = {}): Poll {
 }
 
 test('submits a vote and a participant option', () => {
-  const onVote = jest.fn();
-  const onAddOption = jest.fn();
+  const onVote = vi.fn();
+  const onAddOption = vi.fn();
   render(<PollCard poll={pollFixture()} onVote={onVote} onAddOption={onAddOption} />);
 
   fireEvent.click(screen.getByRole('button', { name: /Москва/ }));
@@ -57,8 +56,8 @@ test('hides participant input at the 12-option limit and keeps anonymous voters 
   }));
   render(<PollCard
     poll={pollFixture({ options, can_add_option: false, show_voter_names: false, has_voted: true, user_option_ids: [1], total_voters: 1 })}
-    onVote={jest.fn()}
-    onAddOption={jest.fn()}
+    onVote={vi.fn()}
+    onAddOption={vi.fn()}
   />);
 
   expect(screen.queryByLabelText('Добавить свой вариант')).not.toBeInTheDocument();
@@ -77,8 +76,8 @@ test('keeps the voters window open during mousedown and closes it on backdrop cl
         { id: 2, text: 'Казань', position: 1, created_by: 1, vote_count: 0, percentage: 0, is_winner: false, voters: [] },
       ],
     })}
-    onVote={jest.fn()}
-    onAddOption={jest.fn()}
+    onVote={vi.fn()}
+    onAddOption={vi.fn()}
   />);
 
   fireEvent.click(screen.getByRole('button', { name: /Посмотреть голоса/ }));
@@ -106,9 +105,9 @@ test('открытый список голосов не пропускает ж�
   // Карточка опроса живёт ВНУТРИ пузыря сообщения, поэтому события из неё
   // всплывают прямо в жесты строки .msg: тап по списку голосов открывал
   // контекстное меню сообщения под панелью, а удержание — режим выделения.
-  const onTouchStart = jest.fn();
-  const onContextMenu = jest.fn();
-  const onPointerDown = jest.fn();
+  const onTouchStart = vi.fn();
+  const onContextMenu = vi.fn();
+  const onPointerDown = vi.fn();
 
   const { container } = render(
     <div onTouchStart={onTouchStart} onContextMenu={onContextMenu} onPointerDown={onPointerDown}>

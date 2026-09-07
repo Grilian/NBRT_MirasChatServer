@@ -1062,8 +1062,8 @@ const Chat: React.FC = () => {
   useEffect(() => {
     const expiryTimers = typingExpiryTimers.current;
 
-    const newSocket = io(process.env.REACT_APP_SOCKET_URL || 'http://192.168.24.2', {
-        path: process.env.REACT_APP_SOCKET_PATH || '/MirasChatServer/socket.io'
+    const newSocket = io(import.meta.env.VITE_SOCKET_URL || 'http://192.168.24.2', {
+        path: import.meta.env.VITE_SOCKET_PATH || '/MirasChatServer/socket.io'
     });
     setSocket(newSocket);
 
@@ -2961,15 +2961,18 @@ const Chat: React.FC = () => {
       // поверх текущего экрана, а не меняет раздел. Смахнув на них, человек
       // упирался в тупик — активная вкладка не менялась, и следующий свайп
       // снова открывал то же окно.
-      const available = mobileSectionsFor(currentAccountType).filter((id) => id !== 'people');
+      // Тип задан явно: без него TypeScript 5 выводит для этого фильтра
+      // предикат и сужает элементы до «всё, кроме people», после чего
+      // сравнение с 'people' ниже по коду становится заведомо ложным — оно и
+      // было заведомо ложным, просто прежний компилятор об этом молчал.
+      const available: SectionId[] = mobileSectionsFor(currentAccountType).filter((id) => id !== 'people');
       const index = available.indexOf(section);
       if (index === -1) return;
       const next = available[index + direction];
       // На краях панели ничего не делаем: заворачивать список по кругу значит
       // уводить человека с «Главной» сразу в «Настройки» одним движением.
       if (!next) return;
-      if (next === 'people') setPeopleOpen(true);
-      else goToSection(next);
+      goToSection(next);
     },
   );
   // Защита раскладки: устаревшее состояние чата не должно влиять на другие

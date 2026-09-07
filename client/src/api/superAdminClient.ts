@@ -4,7 +4,7 @@ import axios from 'axios';
 // это другая учётная система, не должна путаться/конфликтовать с обычной
 // сессией сотрудника/МИРАС-логина в том же браузере.
 const superAdminApi = axios.create({
-  baseURL: process.env.REACT_APP_API_BASE_URL || 'http://192.168.24.2/MirasChatServer/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://192.168.24.2/MirasChatServer/api',
 });
 
 superAdminApi.interceptors.request.use((config) => {

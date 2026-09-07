@@ -1,8 +1,8 @@
 import { registerBackInterceptor, runTopBackInterceptor } from './backInterceptors';
 
 test('Back достаётся последнему открытому оверлею, а не первому', () => {
-  const lightbox = jest.fn();
-  const reactions = jest.fn();
+  const lightbox = vi.fn();
+  const reactions = vi.fn();
 
   const releaseLightbox = registerBackInterceptor(lightbox);
   const releaseReactions = registerBackInterceptor(reactions);
@@ -22,8 +22,8 @@ test('Back достаётся последнему открытому оверл
 });
 
 test('снятие перехвата в произвольном порядке не задевает чужие', () => {
-  const first = jest.fn();
-  const second = jest.fn();
+  const first = vi.fn();
+  const second = vi.fn();
 
   const releaseFirst = registerBackInterceptor(first);
   const releaseSecond = registerBackInterceptor(second);
@@ -42,7 +42,7 @@ test('снятие перехвата в произвольном порядке
 });
 
 test('повторное снятие перехвата ничего не ломает', () => {
-  const handler = jest.fn();
+  const handler = vi.fn();
   const release = registerBackInterceptor(handler);
   release();
   release();

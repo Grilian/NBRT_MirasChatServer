@@ -1,16 +1,16 @@
+import type { Mock } from 'vitest';
 import React from 'react';
-import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '../api/client';
 import HomeSection from './HomeSection';
 import { instantOf, todayKey } from '../calendar/dates';
 
-jest.mock('../api/client', () => ({
+vi.mock('../api/client', () => ({
   __esModule: true,
-  default: { get: jest.fn() },
+  default: { get: vi.fn() },
 }));
 
-const mockedApi = api as unknown as { get: jest.Mock };
+const mockedApi = api as unknown as { get: Mock };
 
 const TASKS = [
   { id: 1, title: 'Смета', status: 'not_started' },
@@ -43,7 +43,7 @@ beforeEach(() => {
 
 const setup = (unreadTotal = 18) => {
   const handlers = {
-    onOpenChats: jest.fn(), onOpenTasks: jest.fn(), onOpenCalendar: jest.fn(), onOpenCalendarEvent: jest.fn(), onOpenFiles: jest.fn(),
+    onOpenChats: vi.fn(), onOpenTasks: vi.fn(), onOpenCalendar: vi.fn(), onOpenCalendarEvent: vi.fn(), onOpenFiles: vi.fn(),
   };
   render(<HomeSection displayName="Алиса" unreadTotal={unreadTotal} {...handlers} />);
   return handlers;

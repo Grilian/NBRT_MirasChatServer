@@ -2,8 +2,7 @@ import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import NotificationStack, { ToastNotification } from './NotificationStack';
 
-jest.mock('./Avatar', () => () => <div />);
-
+vi.mock('./Avatar', () => ({ default: () => <div /> }));
 const threadToast: ToastNotification = {
   chatId: 'general',
   threadRootId: 42,
@@ -17,24 +16,24 @@ const threadToast: ToastNotification = {
 // звали onDismiss только с chatId, уведомление ветки не находилось: оно
 // оставалось висеть до нажатия крестика.
 test('автоскрытие тоста ветки передаёт threadRootId', () => {
-  jest.useFakeTimers();
-  const onDismiss = jest.fn();
+  vi.useFakeTimers();
+  const onDismiss = vi.fn();
 
   render(
-    <NotificationStack toasts={[threadToast]} durationMs={5000} onOpen={jest.fn()} onDismiss={onDismiss} />
+    <NotificationStack toasts={[threadToast]} durationMs={5000} onOpen={vi.fn()} onDismiss={onDismiss} />
   );
 
-  act(() => { jest.advanceTimersByTime(5000); });
+  act(() => { vi.advanceTimersByTime(5000); });
 
   expect(onDismiss).toHaveBeenCalledWith('general', 42);
-  jest.useRealTimers();
+  vi.useRealTimers();
 });
 
 test('крестик тоста ветки тоже передаёт threadRootId', () => {
-  const onDismiss = jest.fn();
+  const onDismiss = vi.fn();
 
   render(
-    <NotificationStack toasts={[threadToast]} durationMs={0} onOpen={jest.fn()} onDismiss={onDismiss} />
+    <NotificationStack toasts={[threadToast]} durationMs={0} onOpen={vi.fn()} onDismiss={onDismiss} />
   );
 
   act(() => { screen.getByLabelText('Закрыть уведомление').click(); });
