@@ -105,6 +105,7 @@ function renderAvatar(
   onOpenUserInfo: (userId: number) => void,
   onOpenGroupInfo: (chatGroupId: number) => void,
   onOpenGeneralInfo?: () => void,
+  unread = 0,
 ) {
   const avatar = (
     <Avatar
@@ -114,6 +115,7 @@ function renderAvatar(
       isGeneral={chat.section === 'general'}
       isGroup={chat.section === 'group'}
       isSelf={chat.section === 'self'}
+      unread={unread}
     />
   );
   if (chat.userId) {
@@ -463,14 +465,21 @@ const ChatList: React.FC<ChatListProps> = ({
           onClick={onOpenThreads}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenThreads(); } }}
         >
-          <span className="threads-roster-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" /></svg>
+          <span className="threads-roster-icon">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" /></svg>
+            {/* Счётчик на самом значке — в том же углу, что у чатов. Иначе в
+                компактном режиме, где от строки остаётся только значок, одна
+                метка висела бы сверху, а все остальные снизу. */}
+            {threadUnreadCount > 0 && (
+              <span className="avatar-unread" aria-label={`Непрочитанных обсуждений: ${threadUnreadCount}`}>
+                {threadUnreadCount > 99 ? '99+' : threadUnreadCount}
+              </span>
+            )}
           </span>
           <div className="row-body">
             <div className="row-top"><div className="row-name"><span>Ветки</span></div></div>
             <div className="row-bottom">
               <div className="row-preview">Все обсуждения</div>
-              {threadUnreadCount > 0 && <span className="row-unread">{threadUnreadCount}</span>}
             </div>
           </div>
         </div>
@@ -555,7 +564,7 @@ const ChatList: React.FC<ChatListProps> = ({
                   touchStart.current = null;
                 }}
               >
-                {renderAvatar(chat, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo)}
+                {renderAvatar(chat, onOpenUserInfo, onOpenGroupInfo, onOpenGeneralInfo, unreadCount)}
                 <div className="row-body">
                   <div className="row-top">
                     <div className="row-name">

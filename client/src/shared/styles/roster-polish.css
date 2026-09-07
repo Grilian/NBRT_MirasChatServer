@@ -6,10 +6,16 @@
    прозрачными полями. Не превращаем их в круглую фотографию и не обрезаем
    углы: картинка должна сохранить собственный силуэт и альфа-канал. */
 .avatar.avatar-photo {
-  object-fit: contain;
   border-radius: 0;
   background: transparent;
   background-color: transparent;
+}
+/* Раньше `.avatar-photo` был самой картинкой. Теперь это обёртка: внутри
+   лежит логотип, а рядом с ним — счётчик непрочитанного, которому нужен
+   позиционирующий родитель. Правило про силуэт переехало на картинку. */
+.avatar-photo-img {
+  width: 100%; height: 100%;
+  object-fit: contain;
 }
 .row-avatar-btn:has(.avatar-photo) { border-radius: var(--radius-sm); }
 
