@@ -27,6 +27,21 @@ import CalendarSection from '@/features/calendar/CalendarSection';
 import PeopleSection from '@/features/contacts/PeopleSection';
 import NotificationStack, { ToastNotification } from '@/features/notifications/NotificationStack';
 import api from '@/shared/api/client';
+import type { ChatGroupSummary, LastMessage, Message, User } from '@/shared/api/types';
+import {
+  archiveAttachment, clearChat, fetchHistory, fetchHistoryBefore, fetchHistoryFrom,
+  fetchLastMessages, fetchRecentChats, fetchUnread, markChatOpened, markThreadRead,
+  setChatMuted, uploadFile, uploadImage,
+  fetchPinnedChats, pinChat, unpinChat, fetchMutedChats,
+} from './api';
+import {
+  addContact, fetchComments, fetchContacts, fetchDirectory, removeContact, saveComment,
+} from '@/features/contacts/api';
+import { fetchEmojiCatalog } from '@/features/emoji/api';
+import { fetchStickerCatalog } from '@/features/stickers/api';
+import { deleteGroupMessages, fetchGroups } from '@/features/groups/api';
+import { deleteOwnAccount, fetchMe, fetchModeratedGroups } from '@/features/settings/api';
+import { fetchThreadInbox, fetchThreadSummary } from '@/features/threads/api';
 import { nameFor } from '@/shared/lib/user';
 import { renderUnreadBadge } from '@/shared/platform/badgeIcon';
 import { describeStatus } from '@/features/status/statusMeta';
@@ -35,8 +50,8 @@ import StatusSheet from '@/features/status/StatusSheet';
 import PollCreator from '@/features/polls/PollCreator';
 import ThreadPanel from '@/features/threads/ThreadPanel';
 import ThreadInbox from '@/features/threads/ThreadInbox';
-import { Poll, PollDraft } from '@/features/polls/poll';
-import { ThreadInboxItem, ThreadSummary } from '@/features/threads/thread';
+import { Poll, PollDraft } from '@/shared/api/poll';
+import { ThreadInboxItem, ThreadSummary } from '@/shared/api/thread';
 import { CustomEmojiMap, buildEmojiMap, toPlainText, setEmojiAnimationEnabled } from '@/features/emoji/customEmoji';
 import { applyChatWallpaper } from './chatWallpaper';
 import { invalidateEmojiPackCache } from '@/features/emoji/EmojiPicker';
@@ -93,79 +108,6 @@ import {
   storeOutgoingAttachment,
 } from './outgoingAttachments';
 
-interface User {
-  id: number;
-  username: string;
-  display_name: string | null;
-  avatar_path: string | null;
-  bio: string | null;
-  phone: string | null;
-  department: string | null;
-  position: string | null;
-  birth_date: string | null;
-  group_id: number | null;
-  group_name: string | null;
-  status_preset?: string | null;
-  status_custom?: string | null;
-}
-interface Message {
-  id: number;
-  chat_id?: string;
-  text: string;
-  file_path?: string | null;
-  file_width?: number | null;
-  file_height?: number | null;
-  local_file_url?: string | null;
-  /** Ссылка на элемент пака — картинка резолвится через каталог стикеров. */
-  sticker_id?: number | null;
-  /**
-   * Копия эмодзи стикера НА МОМЕНТ ОТПРАВКИ. В отличие от смайлика, стикер
-   * не может деградировать до текста при удалении картинки в админке —
-   * этот глиф и есть запасной вариант рендера.
-   */
-  sticker_fallback?: string | null;
-  /** Файл: путь, показанное человеку имя, размер и тип. */
-  document_path?: string | null;
-  document_name?: string | null;
-  document_size?: number | null;
-  document_mime?: string | null;
-  /** Вложение убрано в архив: файл с диска уехал в zip, сообщение осталось. */
-  attachment_archived_at?: number | null;
-  sender_id: number;
-  username: string;
-  display_name?: string | null;
-  avatar_path?: string | null;
-  created_at: string;
-  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
-  client_message_id?: string | null;
-  delivery_error?: string;
-  reply_to_id?: number | null;
-  reply_to_text?: string | null;
-  reply_to_file?: string | null;
-  reply_to_sticker_fallback?: string | null;
-  reply_to_document_name?: string | null;
-  reply_to_author?: string | null;
-  reply_to_deleted?: number | boolean | null;
-  forwarded_from_name?: string | null;
-  forwarded_from_chat?: string | null;
-  /** Личная отметка о прочтении — единственный достоверный признак в общих чатах. */
-  read_by_me?: number | boolean;
-  edited_at?: string | null;
-  deleted?: boolean | number;
-  /** Сколько человек прочитало — только в каналах-объявлениях. */
-  read_count?: number;
-  reactions?: MessageReaction[];
-  poll?: Poll;
-  thread?: ThreadSummary;
-  /** Сервером подтверждённый сигнал администратора, обходящий локальное глушение. */
-  force_notification?: boolean;
-}
-interface LastMessage {
-  chat_id: string;
-  text: string;
-  file_path?: string | null;
-  created_at: string;
-}
 
 /** Превью текста сообщения там, где картинка без подписи не даёт ничего показать. */
 // Текст для уведомлений — и всплывающих, и системных. Картинку там не
@@ -175,23 +117,6 @@ function previewText(text: string, filePath?: string | null, emojiMap: CustomEmo
   const plain = toPlainText(text || '', emojiMap);
   if (plain) return plain;
   return filePath ? '📷 Фото' : '';
-}
-interface ChatGroupSummary {
-  id: number;
-  chat_id: string;
-  name: string;
-  created_by: number;
-  created_at: number;
-  member_count: number;
-  role: 'owner' | 'member';
-  announcements_only: boolean;
-  /** Фото профиля группы — ставит владелец. */
-  avatar_path?: string | null;
-  write_policy: WritePolicy;
-  write_user_ids: number[];
-  write_department_ids: number[];
-  /** Считает сервер под конкретного зрителя — клиент эту логику не повторяет. */
-  can_post?: boolean;
 }
 interface AllUser {
   id: number;
@@ -292,7 +217,7 @@ const Chat: React.FC = () => {
   const loadThreadInbox = useCallback(async () => {
     setThreadInboxLoading(true);
     try {
-      const { data } = await api.get<ThreadInboxItem[]>('/messages/threads');
+      const data = await fetchThreadInbox();
       setThreadInboxItems(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(error);
@@ -329,8 +254,8 @@ const Chat: React.FC = () => {
   const unreadFetchSeq = useRef(0);
   const refetchUnread = useCallback((zeroChatId?: string) => {
     const seq = ++unreadFetchSeq.current;
-    api.get('/unread')
-      .then(({ data }) => {
+    fetchUnread()
+      .then((data) => {
         if (seq !== unreadFetchSeq.current) return;
         // Только что открытый чат гасим сразу: сервер в этот момент ещё
         // считает его непрочитанным (отметка уходит отдельным событием чуть
@@ -369,8 +294,9 @@ const Chat: React.FC = () => {
     setRecentChatIds(prev => prev.includes(chatId)
       ? [chatId, ...prev.filter(id => id !== chatId)].slice(0, 8)
       : prev);
-    api.post(`/messages/meta/recent/${encodeURIComponent(chatId)}`)
-      .then(({ data }) => applyRecentChats(data))
+    markChatOpened(chatId)
+      .then(() => fetchRecentChats())
+      .then(applyRecentChats)
       .catch(console.error);
   }, [applyRecentChats]);
   // Текст сообщения, из которого заводят задачу («Создать задачу» в меню
@@ -500,15 +426,15 @@ const Chat: React.FC = () => {
   const [mutedChatIds, setMutedChatIds] = useState<Set<string>>(new Set());
   useEffect(() => {
     let cancelled = false;
-    api.get<{ muted_chat_ids: string[] }>('/notification-settings')
-      .then(({ data }) => {
-        if (!cancelled) setMutedChatIds(new Set(data.muted_chat_ids || []));
+    fetchMutedChats()
+      .then((ids) => {
+        if (!cancelled) setMutedChatIds(new Set(ids));
       })
       .catch((error) => console.error('Не удалось загрузить настройки уведомлений:', error));
     return () => { cancelled = true; };
   }, []);
   const updateChatNotificationMute = useCallback(async (chatId: string, muted: boolean) => {
-    await api.put(`/notification-settings/${encodeURIComponent(chatId)}`, { muted });
+    await setChatMuted(chatId, muted);
     setMutedChatIds((current) => {
       const next = new Set(current);
       if (muted) next.add(chatId); else next.delete(chatId);
@@ -689,8 +615,8 @@ const Chat: React.FC = () => {
   // смайлика переводила бы всю старую переписку обратно в текст :name:.
   const [customEmoji, setCustomEmoji] = useState<CustomEmojiMap>({});
   const reloadEmojiCatalog = useCallback(() => {
-    api.get('/emoji/catalog')
-      .then(({ data }) => setCustomEmoji(buildEmojiMap(data)))
+    fetchEmojiCatalog()
+      .then((data) => setCustomEmoji(buildEmojiMap(data)))
       .catch(() => { /* без каталога коды останутся текстом — не фатально */ });
   }, []);
   useEffect(() => { reloadEmojiCatalog(); }, [reloadEmojiCatalog]);
@@ -700,8 +626,8 @@ const Chat: React.FC = () => {
   // пака не должно оставлять в старой переписке пустое место.
   const [stickerCatalog, setStickerCatalog] = useState<StickerCatalog>({});
   const reloadStickerCatalog = useCallback(() => {
-    api.get('/stickers/catalog')
-      .then(({ data }) => setStickerCatalog(buildStickerCatalog(data)))
+    fetchStickerCatalog()
+      .then((data) => setStickerCatalog(buildStickerCatalog(data)))
       .catch(() => { /* без каталога останется эмодзи-заглушка — не фатально */ });
   }, []);
   useEffect(() => { reloadStickerCatalog(); }, [reloadStickerCatalog]);
@@ -898,7 +824,7 @@ const Chat: React.FC = () => {
   // числе если её только что назначили живьём, без перелогина).
   useEffect(() => {
     if (currentUserRole !== 'admin') return;
-    api.get('/moderation/groups').then(({ data }) => setGroups(data)).catch(console.error);
+    fetchModeratedGroups().then(setGroups).catch(console.error);
   }, [currentUserRole]);
 
   // Красная точка в трее/оверлей на таскбаре (desktop) и счётчик в заголовке
@@ -1116,7 +1042,7 @@ const Chat: React.FC = () => {
       // истекают и не переиздаются, так что это единственный способ подобрать
       // поля, добавленные в приложение уже после того, как человек залогинился
       // (например, role для встроенного админ-управления), без перелогина.
-      api.get('/users/me').then(({ data }) => {
+      fetchMe().then((data: any) => {
         setCurrentUsername(data.username);
         setCurrentDisplayName(data.display_name);
         setCurrentAvatarPath(data.avatar_path);
@@ -1156,16 +1082,16 @@ const Chat: React.FC = () => {
         localStorage.setItem('statusCustom', data.status_custom || '');
       }).catch(console.error);
 
-      api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
+      fetchContacts().then(setUsers).catch(console.error);
       refetchUnread();
-      api.get('/favorites').then(({ data }) => setFavorites(data)).catch(console.error);
-      api.get('/comments').then(({ data }) => setComments(data)).catch(console.error);
-      api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
-      api.get('/messages/meta/recent').then(({ data }) => applyRecentChats(data)).catch(console.error);
-      api.get('/groups').then(({ data }) => setChatGroups(data)).catch(console.error);
+      fetchPinnedChats().then(setFavorites).catch(console.error);
+      fetchComments().then(setComments).catch(console.error);
+      fetchLastMessages().then(setLastMessages).catch(console.error);
+      fetchRecentChats().then(applyRecentChats).catch(console.error);
+      fetchGroups().then(setChatGroups).catch(console.error);
       // Только для профиля людей, ещё не добавленных в контакты — см.
       // DirectoryUser выше и infoModalUser ниже.
-      api.get('/users').then(({ data }) => setDirectory(data)).catch(console.error);
+      fetchDirectory().then(setDirectory).catch(console.error);
 
       // Каталог кастомных смайликов раньше тянулся только один раз при
       // монтировании — если пак создали УЖЕ ПОСЛЕ этого, или самый первый
@@ -1205,13 +1131,13 @@ const Chat: React.FC = () => {
     // потерялось (короткий разрыв связи и т.п.), чтобы ростер не застревал в
     // состоянии на момент открытия вкладки.
     const rosterRefreshInterval = setInterval(() => {
-      api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
+      fetchContacts().then(setUsers).catch(console.error);
     }, 30000);
 
     // Кто-то написал впервые (или мы сами добавили из справочника) —
     // обновляем список контактов, не дожидаясь очередного 30-секундного опроса.
     newSocket.on('contact_added', () => {
-      api.get('/contacts').then(({ data }) => setUsers(data)).catch(console.error);
+      fetchContacts().then(setUsers).catch(console.error);
     });
 
     newSocket.on('online_users', (userIds: number[]) => setOnlineUsers(userIds));
@@ -1285,7 +1211,7 @@ const Chat: React.FC = () => {
       // отображалось как «Сообщение удалено». Перечитываем превью с сервера:
       // локально мы не знаем, какое сообщение стало последним, если удалили
       // как раз его.
-      api.get('/messages/meta/last').then(({ data }) => setLastMessages(data)).catch(console.error);
+      fetchLastMessages().then(setLastMessages).catch(console.error);
     });
 
     // Вложение убрали в архив. Сообщение остаётся, файл исчезает у всех сразу:
@@ -1305,7 +1231,7 @@ const Chat: React.FC = () => {
         }
         : m)));
       // Превью в списке чатов могло держаться на этом вложении.
-      api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
+      fetchLastMessages().then(setLastMessages).catch(console.error);
     });
 
     // Переписку очистили — у второй стороны она обязана опустеть сразу, а не
@@ -1336,7 +1262,7 @@ const Chat: React.FC = () => {
     // в отличие от deleted, где строка ещё живёт со снятым содержимым.
     newSocket.on('message_hidden', (data: { id: number; chat_id: string }) => {
       setMessages(prev => prev.filter(m => m.id !== data.id));
-      api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
+      fetchLastMessages().then(setLastMessages).catch(console.error);
       refetchUnread();
     });
 
@@ -1355,7 +1281,7 @@ const Chat: React.FC = () => {
     // message_deleted, но сразу на список id.
     newSocket.on('messages_deleted', (data: { chat_id: string; ids: number[] }) => {
       setMessages(prev => prev.map(m => data.ids.includes(m.id) ? { ...m, deleted: true, text: '' } : m));
-      api.get('/messages/meta/last').then(({ data: last }) => setLastMessages(last)).catch(console.error);
+      fetchLastMessages().then(setLastMessages).catch(console.error);
     });
 
     // Задачи. tasks_changed — сигнал перечитать список (кто-то из причастных
@@ -1409,7 +1335,7 @@ const Chat: React.FC = () => {
       // can_post считается под конкретного зрителя, а это событие одно на всех
       // участников — в нём его нет. После смены прав перечитываем список, иначе
       // у человека остался бы composer от прежней политики.
-      api.get('/groups').then(({ data }) => setChatGroups(data)).catch(console.error);
+      fetchGroups().then(setChatGroups).catch(console.error);
     });
     newSocket.on('group_removed', (data: { id: number; chat_id: string }) => {
       setChatGroups(prev => prev.filter(g => g.id !== data.id));
@@ -1501,18 +1427,13 @@ const Chat: React.FC = () => {
       refetchUnread();
 
       if (liveActiveChat) {
-        api.get(`/messages/${liveActiveChat}?limit=50&offset=0`)
-          .then(({ data }) => {
+        fetchHistory(liveActiveChat)
+          .then((data) => {
             // Пока ответ шёл, человек мог уйти в другой чат — тогда эта история
             // уже чужая и применять её нельзя.
             if (resumeRef.current.activeChat !== liveActiveChat) return;
-            if (data.messages) {
-              setMessages(data.messages);
-              setHasMore(data.hasMore);
-            } else {
-              setMessages(data);
-              setHasMore(false);
-            }
+            setMessages(data.messages);
+            setHasMore(data.hasMore);
           })
           .catch(console.error);
       }
@@ -1709,8 +1630,8 @@ const Chat: React.FC = () => {
       // Список веток здесь не перечитываем: сервер шлёт это событие вместе с
       // thread_message, а тот уже дёргает loadThreadInbox. Два перезапроса
       // полного списка на каждый ответ — и так у каждого участника чата.
-      api.get<ThreadSummary>(`/messages/threads/${rootId}/summary`)
-        .then(({ data }) => updateThreadSummary(rootId, data))
+      fetchThreadSummary(rootId)
+        .then((summary) => updateThreadSummary(rootId, summary))
         .catch((error) => {
           if (error.response?.status !== 404) console.error(error);
         });
@@ -1810,34 +1731,29 @@ const Chat: React.FC = () => {
       // будет не к чему.
       const focusTarget = pendingFocusRef.current;
       pendingFocusRef.current = null;
-      const url = focusTarget !== null
-        ? `/messages/${activeChat}?from=${focusTarget}`
-        : `/messages/${activeChat}?limit=50&offset=0`;
-      api.get(url)
-        .then(({ data }) => {
+      const load = focusTarget !== null
+        ? fetchHistoryFrom(activeChat, focusTarget)
+        : fetchHistory(activeChat);
+      load
+        .then((data) => {
           if (cancelled) return;
-          if (data.messages) {
-            // Сообщение слишком далеко: окно вышло бы больше предела, и лента
-            // получилась бы с дырой. Показываем конец переписки как обычно и
-            // говорим об этом прямо, а не молча открываем не то место.
-            if (data.truncated) {
-              setAttachmentNotice('Сообщение слишком далеко в истории — пролистайте переписку вверх');
-              api.get(`/messages/${activeChat}?limit=50&offset=0`)
-                .then((fallback) => {
-                  if (cancelled) return;
-                  setMessages(fallback.data.messages || fallback.data);
-                  setHasMore(!!fallback.data.hasMore);
-                })
-                .catch(console.error);
-              return;
-            }
-            setMessages(data.messages);
-            setHasMore(data.hasMore);
-            if (focusTarget !== null) setFocusMessageId(focusTarget);
-          } else {
-            setMessages(data);
-            setHasMore(false);
+          // Сообщение слишком далеко: окно вышло бы больше предела, и лента
+          // получилась бы с дырой. Показываем конец переписки как обычно и
+          // говорим об этом прямо, а не молча открываем не то место.
+          if (data.truncated) {
+            setAttachmentNotice('Сообщение слишком далеко в истории — пролистайте переписку вверх');
+            fetchHistory(activeChat)
+              .then((fallback) => {
+                if (cancelled) return;
+                setMessages(fallback.messages);
+                setHasMore(fallback.hasMore);
+              })
+              .catch(console.error);
+            return;
           }
+          setMessages(data.messages);
+          setHasMore(data.hasMore);
+          if (focusTarget !== null) setFocusMessageId(focusTarget);
         })
         .catch(console.error);
       // Счётчик открытого чата гасим локально и не даём серверному ответу
@@ -1887,8 +1803,8 @@ const Chat: React.FC = () => {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const { data } = await api.get(`/messages/${activeChat}?limit=50&before=${oldestId}`);
-      if (data.messages) {
+      const data = await fetchHistoryBefore(activeChat, oldestId);
+      {
         // Второй пояс к защёлке: даже если страница каким-то образом придёт
         // дважды, уже показанные id отсеются и в список ничего не задвоится.
         setMessages(prev => {
@@ -1969,7 +1885,7 @@ const Chat: React.FC = () => {
       setThreadInboxItems((previous) => previous.map((item) => ({
         ...item, summary: { ...item.summary, unread_count: 0 },
       })));
-      void Promise.all(unreadRoots.map((rootId) => api.post(`/messages/threads/${rootId}/read`)))
+      void Promise.all(unreadRoots.map((rootId) => markThreadRead(rootId)))
         .then(() => loadThreadInbox())
         .catch(console.error);
     }
@@ -1999,7 +1915,7 @@ const Chat: React.FC = () => {
   const handleClearChat = async (chatId: string, chatName: string) => {
     if (!window.confirm(`Очистить переписку с «${chatName}»?`)) return;
     try {
-      await api.post(`/messages/${encodeURIComponent(chatId)}/clear`);
+      await clearChat(chatId);
       if (chatId === activeChat) setMessages([]);
       setLastMessages((prev) => {
         const next = { ...prev };
@@ -2023,10 +1939,10 @@ const Chat: React.FC = () => {
   const toggleFavorite = async (chatId: string) => {
     try {
       if (favorites.includes(chatId)) {
-        await api.delete(`/favorites/${chatId}`);
+        await unpinChat(chatId);
         setFavorites(prev => prev.filter(id => id !== chatId));
       } else {
-        await api.post('/favorites', { chat_id: chatId });
+        await pinChat(chatId);
         setFavorites(prev => [...prev, chatId]);
       }
     } catch (e) {
@@ -2041,7 +1957,7 @@ const Chat: React.FC = () => {
   // сервер, но не показался бы в списке чатов до следующей перезагрузки.
   const updateComment = async (targetUserId: number, comment: string) => {
     try {
-      await api.post('/comments', { target_user_id: targetUserId, comment });
+      await saveComment(targetUserId, comment);
       const user = allUsers.find(u => u.id === targetUserId) || directory.find(u => u.id === targetUserId);
       if (user) {
         setComments(prev => ({
@@ -2218,7 +2134,7 @@ const Chat: React.FC = () => {
         if (!stored) throw new Error('attachment_missing');
         const form = new FormData();
         form.append('image', stored.blob, stored.name);
-        const { data } = await api.post('/messages/upload-image', form);
+        const data = await uploadImage(form);
         sendingItem = {
           ...item,
           attempts: attempt,
@@ -2365,7 +2281,7 @@ const Chat: React.FC = () => {
     try {
       const form = new FormData();
       form.append('file', file);
-      const { data } = await api.post('/messages/upload-file', form);
+      const data = await uploadFile(form);
       await enqueueOutgoing({
         chatId: activeChat,
         text: '',
@@ -2473,7 +2389,7 @@ const Chat: React.FC = () => {
     closeKeyboard();
     setView(VIEW_CONVERSATION);
     try {
-      await api.post(`/contacts/${user.id}`);
+      await addContact(user.id);
     } catch (e) {
       console.error('Ошибка добавления контакта:', e);
     }
@@ -2503,8 +2419,8 @@ const Chat: React.FC = () => {
         setFocusMessageId(messageId);
         return;
       }
-      api.get(`/messages/${targetChat}?from=${messageId}`)
-        .then(({ data }) => {
+      fetchHistoryFrom(targetChat, messageId)
+        .then((data) => {
           if (data.truncated) {
             setAttachmentNotice('Сообщение слишком далеко в истории — пролистайте переписку вверх');
             return;
@@ -2528,7 +2444,7 @@ const Chat: React.FC = () => {
   const handleAddContact = async (user: { id: number; username: string; display_name: string | null; avatar_path: string | null; group_id: number | null; group_name: string | null }) => {
     setUsers(prev => prev.some(u => u.id === user.id) ? prev : [...prev, { ...user, bio: null, phone: null, department: null, position: null, birth_date: null }]);
     try {
-      await api.post(`/contacts/${user.id}`);
+      await addContact(user.id);
     } catch (e) {
       console.error('Ошибка добавления контакта:', e);
     }
@@ -2541,7 +2457,7 @@ const Chat: React.FC = () => {
     }
     setUsers(prev => prev.filter(u => u.id !== userId));
     try {
-      await api.delete(`/contacts/${userId}`);
+      await removeContact(userId);
     } catch (e) {
       console.error('Ошибка удаления контакта:', e);
     }
@@ -2603,7 +2519,7 @@ const Chat: React.FC = () => {
     // сокетом: там область действия передаётся флагом.
     const bulkInGroup = forEveryone && request.isGroup && activeChatMeta?.chatGroupId && request.ids.length > 1;
     if (bulkInGroup) {
-      api.post(`/groups/${activeChatMeta!.chatGroupId}/messages/delete`, { ids: request.ids }).catch(console.error);
+      deleteGroupMessages(activeChatMeta!.chatGroupId!, request.ids).catch(console.error);
       return;
     }
 
@@ -2664,7 +2580,7 @@ const Chat: React.FC = () => {
       return;
     }
     try {
-      await api.delete('/users/me');
+      await deleteOwnAccount();
     } catch (e) {
       console.error('Ошибка удаления аккаунта:', e);
     }

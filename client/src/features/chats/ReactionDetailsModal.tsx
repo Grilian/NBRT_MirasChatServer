@@ -1,3 +1,5 @@
+import type { MessageReaction } from '@/shared/api/types';
+export type { MessageReaction };
 import React, { useEffect } from 'react';
 import { registerBackInterceptor } from '@/shared/hooks/backInterceptors';
 import Avatar from '@/shared/ui/Avatar';
@@ -5,16 +7,6 @@ import { nameFor } from '@/shared/lib/user';
 import { formatMoscowDateTime } from '@/shared/lib/time';
 import { CustomEmojiMap, renderTextWithEmoji } from '@/features/emoji/customEmoji';
 
-export interface MessageReaction {
-  emoji: string;
-  created_at: number;
-  user: {
-    id: number;
-    username: string;
-    display_name: string | null;
-    avatar_path: string | null;
-  };
-}
 
 interface ReactionDetailsModalProps {
   reactions: MessageReaction[];

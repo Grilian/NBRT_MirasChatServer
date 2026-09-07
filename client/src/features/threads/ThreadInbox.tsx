@@ -1,6 +1,6 @@
 import React from 'react';
 import Avatar from '@/shared/ui/Avatar';
-import { ThreadInboxItem } from './thread';
+import { ThreadInboxItem } from '@/shared/api/thread';
 import { CustomEmojiMap, renderTextWithEmoji } from '@/features/emoji/customEmoji';
 import { formatChatListTime } from '@/shared/lib/time';
 

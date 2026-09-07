@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Avatar from '@/shared/ui/Avatar';
-import { Poll } from './poll';
+import { Poll } from '@/shared/api/poll';
 import { registerBackInterceptor } from '@/shared/hooks/backInterceptors';
 
 interface PollCardProps {

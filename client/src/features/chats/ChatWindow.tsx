@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { Message } from '@/shared/api/types';
 import { captureScrollAnchor, didAppendNewestMessage, restoreScrollAnchor, ScrollAnchorSnapshot } from '@/shared/hooks/scrollAnchor';
 import { nameFor } from '@/shared/lib/user';
 import { formatDaySeparator, formatMoscowDateTime, formatMoscowTime, moscowDayKey } from '@/shared/lib/time';
@@ -15,51 +16,9 @@ import Avatar from '@/shared/ui/Avatar';
 import ReactionDetailsModal, { MessageReaction } from './ReactionDetailsModal';
 import ImageLightbox from '@/shared/ui/ImageLightbox';
 import PollCard from '@/features/polls/PollCard';
-import { Poll } from '@/features/polls/poll';
-import { ThreadSummary } from '@/features/threads/thread';
+import { Poll } from '@/shared/api/poll';
+import { ThreadSummary } from '@/shared/api/thread';
 
-interface Message {
-  id: number;
-  text: string;
-  file_path?: string | null;
-  file_width?: number | null;
-  file_height?: number | null;
-  local_file_url?: string | null;
-  /** Стикер — самостоятельный тип сообщения, не вложение (см. stickerCatalog). */
-  sticker_id?: number | null;
-  sticker_fallback?: string | null;
-  document_path?: string | null;
-  document_name?: string | null;
-  /** Вложение убрано в архив: файла больше нет, сообщение осталось. */
-  attachment_archived_at?: number | null;
-  document_size?: number | null;
-  document_mime?: string | null;
-  sender_id: number;
-  username: string;
-  display_name?: string | null;
-  created_at: string;
-  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
-  client_message_id?: string | null;
-  delivery_error?: string;
-  edited_at?: string | null;
-  deleted?: boolean | number;
-  /** Когда прочитали — только в личной переписке (см. readReceipts.js). */
-  read_at?: number | null;
-  /** Сколько человек прочитало — приходит только в каналах-объявлениях. */
-  read_count?: number;
-  reply_to_id?: number | null;
-  reply_to_text?: string | null;
-  reply_to_file?: string | null;
-  reply_to_sticker_fallback?: string | null;
-  reply_to_document_name?: string | null;
-  reply_to_author?: string | null;
-  reply_to_deleted?: number | boolean | null;
-  forwarded_from_name?: string | null;
-  forwarded_from_chat?: string | null;
-  reactions?: MessageReaction[];
-  poll?: Poll;
-  thread?: ThreadSummary;
-}
 
 interface ChatWindowProps {
   chatId: string | null;

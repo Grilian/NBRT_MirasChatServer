@@ -11,8 +11,8 @@ import { CustomEmojiMap, renderMessageText } from '@/features/emoji/customEmoji'
 import { StickerCatalog } from '@/features/stickers/stickerCatalog';
 import { resolveUploadUrl } from '@/shared/lib/uploads';
 import { formatMoscowTime } from '@/shared/lib/time';
-import { Poll, PollDraft } from '@/features/polls/poll';
-import { ThreadSummary } from './thread';
+import { Poll, PollDraft } from '@/shared/api/poll';
+import { ThreadSummary } from '@/shared/api/thread';
 
 interface ThreadMessage {
   id: number;

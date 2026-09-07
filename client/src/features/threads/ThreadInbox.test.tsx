@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import ThreadInbox from './ThreadInbox';
-import { ThreadInboxItem } from './thread';
+import { ThreadInboxItem } from '@/shared/api/thread';
 
 const item: ThreadInboxItem = {
   root_id: 17,

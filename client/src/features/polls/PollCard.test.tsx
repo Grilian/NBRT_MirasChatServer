@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import PollCard from './PollCard';
-import { Poll } from './poll';
+import { Poll } from '@/shared/api/poll';
 
 function pollFixture(overrides: Partial<Poll> = {}): Poll {
   return {

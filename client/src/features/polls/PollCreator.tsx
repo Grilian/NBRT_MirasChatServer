@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { PollDraft } from './poll';
+import { PollDraft } from '@/shared/api/poll';
 import { acquireStandardKeyboardResizeMode } from '@/shared/platform/mobileKeyboard';
 
 interface PollCreatorProps {
