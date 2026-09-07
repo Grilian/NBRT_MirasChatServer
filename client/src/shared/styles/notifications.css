@@ -59,7 +59,7 @@
 
 /* ---- Settings / profile ---- */
 .settings-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--paper); }
-.settings-body { flex: 1; overflow-y: auto; padding: 18px 20px 40px; background: var(--paper-sunken); }
+.settings-body { flex: 1; overflow-y: auto; background: var(--paper-sunken); }
 .settings-title { font-weight: 600; font-size: 15px; }
 
 .profile-card { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 0 26px; }
@@ -191,3 +191,83 @@
 .profile-form .field:last-of-type { margin-bottom: 20px; }
 .form-error { color: var(--unread); font-size: 13.5px; font-weight: 500; margin: 0 0 12px; }
 .form-success { color: var(--online); font-size: 13.5px; font-weight: 500; margin: 0 0 12px; }
+
+/* ===== Настройки: оглавление слева, раздел справа =====
+   Раньше настройки были одним свитком: чтобы добраться до ночного режима,
+   приходилось пролистать список чатов, переписку, фон и все уведомления.
+
+   На узком экране это два УРОВНЯ, а не две колонки: сначала оглавление, потом
+   раздел с возвратом. Двухколоночная раскладка на 360px дала бы две
+   нечитаемые колонки вместо одной читаемой. */
+.settings-body {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 0;
+  align-items: start;
+  padding: 0;
+}
+.settings-nav {
+  position: sticky; top: 0; align-self: stretch;
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-4) var(--space-3) var(--space-4) var(--space-4);
+  background: var(--paper); border-right: 1px solid var(--line);
+  min-height: 100%;
+}
+.settings-nav .profile-card {
+  padding: var(--space-2) var(--space-2) var(--space-5);
+  border: none; background: none; cursor: pointer; font: inherit; color: inherit;
+  border-radius: var(--radius-md);
+}
+.settings-nav .profile-card:hover { background: var(--row-hover); }
+.settings-nav .profile-card .avatar { width: 56px; height: 56px; font-size: 20px; margin-bottom: var(--space-2); }
+.settings-nav .profile-card .name { font-size: 15px; }
+.settings-nav-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: var(--space-3); }
+.settings-nav-title {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  font: 600 var(--text-xs)/var(--leading-xs) var(--font-ui);
+  letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint);
+}
+.settings-nav-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); cursor: pointer; text-align: left;
+  border: none; border-radius: var(--radius-md); background: none; color: var(--ink);
+  font: 500 var(--text-sm)/var(--leading-sm) var(--font-ui);
+}
+.settings-nav-item:hover { background: var(--row-hover); }
+.settings-nav-item.is-active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+/* Название раздела не обрезается: их шесть, и все короткие — а если появится
+   длинное, правильнее перенести, чем спрятать. */
+.settings-nav-name { flex: 1; min-width: 0; }
+.settings-nav-item .chevron { flex: none; color: var(--ink-faint); }
+/* Стрелка — признак «уйдём на следующий уровень», и на широком экране, где
+   ничего никуда не уходит, она лишняя. */
+.settings-nav .chevron { display: none; }
+.settings-nav .app-version { margin-top: auto; text-align: left; padding: var(--space-4) var(--space-2) 0; }
+
+.settings-pane {
+  min-width: 0; padding: var(--space-4) var(--space-5) var(--space-8);
+  background: var(--paper-sunken);
+}
+/* Возврат к оглавлению — только на узком экране. */
+.settings-pane-back { display: none; }
+
+@media (max-width: 760px) {
+  .settings-body { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav {
+    position: static; border-right: none; min-height: 0;
+    padding: var(--space-4) var(--space-4) var(--space-6);
+  }
+  .settings-nav .chevron { display: block; }
+  .settings-nav-item { padding: var(--space-3); }
+  /* Открытый раздел занимает экран целиком: оглавление осталось уровнем
+     выше, и показывать его обрубком над разделом незачем. */
+  .settings-body.is-section-open .settings-nav { display: none; }
+  .settings-body:not(.is-section-open) .settings-pane { display: none; }
+  .settings-pane { padding: var(--space-2) var(--space-4) var(--space-6); }
+  .settings-pane-back {
+    display: flex; align-items: center; gap: var(--space-2); width: 100%;
+    padding: var(--space-3) var(--space-1); margin-bottom: var(--space-2);
+    border: none; background: none; cursor: pointer; color: var(--ink);
+    font: 600 var(--text-md)/var(--leading-md) var(--font-display);
+  }
+}

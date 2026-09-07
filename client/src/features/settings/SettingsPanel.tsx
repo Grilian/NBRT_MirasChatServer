@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { registerBackInterceptor } from '@/shared/hooks/backInterceptors';
 import Avatar from '@/shared/ui/Avatar';
 import api from '@/shared/api/client';
 import { applyChatWallpaper } from '@/features/chats/chatWallpaper';
@@ -39,6 +40,39 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: 'Тёмная' },
 ];
 
+/**
+ * Оглавление настроек.
+ *
+ * Группы взяты из концепции: личное (то, что человек настраивает под себя) и
+ * системное (то, что относится к устройству и учётной записи). Разделение не
+ * косметическое: за «Оформлением» и «Уведомлениями» приходят часто, а в
+ * «Подключение» и «Аккаунт» — раз в год, и держать их вперемешку одним свитком
+ * значит каждый раз пролистывать редкое ради частого.
+ */
+type SettingsSectionId = 'appearance' | 'chats' | 'notifications' | 'app' | 'connection' | 'account';
+
+const SECTION_LABELS: Record<SettingsSectionId, string> = {
+  appearance: 'Оформление',
+  chats: 'Чаты',
+  notifications: 'Уведомления',
+  app: 'Приложение',
+  connection: 'Подключение',
+  account: 'Аккаунт',
+};
+
+const NAV_GROUPS: { label: string; items: { id: SettingsSectionId; label: string }[] }[] = [
+  {
+    label: 'Личные',
+    items: (['appearance', 'chats', 'notifications'] as SettingsSectionId[])
+      .map((id) => ({ id, label: SECTION_LABELS[id] })),
+  },
+  {
+    label: 'Система',
+    items: (['app', 'connection', 'account'] as SettingsSectionId[])
+      .map((id) => ({ id, label: SECTION_LABELS[id] })),
+  },
+];
+
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   username, avatarPath, onClose, onOpenProfile, onDeleteAccount, onLogout, closeMode = 'back'
 }) => {
@@ -49,6 +83,38 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // модуля осталась бы навсегда таким, каким увидела его при самом первом
   // импорте файла.
   const isElectron = isElectronEnv();
+
+  /**
+   * Какие разделы вообще есть на этом устройстве.
+   *
+   * «Подключение» — это настройки прокси, и они существуют только в десктопном
+   * клиенте: в браузере и на телефоне сетью распоряжается не приложение.
+   * Показывать пункт, за которым пусто, нельзя — пустой раздел неотличим от
+   * сломанного.
+   */
+  const visibleSections: SettingsSectionId[] = [
+    'appearance', 'chats', 'notifications', 'app',
+    ...(isElectron ? ['connection' as SettingsSectionId] : []),
+    'account',
+  ];
+  /**
+   * Какой раздел открыт. `null` — открыто оглавление, и это состояние
+   * существует ТОЛЬКО ради узкого экрана: там оглавление и раздел — два
+   * уровня, а не две колонки. На широком оглавление видно всегда, и `null`
+   * означает просто «раздел ещё не выбирали» — показываем первый.
+   */
+  const [openSection, setOpenSection] = useState<SettingsSectionId | null>(null);
+  const section: SettingsSectionId = openSection || 'appearance';
+
+  // Аппаратный «Назад» на узком экране возвращает к ОГЛАВЛЕНИЮ, а не выкидывает
+  // из настроек: раздел там — отдельный уровень, и выход из него мимо
+  // оглавления читался бы как проскок. На широком экране открытого раздела в
+  // этом смысле нет — оглавление видно всегда, и перехватчик не ставится.
+  useEffect(() => {
+    if (!openSection) return undefined;
+    return registerBackInterceptor(() => { setOpenSection(null); return true; });
+  }, [openSection]);
+
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
@@ -262,500 +328,553 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         )}
       </div>
 
-      <div className="settings-body">
-        <div className="profile-card">
-          <Avatar name={username} avatarPath={avatarPath} />
-          <div className="name">{username}</div>
-        </div>
+      <div className={'settings-body' + (openSection ? ' is-section-open' : '')}>
+        {/* Слева — оглавление, справа — один раздел. Раньше настройки были
+            одним свитком: чтобы добраться до ночного режима, приходилось
+            пролистать список чатов, переписку, фон и все уведомления. С
+            оглавлением раздел находится за один взгляд.
 
-        {/* Статус переехал в профиль: это часть того, что человек о себе
-            сообщает, а не настройка приложения — и менять его логично там же,
-            где имя, должность и аватар. */}
+            На узком экране это два УРОВНЯ, а не две колонки: сначала список
+            разделов, потом сам раздел с возвратом. Двухколоночная раскладка на
+            360px дала бы две нечитаемые колонки вместо одной читаемой. */}
+        <nav className="settings-nav" aria-label="Разделы настроек">
+          <button type="button" className="profile-card" onClick={onOpenProfile}>
+            <Avatar name={username} avatarPath={avatarPath} />
+            <div className="name">{username}</div>
+          </button>
 
-        <div className="settings-section-title">Список чатов</div>
-        <div className="settings-group">
-          <div className="settings-row static">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
-            <span className="label">Группировать по отделам</span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={ui.groupContacts}
-                onChange={(e) => updateUi({ groupContacts: e.target.checked })}
+          {NAV_GROUPS.map((group) => {
+            const items = group.items.filter((item) => visibleSections.includes(item.id));
+            if (!items.length) return null;
+            return (
+              <div className="settings-nav-group" key={group.label}>
+                <div className="settings-nav-title">{group.label}</div>
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={'settings-nav-item' + (section === item.id ? ' is-active' : '')}
+                    aria-current={section === item.id ? 'page' : undefined}
+                    onClick={() => setOpenSection(item.id)}
+                  >
+                    <span className="settings-nav-name">{item.label}</span>
+                    <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+
+          <div className="app-version">{APP_NAME} {appVersion ?? APP_VERSION} · {BUILT_AT}</div>
+        </nav>
+
+        <div className="settings-pane">
+          {/* Заголовок раздела с возвратом — только на узком экране, где
+              оглавление ушло на предыдущий уровень. */}
+          <button type="button" className="settings-pane-back" onClick={() => setOpenSection(null)}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
+            {SECTION_LABELS[section]}
+          </button>
+
+          {section === 'appearance' && (
+            <>
+          <div className="settings-section-title">Оформление</div>
+          <div className="settings-group">
+            <div className="settings-row static">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+              <span className="label">Тема</span>
+            </div>
+            <div className="settings-inline-control">
+              <div className="segmented">
+                {THEME_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={theme === opt.value ? 'is-active' : ''}
+                    onClick={() => handleThemeChange(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="settings-section-title">Фон переписки</div>
+          <div className="settings-group">
+            <div className="settings-row static settings-wallpaper">
+              <div
+                className={'settings-wallpaper-preview' + (wallpaperUrl ? ' has-image' : '')}
+                style={wallpaperUrl ? { backgroundImage: `url("${wallpaperUrl}")` } : undefined}
+                aria-hidden="true"
               />
-              <span className="switch-track"><span className="switch-thumb" /></span>
-            </label>
-          </div>
-          <div className="settings-hint">
-            Выключено — чаты идут по свежести переписки. Включено — разбиты на разделы по отделам.
-          </div>
-        </div>
-
-        <div className="settings-section-title">Переписка</div>
-        <div className="settings-group">
-          <div className="settings-row static">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><path d="M9 9h.01M15 9h.01" /></svg>
-            <span className="label">Анимированные смайлики</span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={ui.animatedEmoji}
-                onChange={(e) => updateUi({ animatedEmoji: e.target.checked })}
-              />
-              <span className="switch-track"><span className="switch-thumb" /></span>
-            </label>
-          </div>
-          <div className="settings-hint">
-            Выключено — смайлики в переписке остаются неподвижными. Настройка личная: у остальных
-            анимация продолжит работать.
-          </div>
-        </div>
-
-        <div className="settings-section-title">Фон переписки</div>
-        <div className="settings-group">
-          <div className="settings-row static settings-wallpaper">
-            <div
-              className={'settings-wallpaper-preview' + (wallpaperUrl ? ' has-image' : '')}
-              style={wallpaperUrl ? { backgroundImage: `url("${wallpaperUrl}")` } : undefined}
-              aria-hidden="true"
-            />
-            <div className="settings-wallpaper-actions">
-              {/* Поле файла спрятано за кнопкой: системное оформление input[type=file]
-                  не поддаётся стилям и выбивалось бы из списка настроек. */}
-              <input
-                ref={wallpaperInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                hidden
-                onChange={handleWallpaperPick}
-              />
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => wallpaperInputRef.current?.click()}
-                disabled={wallpaperBusy}
-              >
-                {wallpaperBusy ? 'Загрузка…' : wallpaperUrl ? 'Заменить' : 'Выбрать изображение'}
-              </button>
-              {wallpaperUrl && (
+              <div className="settings-wallpaper-actions">
+                {/* Поле файла спрятано за кнопкой: системное оформление input[type=file]
+                    не поддаётся стилям и выбивалось бы из списка настроек. */}
+                <input
+                  ref={wallpaperInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  hidden
+                  onChange={handleWallpaperPick}
+                />
                 <button
                   type="button"
                   className="btn-secondary"
-                  onClick={handleWallpaperRemove}
+                  onClick={() => wallpaperInputRef.current?.click()}
                   disabled={wallpaperBusy}
                 >
-                  Убрать
+                  {wallpaperBusy ? 'Загрузка…' : wallpaperUrl ? 'Заменить' : 'Выбрать изображение'}
                 </button>
-              )}
+                {wallpaperUrl && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={handleWallpaperRemove}
+                    disabled={wallpaperBusy}
+                  >
+                    Убрать
+                  </button>
+                )}
+              </div>
+            </div>
+            {wallpaperError && <div className="settings-hint form-error">{wallpaperError}</div>}
+            <div className="settings-hint">
+              Один фон на все чаты сразу. Лучше всего подходит вертикальное изображение — лента
+              сообщений выше своей ширины. Сервер сжимает картинку, поэтому исходник может быть
+              любого размера.
             </div>
           </div>
-          {wallpaperError && <div className="settings-hint form-error">{wallpaperError}</div>}
-          <div className="settings-hint">
-            Один фон на все чаты сразу. Лучше всего подходит вертикальное изображение — лента
-            сообщений выше своей ширины. Сервер сжимает картинку, поэтому исходник может быть
-            любого размера.
-          </div>
-        </div>
-
-        <div className="settings-section-title">Уведомления</div>
-        <div className="settings-group">
-          <div className="settings-row static">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
-            <span className="label">Уведомления о сообщениях</span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={notify.enabled}
-                onChange={(e) => updateNotify({ enabled: e.target.checked })}
-              />
-              <span className="switch-track"><span className="switch-thumb" /></span>
-            </label>
-          </div>
-
-          <div className="settings-row static">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M19.1 4.9a10 10 0 0 1 0 14.2M15.5 8.5a5 5 0 0 1 0 7" /></svg>
-            <span className="label">Звук</span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={notify.sound}
-                disabled={!notify.enabled}
-                onChange={(e) => {
-                  updateNotify({ sound: e.target.checked });
-                  if (e.target.checked) playIncomingSound(); // сразу слышно, какой он
-                }}
-              />
-              <span className="switch-track"><span className="switch-thumb" /></span>
-            </label>
-          </div>
-
-          {!isNativeMobile && (
+          <div className="settings-section-title">Переписка</div>
+          <div className="settings-group">
             <div className="settings-row static">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg>
-              <span className="label">Системные уведомления</span>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><path d="M9 9h.01M15 9h.01" /></svg>
+              <span className="label">Анимированные смайлики</span>
               <label className="switch">
                 <input
                   type="checkbox"
-                  checked={notify.system}
-                  disabled={!notify.enabled}
-                  onChange={(e) => handleSystemToggle(e.target.checked)}
+                  checked={ui.animatedEmoji}
+                  onChange={(e) => updateUi({ animatedEmoji: e.target.checked })}
                 />
                 <span className="switch-track"><span className="switch-thumb" /></span>
               </label>
             </div>
-          )}
-
-          {!isNativeMobile && notify.enabled && notify.system && systemPermission === 'denied' && (
-            <div className="settings-note is-warning">
-              Системные уведомления запрещены в настройках {isElectron ? 'Windows' : 'браузера'} — разрешите их там,
-              иначе за пределами окна приложения уведомления показываться не будут. Всплывающие уведомления
-              внутри приложения работают в любом случае.
-            </div>
-          )}
-
-          <div className="settings-row static">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
-            <span className="label">Показывать уведомление</span>
-            <select
-              className="settings-select"
-              value={notify.durationMs}
-              disabled={!notify.enabled}
-              onChange={(e) => updateNotify({ durationMs: Number(e.target.value) })}
-            >
-              {DURATION_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="settings-note">
-            Уведомление висит указанное время, а при наведении курсора таймер останавливается — чтобы
-            сообщение не пропало, пока вас нет на месте.
-          </div>
-        </div>
-
-        <div className="settings-section-title">Оформление</div>
-        <div className="settings-group">
-          <div className="settings-row static">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
-            <span className="label">Тема</span>
-          </div>
-          <div className="settings-inline-control">
-            <div className="segmented">
-              {THEME_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={theme === opt.value ? 'is-active' : ''}
-                  onClick={() => handleThemeChange(opt.value)}
-                >
-                  {opt.label}
-                </button>
-              ))}
+            <div className="settings-hint">
+              Выключено — смайлики в переписке остаются неподвижными. Настройка личная: у остальных
+              анимация продолжит работать.
             </div>
           </div>
-        </div>
+            </>
+          )}
 
-        {isElectron && (
-          <>
-            <div className="settings-section-title">Приложение</div>
-            <div className="settings-group">
+          {section === 'chats' && (
+            <>
+          <div className="settings-section-title">Список чатов</div>
+          <div className="settings-group">
+            <div className="settings-row static">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
+              <span className="label">Группировать по отделам</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={ui.groupContacts}
+                  onChange={(e) => updateUi({ groupContacts: e.target.checked })}
+                />
+                <span className="switch-track"><span className="switch-thumb" /></span>
+              </label>
+            </div>
+            <div className="settings-hint">
+              Выключено — чаты идут по свежести переписки. Включено — разбиты на разделы по отделам.
+            </div>
+          </div>
+            </>
+          )}
+
+          {section === 'notifications' && (
+            <>
+          <div className="settings-section-title">Уведомления</div>
+          <div className="settings-group">
+            <div className="settings-row static">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+              <span className="label">Уведомления о сообщениях</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={notify.enabled}
+                  onChange={(e) => updateNotify({ enabled: e.target.checked })}
+                />
+                <span className="switch-track"><span className="switch-thumb" /></span>
+              </label>
+            </div>
+
+            <div className="settings-row static">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M19.1 4.9a10 10 0 0 1 0 14.2M15.5 8.5a5 5 0 0 1 0 7" /></svg>
+              <span className="label">Звук</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={notify.sound}
+                  disabled={!notify.enabled}
+                  onChange={(e) => {
+                    updateNotify({ sound: e.target.checked });
+                    if (e.target.checked) playIncomingSound(); // сразу слышно, какой он
+                  }}
+                />
+                <span className="switch-track"><span className="switch-thumb" /></span>
+              </label>
+            </div>
+
+            {!isNativeMobile && (
               <div className="settings-row static">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v6" /><path d="M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>
-                <span className="label">Добавить в автозагрузку</span>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg>
+                <span className="label">Системные уведомления</span>
                 <label className="switch">
                   <input
                     type="checkbox"
-                    checked={autoLaunch}
-                    onChange={(e) => handleAutoLaunchChange(e.target.checked)}
+                    checked={notify.system}
+                    disabled={!notify.enabled}
+                    onChange={(e) => handleSystemToggle(e.target.checked)}
                   />
                   <span className="switch-track"><span className="switch-thumb" /></span>
                 </label>
               </div>
+            )}
 
-              {/* Ни «Скачать», ни «Установить» тут нет: обновление идёт само.
-                  Строки ниже — не действия, а отчёт о том, что происходит,
-                  чтобы скачивание на фоне не выглядело чем-то непрошеным. */}
-              {(update.status === 'available' || update.status === 'downloading') && (
-                <div className="settings-row static">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
-                  <span className="label">Загрузка обновления</span>
-                  <span className="value">{update.status === 'downloading' ? `${update.percent}%` : '…'}</span>
-                </div>
-              )}
-
-              {/* Установку назначил супер-админ. Кнопки «Перезапустить» тут
-                  намеренно нет: она обошла бы назначенный час, ради которого
-                  расписание и заводили. */}
-              {update.status === 'scheduled' && (
-                <div className="settings-row static">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
-                  <span className="label">Обновление {update.version} установится</span>
-                  <span className="value">{formatMoscowDateTime(update.at)}</span>
-                </div>
-              )}
-
-              {/* Единственная кнопка во всей механике, и та необязательная:
-                  обновление и так встанет при закрытии приложения. Она для
-                  того, кто увидел строку и хочет получить новую версию сейчас. */}
-              {update.status === 'downloaded' && (
-                <button type="button" className="settings-row" onClick={() => window.electronAPI!.installUpdate()}>
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
-                  <span className="label">Обновление {update.version} встанет при закрытии</span>
-                  <span className="value is-action">Перезапустить</span>
-                </button>
-              )}
-
-              {/* Linux: electron-updater не умеет тихо поставить .deb/.tar.gz,
-                  поэтому пакет только скачивается сам, а установка требует
-                  клика — откроется системный установщик, как при двойном
-                  клике по скачанному .deb. */}
-              {update.status === 'linux-downloading' && (
-                <div className="settings-row static">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
-                  <span className="label">Загрузка обновления</span>
-                  <span className="value">{update.percent}%</span>
-                </div>
-              )}
-              {update.status === 'linux-ready' && (
-                <button type="button" className="settings-row" onClick={() => window.electronAPI!.installUpdate()}>
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
-                  <span className="label">Обновление {update.version} скачано</span>
-                  <span className="value is-action">Установить</span>
-                </button>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Сервер во внутренней сети конторы: без прокси на некоторых сетях
-            (домашний интернет, гостевой Wi-Fi, VPN) чат просто не подключается,
-            и без этой настройки понять почему было неоткуда. */}
-        {isElectron && proxy && (
-          <>
-            <div className="settings-section-title">Прокси</div>
-            <div className="settings-group">
-              <div className="settings-row static">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z" /></svg>
-                <span className="label">Использовать прокси</span>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={proxy.enabled}
-                    disabled={proxySaving}
-                    onChange={(e) => updateProxy({ enabled: e.target.checked })}
-                  />
-                  <span className="switch-track"><span className="switch-thumb" /></span>
-                </label>
+            {!isNativeMobile && notify.enabled && notify.system && systemPermission === 'denied' && (
+              <div className="settings-note is-warning">
+                Системные уведомления запрещены в настройках {isElectron ? 'Windows' : 'браузера'} — разрешите их там,
+                иначе за пределами окна приложения уведомления показываться не будут. Всплывающие уведомления
+                внутри приложения работают в любом случае.
               </div>
+            )}
 
-              {proxy.enabled && (
-                <>
-                  <div className="settings-inline-control">
-                    <div className="segmented">
-                      <button
-                        type="button"
-                        className={proxy.mode === 'system' ? 'is-active' : ''}
-                        disabled={proxySaving}
-                        onClick={() => updateProxy({ mode: 'system' })}
-                      >
-                        Системный
-                      </button>
-                      <button
-                        type="button"
-                        className={proxy.mode === 'manual' ? 'is-active' : ''}
-                        disabled={proxySaving}
-                        onClick={() => updateProxy({ mode: 'manual' })}
-                      >
-                        Вручную
-                      </button>
-                      <button
-                        type="button"
-                        className={proxy.mode === 'cit' ? 'is-active' : ''}
-                        disabled={proxySaving}
-                        onClick={() => updateProxy({ mode: 'cit' })}
-                      >
-                        ЦИТ
-                      </button>
-                    </div>
+            <div className="settings-row static">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+              <span className="label">Показывать уведомление</span>
+              <select
+                className="settings-select"
+                value={notify.durationMs}
+                disabled={!notify.enabled}
+                onChange={(e) => updateNotify({ durationMs: Number(e.target.value) })}
+              >
+                {DURATION_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="settings-note">
+              Уведомление висит указанное время, а при наведении курсора таймер останавливается — чтобы
+              сообщение не пропало, пока вас нет на месте.
+            </div>
+          </div>
+            </>
+          )}
+
+          {section === 'app' && (
+            <>
+          {isElectron && (
+            <>
+              <div className="settings-section-title">Приложение</div>
+              <div className="settings-group">
+                <div className="settings-row static">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v6" /><path d="M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>
+                  <span className="label">Добавить в автозагрузку</span>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={autoLaunch}
+                      onChange={(e) => handleAutoLaunchChange(e.target.checked)}
+                    />
+                    <span className="switch-track"><span className="switch-thumb" /></span>
+                  </label>
+                </div>
+
+                {/* Ни «Скачать», ни «Установить» тут нет: обновление идёт само.
+                    Строки ниже — не действия, а отчёт о том, что происходит,
+                    чтобы скачивание на фоне не выглядело чем-то непрошеным. */}
+                {(update.status === 'available' || update.status === 'downloading') && (
+                  <div className="settings-row static">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                    <span className="label">Загрузка обновления</span>
+                    <span className="value">{update.status === 'downloading' ? `${update.percent}%` : '…'}</span>
                   </div>
+                )}
 
-                  {proxy.mode === 'system' && (
-                    <div className="field">
-                      <label>Системный прокси</label>
-                      <div className="field-readonly">
-                        Используются настройки сети из самой ОС
-                      </div>
-                      <div className="field-hint">
-                        То же самое, чем в этой ситуации и так уже пользуется браузер. Подходит,
-                        если прокси уже настроен в сетевых параметрах системы.
+                {/* Установку назначил супер-админ. Кнопки «Перезапустить» тут
+                    намеренно нет: она обошла бы назначенный час, ради которого
+                    расписание и заводили. */}
+                {update.status === 'scheduled' && (
+                  <div className="settings-row static">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+                    <span className="label">Обновление {update.version} установится</span>
+                    <span className="value">{formatMoscowDateTime(update.at)}</span>
+                  </div>
+                )}
+
+                {/* Единственная кнопка во всей механике, и та необязательная:
+                    обновление и так встанет при закрытии приложения. Она для
+                    того, кто увидел строку и хочет получить новую версию сейчас. */}
+                {update.status === 'downloaded' && (
+                  <button type="button" className="settings-row" onClick={() => window.electronAPI!.installUpdate()}>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
+                    <span className="label">Обновление {update.version} встанет при закрытии</span>
+                    <span className="value is-action">Перезапустить</span>
+                  </button>
+                )}
+
+                {/* Linux: electron-updater не умеет тихо поставить .deb/.tar.gz,
+                    поэтому пакет только скачивается сам, а установка требует
+                    клика — откроется системный установщик, как при двойном
+                    клике по скачанному .deb. */}
+                {update.status === 'linux-downloading' && (
+                  <div className="settings-row static">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                    <span className="label">Загрузка обновления</span>
+                    <span className="value">{update.percent}%</span>
+                  </div>
+                )}
+                {update.status === 'linux-ready' && (
+                  <button type="button" className="settings-row" onClick={() => window.electronAPI!.installUpdate()}>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
+                    <span className="label">Обновление {update.version} скачано</span>
+                    <span className="value is-action">Установить</span>
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+          {/* На Android обновление молча поставить нельзя: система не даёт
+              приложениям устанавливать пакеты без своего диалога. Поэтому здесь,
+              в отличие от десктопа, кнопка обязательна — она открывает ссылку на
+              APK, дальше скачивание и установку ведёт сам Android. */}
+          {mobileUpdate && (
+            <>
+              <div className="settings-section-title">Приложение</div>
+              <div className="settings-group">
+                <button type="button" className="settings-row" onClick={() => openMobileUpdate(mobileUpdate.url)}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                  <span className="label">Доступна версия {mobileUpdate.versionName}</span>
+                  <span className="value is-action">Обновить</span>
+                </button>
+              </div>
+            </>
+          )}
+          {/* После обновления навигации шапка списка чатов на широком экране
+              скрыта целиком, а вместе с ней случайно исчезли и ссылки на
+              дистрибутивы. В веб-версии держим их в постоянном явном месте —
+              настройках приложения. Electron и Android обновляются своими
+              механизмами и этот блок не получают. */}
+          {!isElectron && !isNativeMobile && (
+            <>
+              <div className="settings-section-title">Приложение</div>
+              <div className="settings-group web-distributions-group">
+                <WebDownloadLinks variant="settings" />
+              </div>
+            </>
+          )}
+          {/* На самом телефоне сканировать QR своего же приложения незачем —
+              кнопка для тех, кто ставит Android-версию с компьютера или веба. */}
+          {!isNativeMobile && (
+            <>
+              <div className="settings-section-title">Android-приложение</div>
+              <div className="settings-group">
+                <button type="button" className="settings-row" onClick={() => setQrOpen(true)}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><path d="M14 14h3v3h-3zM21 14v3M14 21h3M21 21v-1" /></svg>
+                  <span className="label">QR-код для установки на телефон</span>
+                  <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              </div>
+            </>
+          )}
+            </>
+          )}
+
+          {section === 'connection' && (
+            <>
+          {/* Сервер во внутренней сети конторы: без прокси на некоторых сетях
+              (домашний интернет, гостевой Wi-Fi, VPN) чат просто не подключается,
+              и без этой настройки понять почему было неоткуда. */}
+          {isElectron && proxy && (
+            <>
+              <div className="settings-section-title">Прокси</div>
+              <div className="settings-group">
+                <div className="settings-row static">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z" /></svg>
+                  <span className="label">Использовать прокси</span>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={proxy.enabled}
+                      disabled={proxySaving}
+                      onChange={(e) => updateProxy({ enabled: e.target.checked })}
+                    />
+                    <span className="switch-track"><span className="switch-thumb" /></span>
+                  </label>
+                </div>
+
+                {proxy.enabled && (
+                  <>
+                    <div className="settings-inline-control">
+                      <div className="segmented">
+                        <button
+                          type="button"
+                          className={proxy.mode === 'system' ? 'is-active' : ''}
+                          disabled={proxySaving}
+                          onClick={() => updateProxy({ mode: 'system' })}
+                        >
+                          Системный
+                        </button>
+                        <button
+                          type="button"
+                          className={proxy.mode === 'manual' ? 'is-active' : ''}
+                          disabled={proxySaving}
+                          onClick={() => updateProxy({ mode: 'manual' })}
+                        >
+                          Вручную
+                        </button>
+                        <button
+                          type="button"
+                          className={proxy.mode === 'cit' ? 'is-active' : ''}
+                          disabled={proxySaving}
+                          onClick={() => updateProxy({ mode: 'cit' })}
+                        >
+                          ЦИТ
+                        </button>
                       </div>
                     </div>
-                  )}
 
-                  {proxy.mode === 'manual' && (
-                    <form className="field proxy-manual-fields" onSubmit={saveProxyManual}>
-                      <label>Адрес и порт</label>
-                      <div className="proxy-manual-inputs">
-                        <input
-                          type="text"
-                          value={proxyManualHost}
-                          onChange={(e) => setProxyManualHost(e.target.value)}
-                          placeholder="proxy.example.ru"
-                        />
-                        <input
-                          type="text"
-                          className="proxy-manual-port"
-                          value={proxyManualPort}
-                          onChange={(e) => setProxyManualPort(e.target.value)}
-                          placeholder="8080"
-                        />
+                    {proxy.mode === 'system' && (
+                      <div className="field">
+                        <label>Системный прокси</label>
+                        <div className="field-readonly">
+                          Используются настройки сети из самой ОС
+                        </div>
+                        <div className="field-hint">
+                          То же самое, чем в этой ситуации и так уже пользуется браузер. Подходит,
+                          если прокси уже настроен в сетевых параметрах системы.
+                        </div>
                       </div>
-                      <button type="submit" className="btn-primary" disabled={proxySaving || !proxyManualHost.trim()}>
-                        Сохранить
-                      </button>
-                    </form>
-                  )}
+                    )}
 
-                  {proxy.mode === 'cit' && (
-                    <div className="field">
-                      <label>Автонастройка ЦИТ</label>
-                      <div className={'field-readonly' + (proxy.citReachable ? '' : ' is-muted')}>
-                        PAC ЦИТ — i.tatar.ru:8080
-                      </div>
-                      {!proxy.citReachable && (
-                        <div className="field-hint">Не настроен — подключите Wi-Fi для настройки</div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Логин и пароль относятся к самому прокси-серверу, а не к
-                      способу, которым его нашли — нужны что в «Системном»
-                      режиме (браузер в этой же сети их тоже спрашивает), что
-                      в «ЦИТ». В режиме «Вручную» человек мог указать другой
-                      сервер без авторизации, поэтому там их не показываем. */}
-                  {(proxy.mode === 'cit' || proxy.mode === 'system') && (
-                    <form className="field proxy-manual-fields" onSubmit={saveProxyCitCredentials}>
-                      <label>Логин и пароль прокси</label>
-                      <div className="proxy-manual-inputs">
-                        <input
-                          type="text"
-                          value={proxyCitUsername}
-                          onChange={(e) => setProxyCitUsername(e.target.value)}
-                          placeholder="Домен\логин, напр. govtatar\ivanov"
-                          autoComplete="username"
-                        />
-                        <input
-                          type="password"
-                          value={proxyCitPassword}
-                          onChange={(e) => setProxyCitPassword(e.target.value)}
-                          placeholder={proxy.citPasswordSet ? 'Пароль сохранён — введите новый, чтобы изменить' : 'Пароль'}
-                          autoComplete="current-password"
-                        />
-                      </div>
-                      <div className="proxy-manual-actions">
-                        <button type="submit" className="btn-primary" disabled={proxySaving}>
+                    {proxy.mode === 'manual' && (
+                      <form className="field proxy-manual-fields" onSubmit={saveProxyManual}>
+                        <label>Адрес и порт</label>
+                        <div className="proxy-manual-inputs">
+                          <input
+                            type="text"
+                            value={proxyManualHost}
+                            onChange={(e) => setProxyManualHost(e.target.value)}
+                            placeholder="proxy.example.ru"
+                          />
+                          <input
+                            type="text"
+                            className="proxy-manual-port"
+                            value={proxyManualPort}
+                            onChange={(e) => setProxyManualPort(e.target.value)}
+                            placeholder="8080"
+                          />
+                        </div>
+                        <button type="submit" className="btn-primary" disabled={proxySaving || !proxyManualHost.trim()}>
                           Сохранить
                         </button>
-                        {proxy.citPasswordSet && (
-                          <button type="button" className="btn-plain" disabled={proxySaving} onClick={clearProxyCitPassword}>
-                            Убрать пароль
-                          </button>
+                      </form>
+                    )}
+
+                    {proxy.mode === 'cit' && (
+                      <div className="field">
+                        <label>Автонастройка ЦИТ</label>
+                        <div className={'field-readonly' + (proxy.citReachable ? '' : ' is-muted')}>
+                          PAC ЦИТ — i.tatar.ru:8080
+                        </div>
+                        {!proxy.citReachable && (
+                          <div className="field-hint">Не настроен — подключите Wi-Fi для настройки</div>
                         )}
                       </div>
-                      {proxy.citAuthStatus === 'rejected' && (
-                        <div className="field-hint is-warning">
-                          Прокси не принял логин или пароль. Проверьте, что домен указан через
-                          обратный слэш перед именем (govtatar\ivanov), и попробуйте снова.
+                    )}
+
+                    {/* Логин и пароль относятся к самому прокси-серверу, а не к
+                        способу, которым его нашли — нужны что в «Системном»
+                        режиме (браузер в этой же сети их тоже спрашивает), что
+                        в «ЦИТ». В режиме «Вручную» человек мог указать другой
+                        сервер без авторизации, поэтому там их не показываем. */}
+                    {(proxy.mode === 'cit' || proxy.mode === 'system') && (
+                      <form className="field proxy-manual-fields" onSubmit={saveProxyCitCredentials}>
+                        <label>Логин и пароль прокси</label>
+                        <div className="proxy-manual-inputs">
+                          <input
+                            type="text"
+                            value={proxyCitUsername}
+                            onChange={(e) => setProxyCitUsername(e.target.value)}
+                            placeholder="Домен\логин, напр. govtatar\ivanov"
+                            autoComplete="username"
+                          />
+                          <input
+                            type="password"
+                            value={proxyCitPassword}
+                            onChange={(e) => setProxyCitPassword(e.target.value)}
+                            placeholder={proxy.citPasswordSet ? 'Пароль сохранён — введите новый, чтобы изменить' : 'Пароль'}
+                            autoComplete="current-password"
+                          />
                         </div>
-                      )}
-                      {proxy.citAuthStatus === 'no-credentials' && (
-                        <div className="field-hint">
-                          Прокси запросил авторизацию, а логин и пароль ещё не заполнены —
-                          заполните их выше.
+                        <div className="proxy-manual-actions">
+                          <button type="submit" className="btn-primary" disabled={proxySaving}>
+                            Сохранить
+                          </button>
+                          {proxy.citPasswordSet && (
+                            <button type="button" className="btn-plain" disabled={proxySaving} onClick={clearProxyCitPassword}>
+                              Убрать пароль
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </form>
-                  )}
-                </>
-              )}
-            </div>
-          </>
-        )}
+                        {proxy.citAuthStatus === 'rejected' && (
+                          <div className="field-hint is-warning">
+                            Прокси не принял логин или пароль. Проверьте, что домен указан через
+                            обратный слэш перед именем (govtatar\ivanov), и попробуйте снова.
+                          </div>
+                        )}
+                        {proxy.citAuthStatus === 'no-credentials' && (
+                          <div className="field-hint">
+                            Прокси запросил авторизацию, а логин и пароль ещё не заполнены —
+                            заполните их выше.
+                          </div>
+                        )}
+                      </form>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          )}
+            </>
+          )}
 
-        {/* На Android обновление молча поставить нельзя: система не даёт
-            приложениям устанавливать пакеты без своего диалога. Поэтому здесь,
-            в отличие от десктопа, кнопка обязательна — она открывает ссылку на
-            APK, дальше скачивание и установку ведёт сам Android. */}
-        {mobileUpdate && (
-          <>
-            <div className="settings-section-title">Приложение</div>
-            <div className="settings-group">
-              <button type="button" className="settings-row" onClick={() => openMobileUpdate(mobileUpdate.url)}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
-                <span className="label">Доступна версия {mobileUpdate.versionName}</span>
-                <span className="value is-action">Обновить</span>
-              </button>
-            </div>
-          </>
-        )}
+          {section === 'account' && (
+            <>
+          <div className="settings-section-title">Аккаунт</div>
+          <div className="settings-group">
+            <button type="button" className="settings-row" onClick={onOpenProfile}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" /></svg>
+              <span className="label">Редактировать профиль</span>
+              <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
+            </button>
+            <button type="button" className="settings-row danger" onClick={onDeleteAccount}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+              <span className="label">Удалить аккаунт</span>
+            </button>
+          </div>
 
-        {/* После обновления навигации шапка списка чатов на широком экране
-            скрыта целиком, а вместе с ней случайно исчезли и ссылки на
-            дистрибутивы. В веб-версии держим их в постоянном явном месте —
-            настройках приложения. Electron и Android обновляются своими
-            механизмами и этот блок не получают. */}
-        {!isElectron && !isNativeMobile && (
-          <>
-            <div className="settings-section-title">Приложение</div>
-            <div className="settings-group web-distributions-group">
-              <WebDownloadLinks variant="settings" />
-            </div>
-          </>
-        )}
-
-        {/* На самом телефоне сканировать QR своего же приложения незачем —
-            кнопка для тех, кто ставит Android-версию с компьютера или веба. */}
-        {!isNativeMobile && (
-          <>
-            <div className="settings-section-title">Android-приложение</div>
-            <div className="settings-group">
-              <button type="button" className="settings-row" onClick={() => setQrOpen(true)}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><path d="M14 14h3v3h-3zM21 14v3M14 21h3M21 21v-1" /></svg>
-                <span className="label">QR-код для установки на телефон</span>
-                <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
-              </button>
-            </div>
-          </>
-        )}
-        {qrOpen && <AndroidQrModal onClose={() => setQrOpen(false)} />}
-
-        <div className="settings-section-title">Аккаунт</div>
-        <div className="settings-group">
-          <button type="button" className="settings-row" onClick={onOpenProfile}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" /></svg>
-            <span className="label">Редактировать профиль</span>
-            <svg className="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
-          </button>
-          <button type="button" className="settings-row danger" onClick={onDeleteAccount}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
-            <span className="label">Удалить аккаунт</span>
-          </button>
+          <div className="settings-group">
+            <button type="button" className="settings-row" onClick={onLogout}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
+              <span className="label">Выйти</span>
+            </button>
+          </div>
+            </>
+          )}
         </div>
-
-        <div className="settings-group">
-          <button type="button" className="settings-row" onClick={onLogout}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
-            <span className="label">Выйти</span>
-          </button>
-        </div>
-
-        {/* В десктопе показываем номер версии: он совпадает с тем, что пишет
-            строка обновления, и человеку есть с чем сравнить. Хэш сборки
-            остаётся в вебе — там номера версии просто нет, а знать, какой
-            коммит раскатан, всё равно нужно (см. README, проверка деплоя). */}
-        <div className="app-version">{APP_NAME} {appVersion ?? APP_VERSION} · {BUILT_AT}</div>
       </div>
+
+      {qrOpen && <AndroidQrModal onClose={() => setQrOpen(false)} />}
     </div>
   );
 };

@@ -2,6 +2,12 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import SettingsPanel from './SettingsPanel';
 
+// Настройки больше не один свиток: слева оглавление, справа один раздел.
+// Значит и в тесте надо сначала открыть нужный раздел — ровно так же, как это
+// теперь делает человек. Хелпер один на файл, чтобы не повторять клик
+// двадцать раз.
+const openSection = () => fireEvent.click(screen.getByRole('button', { name: 'Приложение' }));
+
 vi.mock('@/shared/api/client', () => ({
   __esModule: true,
   default: {
@@ -62,6 +68,7 @@ describe('SettingsPanel — обновления на Linux', () => {
   test('linux-downloading показывает прогресс без кнопки', async () => {
     mockElectronAPI({ status: 'linux-downloading', percent: 42 });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     expect(await screen.findByText('Загрузка обновления')).toBeInTheDocument();
     expect(screen.getByText('42%')).toBeInTheDocument();
@@ -72,6 +79,7 @@ describe('SettingsPanel — обновления на Linux', () => {
     const installUpdate = vi.fn();
     mockElectronAPI({ status: 'linux-ready', version: '1.12.0' }, { installUpdate });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     const row = await screen.findByText('Обновление 1.12.0 скачано');
     expect(screen.getByText('Установить')).toBeInTheDocument();
@@ -83,6 +91,7 @@ describe('SettingsPanel — обновления на Linux', () => {
   test('idle не показывает ни прогресс, ни кнопку установки', async () => {
     mockElectronAPI({ status: 'idle' });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Добавить в автозагрузку'); // дожидаемся отрисовки секции «Приложение»
     expect(screen.queryByText('Загрузка обновления')).not.toBeInTheDocument();

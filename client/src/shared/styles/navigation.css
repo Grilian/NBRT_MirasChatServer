@@ -218,9 +218,16 @@ button.app-menu-item:disabled { opacity: .42; cursor: default; }
 .app-menu-app-version { margin-top: 2px; font-size: 11px; }
 
 /* ===== Compact desktop windows opened from the application menu ===== */
-.settings-modal { width: min(560px, calc(100vw - 48px)); max-width: 560px; height: min(760px, 88vh); max-height: 88vh; }
+/* Шире прежних 560px: окно стало двухколоночным (оглавление + раздел), и на
+   560 разделу оставалось 318 — в такую колонку не помещается ни сегментный
+   переключатель темы, ни описание фона. */
+.settings-modal { width: min(820px, calc(100vw - 48px)); max-width: 820px; height: min(760px, 88vh); max-height: 88vh; }
+/* Прокручивается КАЖДАЯ колонка сама по себе, а не окно целиком: иначе
+   оглавление уезжало бы вверх вместе с длинным разделом уведомлений, и
+   вернуться к нему можно было бы только прокруткой обратно. */
+.settings-modal .settings-nav, .settings-modal .settings-pane { overflow-y: auto; }
 .settings-modal .settings-panel { min-height: 0; flex: 1; }
-.settings-modal .settings-body { min-height: 0; flex: 1; overflow-y: auto; }
+.settings-modal .settings-body { min-height: 0; flex: 1; overflow: hidden; }
 .tasks-modal { width: min(650px, calc(100vw - 48px)); max-width: 650px; height: min(720px, 86vh); max-height: 86vh; }
 .tasks-modal > .section-pane { min-height: 0; flex: 1; }
 .task-head-actions, .user-info-head-actions { display: flex; align-items: center; gap: 7px; }

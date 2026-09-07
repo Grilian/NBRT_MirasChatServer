@@ -2,6 +2,12 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SettingsPanel from './SettingsPanel';
 
+// Настройки больше не один свиток: слева оглавление, справа один раздел.
+// Значит и в тесте надо сначала открыть нужный раздел — ровно так же, как это
+// теперь делает человек. Хелпер один на файл, чтобы не повторять клик
+// двадцать раз.
+const openSection = () => fireEvent.click(screen.getByRole('button', { name: 'Подключение' }));
+
 vi.mock('@/shared/api/client', () => ({
   __esModule: true,
   default: {
@@ -68,17 +74,22 @@ describe('SettingsPanel — прокси', () => {
     delete (window as any).electronAPI;
   });
 
-  test('раздел «Прокси» не показывается вне Electron', async () => {
+  test('раздел «Подключение» не показывается вне Electron', async () => {
+    // Сетью вне десктопного клиента распоряжается не приложение, и пункт, за
+    // которым пусто, неотличим от сломанного — поэтому в оглавлении его нет
+    // вовсе, а не «есть, но пустой».
     delete (window as any).electronAPI;
     render(<SettingsPanel {...baseProps} />);
     // Даём отработать возможные микрозадачи монтирования.
     await act(async () => {});
+    expect(screen.queryByRole('button', { name: 'Подключение' })).not.toBeInTheDocument();
     expect(screen.queryByText('Прокси')).not.toBeInTheDocument();
   });
 
   test('ЦИТ недоступен — адрес показан бледным текстом с подсказкой', async () => {
     mockElectronAPI({ getProxyState: vi.fn(() => Promise.resolve(baseProxyState)) });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     const address = await screen.findByText('PAC ЦИТ — i.tatar.ru:8080');
     expect(address).toHaveClass('is-muted');
@@ -90,6 +101,7 @@ describe('SettingsPanel — прокси', () => {
       getProxyState: vi.fn(() => Promise.resolve({ ...baseProxyState, citReachable: true })),
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     const address = await screen.findByText('PAC ЦИТ — i.tatar.ru:8080');
     expect(address).not.toHaveClass('is-muted');
@@ -105,6 +117,7 @@ describe('SettingsPanel — прокси', () => {
       setProxyState,
     });
     const { container } = render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Использовать прокси');
     const hostInput = container.querySelector('input[placeholder="proxy.example.ru"]') as HTMLInputElement;
@@ -125,6 +138,7 @@ describe('SettingsPanel — прокси', () => {
       setProxyState,
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     const row = (await screen.findByText('Использовать прокси')).closest('.settings-row') as HTMLElement;
     const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
@@ -138,6 +152,7 @@ describe('SettingsPanel — прокси', () => {
       getProxyState: vi.fn(() => Promise.resolve({ ...baseProxyState, enabled: false })),
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Использовать прокси');
     expect(screen.queryByText('Системный')).not.toBeInTheDocument();
@@ -152,6 +167,7 @@ describe('SettingsPanel — прокси', () => {
       setProxyState,
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Системный прокси');
     expect(screen.getByText('Используются настройки сети из самой ОС')).toBeInTheDocument();
@@ -167,6 +183,7 @@ describe('SettingsPanel — прокси', () => {
       setProxyState,
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     fireEvent.click(await screen.findByText('Системный'));
     await waitFor(() => expect(setProxyState).toHaveBeenCalledWith({ mode: 'system' }));
@@ -177,6 +194,7 @@ describe('SettingsPanel — прокси', () => {
       getProxyState: vi.fn(() => Promise.resolve({ ...baseProxyState, mode: 'manual' })),
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Использовать прокси');
     expect(screen.queryByText('Логин и пароль прокси')).not.toBeInTheDocument();
@@ -189,6 +207,7 @@ describe('SettingsPanel — прокси', () => {
       })),
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     expect(await screen.findByText(/Прокси не принял логин или пароль/)).toBeInTheDocument();
   });
@@ -196,6 +215,7 @@ describe('SettingsPanel — прокси', () => {
   test('нет предупреждения, пока статус авторизации неизвестен', async () => {
     mockElectronAPI({ getProxyState: vi.fn(() => Promise.resolve(baseProxyState)) });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Логин и пароль прокси');
     expect(screen.queryByText(/Прокси не принял/)).not.toBeInTheDocument();
@@ -208,6 +228,7 @@ describe('SettingsPanel — прокси', () => {
       setProxyState,
     });
     const { container } = render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Логин и пароль прокси');
     const loginInput = container.querySelector('input[placeholder^="Домен"]') as HTMLInputElement;
@@ -229,6 +250,7 @@ describe('SettingsPanel — прокси', () => {
       setProxyState,
     });
     const { container } = render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Логин и пароль прокси');
     // Плейсхолдер подсказывает, что пароль уже есть, а поле остаётся пустым —
@@ -251,6 +273,7 @@ describe('SettingsPanel — прокси', () => {
       setProxyState,
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     const clearBtn = await screen.findByText('Убрать пароль');
     fireEvent.click(clearBtn);
@@ -263,6 +286,7 @@ describe('SettingsPanel — прокси', () => {
       getProxyState: vi.fn(() => Promise.resolve({ ...baseProxyState, citPasswordSet: false })),
     });
     render(<SettingsPanel {...baseProps} />);
+    openSection();
 
     await screen.findByText('Логин и пароль прокси');
     expect(screen.queryByText('Убрать пароль')).not.toBeInTheDocument();
