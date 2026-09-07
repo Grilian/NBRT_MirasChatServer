@@ -63,57 +63,187 @@
 .row-preview-author { color: var(--ink-muted); }
 
 /* ===== Главная ===== */
-.home-section {
-  display: flex; flex-direction: column; gap: 18px; min-height: 0; height: 100%;
-  padding: 22px 22px 18px; overflow-y: auto;
-}
-.home-head h1 { margin: 0; font-size: 22px; font-weight: 650; }
-.home-date { margin: 4px 0 0; color: var(--ink-muted); font-size: 13px; }
-.home-group { display: flex; flex-direction: column; gap: 8px; }
-.home-group h2 {
-  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em;
-  text-transform: uppercase; color: var(--ink-muted);
-}
-.home-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-.home-card {
-  display: flex; align-items: center; gap: 12px; padding: 13px 14px; cursor: pointer;
-  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
-  color: inherit; text-align: left; transition: background var(--ease), border-color var(--ease);
-}
-.home-card:hover { background: var(--row-hover); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
-.home-card-icon { font-size: 22px; line-height: 1; flex: none; }
-.home-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.home-card-count { font-size: 20px; font-weight: 650; line-height: 1.1; }
-.home-card-label { font-size: 13px; color: var(--ink-muted); }
-.home-card-go { width: 16px; height: 16px; color: var(--ink-muted); flex: none; }
-.home-empty {
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
-  padding: 40px 16px; text-align: center; color: var(--ink-muted); font-size: 14px;
-}
-.home-empty span { font-size: 30px; }
-.home-empty p { margin: 0; max-width: 420px; }
+/* ===== «Главная» =====
+   Стартовый экран: сводка дня и переходы к работе. Каждый блок — точка
+   перехода, а не витрина статистики.
 
-/* Расписание дня и входы в разделы на «Главной». */
-.home-schedule { display: flex; flex-direction: column; gap: 6px; }
+   ВАЖНОЕ ПРАВИЛО ЭТОГО БЛОКА: здесь ничего не обрезается многоточием.
+   Подписи плиток и названия событий переносятся на следующую строку, а высоту
+   задаёт содержимое. В макете редизайна и то и другое обрезано («7
+   непрочита…», «Экскурсия «Хра…»), хотя документ концепции сам дважды
+   запрещает это для важного текста. Закреплено тестом, который читает этот
+   файл, — см. homeText.test.ts. */
+.home-section {
+  display: flex; flex-direction: column; gap: var(--space-6); min-height: 0; height: 100%;
+  padding: var(--space-6) var(--space-6) var(--space-5); overflow-y: auto;
+}
+
+/* ---- Шапка: дата, приветствие, свой статус ---- */
+.home-hero {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-5); flex-wrap: wrap;
+}
+.home-hero-copy { min-width: 0; }
+.home-hero-date {
+  margin: 0; color: var(--ink-muted);
+  font: 500 var(--text-sm)/var(--leading-sm) var(--font-ui);
+}
+/* Заглавной делаем ТОЛЬКО первую букву: «четверг, 3 сентября» читается как
+   обрывок фразы, но capitalize поднимает каждое слово и даёт «Понедельник, 7
+   Сентября» — по-русски месяц с большой буквы не пишут. Поймано живой
+   проверкой; toLocaleDateString отдаёт строку в нижнем регистре. */
+.home-hero-date::first-letter { text-transform: uppercase; }
+.home-hero-greeting {
+  margin: var(--space-1) 0 0;
+  font: 650 var(--text-2xl)/var(--leading-2xl) var(--font-display);
+  color: var(--ink); letter-spacing: -.01em; text-wrap: balance;
+}
+.home-status {
+  flex: none; display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--paper); color: var(--ink);
+  font: 500 var(--text-sm)/1.2 var(--font-ui);
+  transition: background var(--ease), border-color var(--ease);
+}
+.home-status:hover { background: var(--row-hover); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.home-status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--online); }
+/* Занятый статус — не «в сети»: цвет обязан отличаться, иначе точка
+   превращается в украшение. */
+.home-status-dot.is-busy { background: var(--gold); }
+.home-status-label { min-width: 0; }
+.home-status-caret { flex: none; color: var(--ink-muted); }
+
+/* ---- Три плитки сводки ---- */
+/* auto-fit + minmax: на широком экране три в ряд, на узком — одна под другой,
+   без второго набора правил в медиазапросе. */
+.home-stats {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.home-stat {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4); cursor: pointer; text-align: left; color: inherit;
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: var(--paper);
+  transition: background var(--ease), border-color var(--ease);
+}
+.home-stat:hover { background: var(--row-hover); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.home-stat-icon {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--tile-tone) 14%, transparent);
+  color: var(--tile-tone);
+}
+.home-stat-icon svg { width: 20px; height: 20px; }
+.home-stat-chats { --tile-tone: var(--accent); }
+.home-stat-tasks { --tile-tone: var(--green); }
+.home-stat-calendar { --tile-tone: var(--gold); }
+.home-stat-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.home-stat-count {
+  font: 650 var(--text-xl)/1.15 var(--font-display); color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.home-stat-label {
+  color: var(--ink-muted);
+  font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui);
+}
+.home-go { width: 16px; height: 16px; flex: none; color: var(--ink-faint); }
+
+/* ---- Две колонки: расписание и «не потерять» ---- */
+.home-columns {
+  display: grid; gap: var(--space-4);
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  align-items: start;
+}
+.home-col-side { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.home-panel {
+  min-width: 0; display: flex; flex-direction: column; gap: var(--space-3);
+  padding: var(--space-4); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); background: var(--paper);
+}
+.home-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.home-panel-head h2 {
+  margin: 0; font: 600 var(--text-md)/var(--leading-md) var(--font-display); color: var(--ink);
+}
+.home-eyebrow {
+  margin: 0 0 2px; color: var(--ink-faint);
+  font: 600 var(--text-xs)/var(--leading-xs) var(--font-ui);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.home-panel-link {
+  flex: none; border: none; background: none; cursor: pointer; padding: 2px;
+  color: var(--accent); font: 500 var(--text-sm)/1.2 var(--font-ui);
+}
+.home-panel-link:hover { text-decoration: underline; }
+.home-panel-note { margin: 0; color: var(--ink-muted); font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui); }
+
+.home-schedule { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .home-event {
-  display: flex; align-items: baseline; gap: 12px; padding: 11px 14px; cursor: pointer;
-  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
-  color: inherit; text-align: left; transition: background var(--ease);
+  width: 100%; display: flex; align-items: baseline; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3); cursor: pointer; text-align: left; color: inherit;
+  border: none; border-radius: var(--radius-md); background: none;
+  transition: background var(--ease);
 }
 .home-event:hover { background: var(--row-hover); }
-.home-event-time { flex: none; min-width: 62px; font-size: 13px; font-weight: 600; color: var(--accent); }
-.home-event-title { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.home-schedule-all {
-  align-self: flex-start; border: none; background: none; cursor: pointer;
-  color: var(--accent); font-size: 13px; padding: 4px 2px;
+.home-event-time {
+  flex: none; min-width: 64px; color: var(--accent);
+  font: 600 var(--text-sm)/var(--leading-sm) var(--font-ui);
+  font-variant-numeric: tabular-nums;
 }
-.home-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.home-event-title {
+  flex: 1; min-width: 0; color: var(--ink);
+  font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui);
+}
+
+.home-attention {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-3); cursor: pointer; text-align: left; color: inherit;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  transition: background var(--ease);
+}
+.home-attention:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.home-attention-icon {
+  flex: none; width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: var(--radius-md); color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.home-attention-icon svg { width: 18px; height: 18px; }
+.home-attention-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.home-attention-title { font: 600 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink); }
+.home-attention-hint { font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-muted); }
+
+.home-next { flex-direction: row; align-items: center; gap: var(--space-3); }
+.home-next-mark {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center;
+  border-radius: 50%; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.home-next-mark svg { width: 20px; height: 20px; }
+.home-next-copy { min-width: 0; }
+.home-next-title { margin: 0; font: 600 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink); }
+.home-next-hint { margin: 1px 0 0; font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-muted); }
+
+.home-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .home-link {
-  display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; cursor: pointer;
-  border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--paper);
-  color: inherit; font-size: 14px; transition: background var(--ease);
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-4); cursor: pointer; color: inherit;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--paper-sunken);
+  font: 500 var(--text-sm)/1.2 var(--font-ui);
+  transition: background var(--ease);
 }
 .home-link:hover { background: var(--row-hover); }
+
+/* Узкий экран: одна колонка. Порог тот же, что у мобильной раскладки, —
+   второй рядом ничего не даёт, кроме шанса их рассинхронизировать. */
+@media (max-width: 760px) {
+  .home-section { padding: var(--space-5) var(--space-4) var(--space-4); gap: var(--space-5); }
+  .home-columns { grid-template-columns: minmax(0, 1fr); }
+  .home-hero-greeting { font-size: var(--text-xl); }
+}
 
 /* ===== Окно статуса ===== */
 .status-picker { display: flex; flex-direction: column; gap: 14px; }

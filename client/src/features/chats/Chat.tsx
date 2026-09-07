@@ -3386,6 +3386,9 @@ const Chat: React.FC = () => {
           <HomeSection
             displayName={currentDisplayName}
             unreadTotal={totalUnread}
+            status={describeStatus(currentStatusPreset, currentStatusCustom, customEmoji)}
+            customEmoji={customEmoji}
+            onOpenStatus={() => setStatusSheetOpen(true)}
             onOpenChats={() => goToSection('chats')}
             onOpenTasks={() => goToSection('tasks')}
             onOpenCalendar={() => { setCalendarOpenTarget(null); goToSection('calendar'); }}
