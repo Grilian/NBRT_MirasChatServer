@@ -21,7 +21,6 @@ declare global {
       setUnreadBadge: (count: number, badgeDataUrl?: string) => void;
       focusWindow: () => void;
       /** Раздвинуть окно вправо под правую область. `false` — не потребовалось. */
-      ensureWindowWidth?: (width: number) => Promise<boolean>;
       flashWindow: () => void;
       onFocusChange: (callback: (isFocused: boolean) => void) => () => void;
       // Уведомления рисует главный процесс: в рендерере с origin file://

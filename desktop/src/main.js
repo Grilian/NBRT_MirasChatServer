@@ -1163,36 +1163,6 @@ ipcMain.on('window:focus', () => {
   mainWindow.focus();
 });
 
-/**
- * Раздвинуть окно вправо под правую область приложения.
- *
- * Требование интерфейса: открытие ветки (или сведений о чате) в узком окне не
- * должно ни наезжать на переписку, ни молча не срабатывать — приложение
- * выходит из узкого состояния и освобождает место. Растём именно вправо,
- * оставляя левый край на месте: окно не должно «прыгать» под курсором.
- *
- * Развёрнутое окно не трогаем — оно и так во весь экран, и если панель туда не
- * влезла, раздвигать нечего.
- */
-ipcMain.handle('window:ensure-width', (event, requested) => {
-  const target = Math.round(Number(requested) || 0);
-  if (!mainWindow || !Number.isFinite(target) || target <= 0) return false;
-  if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return false;
-
-  const bounds = mainWindow.getBounds();
-  if (bounds.width >= target) return false;
-
-  // Шире рабочей области экрана не растём и за её правый край не вылезаем:
-  // окно, уехавшее под панель задач или на несуществующий монитор, человек
-  // потом не найдёт.
-  const area = screen.getDisplayMatching(bounds).workArea;
-  const width = Math.min(target, area.width);
-  const x = Math.min(Math.max(bounds.x, area.x), area.x + area.width - width);
-
-  mainWindow.setBounds({ x, y: bounds.y, width, height: bounds.height }, true);
-  return true;
-});
-
 // Скачивание файла из переписки — задача главного процесса.
 //
 // В рендерере ссылка с target="_blank" открывала бы СТОРОННИЙ браузер (у нас

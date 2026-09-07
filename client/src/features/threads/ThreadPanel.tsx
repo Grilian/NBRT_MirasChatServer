@@ -55,8 +55,6 @@ interface ThreadResponse {
 }
 
 interface ThreadPanelProps {
-  /** Разделитель для ручного изменения ширины — рисует владелец раскладки. */
-  resizeHandle?: React.ReactNode;
   /** Каталог стикеров — прокидывается в ленту ветки, как и каталог смайликов. */
   stickerCatalog?: StickerCatalog;
   rootId: number;
@@ -94,7 +92,6 @@ function makeClientMessageId(): string {
 }
 
 const ThreadPanel: React.FC<ThreadPanelProps> = ({
-  resizeHandle,
   rootId, currentUserId, socket, customEmoji, stickerCatalog, reactionEmoji, autoFocus, disabled, readActive = true,
   onClose, onSummary, onRead,
   onRequestDelete, onRemoveReaction,
@@ -335,7 +332,6 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
 
   return (
     <aside className="thread-panel" aria-label="Ветка">
-      {resizeHandle}
       <header className="thread-header">
         <div>
           <strong>Ветка</strong>

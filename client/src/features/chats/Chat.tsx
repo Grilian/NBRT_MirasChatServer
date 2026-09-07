@@ -83,8 +83,6 @@ import {
 } from './notificationPrefs';
 import {
   DEFAULT_UI_PREFS,
-  RIGHT_PANEL_MAX_WIDTH,
-  RIGHT_PANEL_MIN_WIDTH,
   ROSTER_MAX_WIDTH,
   ROSTER_MIN_WIDTH,
   UiPrefs,
@@ -93,7 +91,6 @@ import {
   saveUiPrefs
 } from '@/features/settings/uiPrefs';
 import { useLayoutMode } from '@/shared/hooks/useLayoutMode';
-import { widthNeededForRightPanel } from '@/shared/hooks/layoutMode';
 import { APP_NAME } from '@/app/version';
 import {
   OutgoingMessage,
@@ -664,47 +661,21 @@ const Chat: React.FC = () => {
   // То же самое для настроек интерфейса (группировка контактов, ширина списка).
   const [uiPrefs, setUiPrefs] = useState<UiPrefs>(getUiPrefs);
 
-  // Единая адаптивная раскладка: FULL → STANDARD → COMPACT → MOBILE.
-  // `activeThread` — НАМЕРЕНИЕ открыть правую область, а `layout.rightPanelOpen`
-  // — то, помещается ли она сейчас. Разделять обязательно: закрытую из-за
-  // нехватки места ветку надо вернуть саму, когда место появится, а закрытую
-  // человеком — не возвращать никогда (см. layoutMode.ts).
-  // Сведения о чате и профиль занимают ту же правую область, что и ветка,
-  // поэтому в раскладку они входят одним намерением: место нужно и тем, и
-  // другим, а показывается за раз что-то одно.
+  // Единая адаптивная раскладка: STANDARD → COMPACT → MOBILE.
+  //
+  // Правой области больше нет, и вместе с ней ушла вся её механика: намерение
+  // против возможности, автозакрытие при сужении с возвратом при расширении,
+  // расширение окна Electron под четвёртую колонку. Ветка теперь занимает
+  // место переписки, сведения и профиль — модальные окна; и то и другое
+  // помещается на любой ширине, спрашивать раскладку об этом больше незачем.
   const infoRequested = generalInfoOpen || groupInfoId !== null || infoModalUserId !== null;
 
   const layout = useLayoutMode({
     rosterWidth: uiPrefs.rosterWidth,
-    rightPanelRequested: activeThread !== null || infoRequested,
     rosterCollapsedByUser: uiPrefs.rosterCollapsed,
-    rightPanelWidth: uiPrefs.rightPanelWidth,
   });
   const narrowLayout = layout.mode === 'mobile';
 
-  // Открытие правой области в узком окне раздвигает окно, а не наезжает на
-  // переписку. Человек фактически возвращает область, которую адаптив закрыл
-  // сам при сужении, — значит и места под неё приложение должно найти само.
-  // В браузере раздвигать нечего: там панель просто не откроется, пока окно
-  // узкое, и это честнее, чем перекрыть переписку.
-  const ensureRoomForRightPanel = useCallback(() => {
-    if (narrowLayout) return; // на телефоне правая область — отдельный экран
-    const needed = widthNeededForRightPanel(uiPrefsRef.current.rosterWidth, layout.rosterCompact);
-    void window.electronAPI?.ensureWindowWidth?.(needed);
-  }, [narrowLayout, layout.rosterCompact]);
-
-  // Раздвигаем окно на САМО намерение открыть правую область, а не по месту
-  // вызова: точек открытия много (ветка из ленты, из списка веток, профиль из
-  // списка чатов, из сообщения, из «Людей», сведения из шапки), и обвешивать
-  // каждую значит забыть половину.
-  const rightPanelIntent = activeThread !== null || infoRequested;
-  useEffect(() => {
-    if (rightPanelIntent) ensureRoomForRightPanel();
-    // ensureRoomForRightPanel намеренно не в зависимостях: он пересоздаётся при
-    // смене режима, и от этого окно раздвигалось бы повторно уже после того,
-    // как человек сам уменьшил его обратно.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rightPanelIntent]);
   useEffect(() => onUiPrefsChanged(setUiPrefs), []);
 
   // Анимация смайликов — не проп, а модульный флаг: смайлики рисуются в
@@ -719,32 +690,6 @@ const Chat: React.FC = () => {
   // состоянии (перерисовка на каждый кадр), а в localStorage уходит один раз,
   // на отпускании: писать туда на каждое движение мыши незачем.
   const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const rightResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  // Правая область тянется за СВОЮ левую границу, поэтому знак смещения
-  // обратный списку: тянем влево — панель шире.
-  const handleRightResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    rightResizeStateRef.current = { startX: e.clientX, startWidth: uiPrefsRef.current.rightPanelWidth };
-  };
-
-  const handleRightResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const state = rightResizeStateRef.current;
-    if (!state) return;
-    const next = Math.min(
-      RIGHT_PANEL_MAX_WIDTH,
-      Math.max(RIGHT_PANEL_MIN_WIDTH, state.startWidth - (e.clientX - state.startX))
-    );
-    setUiPrefs((prev) => (prev.rightPanelWidth === next ? prev : { ...prev, rightPanelWidth: next }));
-  };
-
-  const handleRightResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!rightResizeStateRef.current) return;
-    rightResizeStateRef.current = null;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    saveUiPrefs(uiPrefsRef.current);
-  };
 
   const handleResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -914,10 +859,9 @@ const Chat: React.FC = () => {
     // кадр не унаследовал колонку ветки.
     setActiveThread(null);
     setThreadInboxOpen(false);
-    // Сведения о чате тоже принадлежат чатам. Если оставить запрос открытым,
-    // класс is-right-open переживает переход в «Настройки» и четырёхколоночная
-    // сетка начинает ужимать основной раздел, одновременно раздувая правую
-    // панель. При уходе из чатов закрываем сведения вместе с веткой.
+    // Сведения о чате тоже принадлежат чатам: окно о конкретной переписке,
+    // оставшееся висеть поверх «Настроек», человек прочтёт как поломку. При
+    // уходе из чатов закрываем сведения вместе с веткой.
     setGeneralInfoOpen(false);
     setGroupInfoId(null);
     setInfoModalUserId(null);
@@ -2916,9 +2860,11 @@ const Chat: React.FC = () => {
   // Сведения, открытые последними, занимают правую область поверх ветки:
   // человек только что попросил именно их. Закроет — ветка вернётся, её
   // состояние никуда не делось.
-  const infoInPanel = !narrowLayout && infoRequested && layout.rightPanelOpen;
-  const threadPaneOpen = showConversation && activeThread !== null
-    && !infoInPanel && (narrowLayout || layout.rightPanelOpen);
+  // Ветка ЗАМЕЩАЕТ переписку, а не встаёт рядом четвёртой колонкой. Условие
+  // от этого стало простым до неприличия — и в этом весь смысл правки:
+  // «намерение против возможности» существовало ровно потому, что колонке
+  // могло не хватить места. Замещающей панели места хватает всегда.
+  const threadPaneOpen = showConversation && activeThread !== null;
 
   // Содержимое правой области, когда там не ветка, а сведения. Собирается
   // один раз и рисуется либо в панели, либо модальным окном — разметка одна.
@@ -2986,11 +2932,9 @@ const Chat: React.FC = () => {
         + (layout.rosterCompact ? ' is-roster-compact' : '')
         + (conversationOpen ? ' is-conversation-view' : '')
         + (threadPaneOpen ? ' is-thread-open' : '')
-        + (infoInPanel ? ' is-right-open' : '')
         + (skipPaneAnim ? ' is-no-pane-anim' : '')}
       style={{
         ['--roster-w' as string]: `${uiPrefs.rosterWidth}px`,
-        ['--right-w' as string]: `${uiPrefs.rightPanelWidth}px`,
       }}
       {...swipeSections}
     >
@@ -3393,7 +3337,12 @@ const Chat: React.FC = () => {
           onOpen={(rootId) => { setGeneralInfoOpen(false); setGroupInfoId(null); setInfoModalUserId(null); setActiveThread({ rootId, autoFocus: false }); }}
         />
       ) : (
-        <main className="conversation">
+        // `inert`, пока сверху ветка. Переписка остаётся смонтированной ради
+        // позиции прокрутки — но смонтированное значит и достижимое с
+        // клавиатуры: Tab уводил бы фокус ПОД открытую панель, на кнопки,
+        // которых человек не видит. Раньше вопроса не было, потому что на
+        // десктопе обе области стояли рядом и обе были настоящими.
+        <main className="conversation" inert={threadPaneOpen}>
           <div className="conv-head">
             <button type="button" className="icon-btn back-btn" onClick={leaveConversation} aria-label="Назад к списку">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
@@ -3558,58 +3507,28 @@ const Chat: React.FC = () => {
           />
         </main>
       ))}
-      {/* Именно threadPaneOpen, а не сам activeThread: намерение открыть ветку
-          сохраняется и тогда, когда для неё нет места, — иначе её нельзя было
-          бы вернуть саму при расширении окна. Но РИСОВАТЬ панель в этот момент
-          нельзя: колонки под неё в гриде нет, и панель складывалась в ширину рельса
-          поверх рельса (поймано при проверке). */}
-      {/* Сведения о чате и профиль на десктопе живут в ПРАВОЙ ОБЛАСТИ, а не
-          поверх переписки: их открывают, чтобы посмотреть и вернуться к делу,
-          и модальное окно ради этого закрывало собой ровно то, о чём человек
-          читает. На узком экране это по-прежнему отдельный экран поверх —
-          класть панель рядом там некуда.
+      {/* Сведения о чате, профиль и участники — МОДАЛЬНОЕ окно на любой
+          ширине. До редизайна на десктопе они занимали собственную колонку
+          справа, и ради этой колонки существовала вся механика правой
+          области: намерение против возможности, автозакрытие при сужении,
+          ручная ширина, расширение окна Electron. Плата за неё была не в
+          коде, а на экране — переписка ужималась к своему минимуму каждый
+          раз, когда кто-то открывал карточку человека.
 
-          Компоненты те же самые: в панели их оборачивает .right-panel-host,
-          который снимает с .modal-overlay позиционирование поверх экрана.
-          Вторых версий этих окон не заводим. */}
-      {infoRequested && (
-        infoInPanel
-          ? (
-            <aside className="right-panel-host" aria-label="Сведения">
-              <div
-                className="right-panel-resizer"
-                role="separator"
-                aria-orientation="vertical"
-                aria-label="Ширина правой панели"
-                onPointerDown={handleRightResizeStart}
-                onPointerMove={handleRightResizeMove}
-                onPointerUp={handleRightResizeEnd}
-                onPointerCancel={handleRightResizeEnd}
-                onDoubleClick={() => saveUiPrefs({ ...uiPrefsRef.current, rightPanelWidth: DEFAULT_UI_PREFS.rightPanelWidth })}
-                title="Потяните, чтобы изменить ширину. Двойной клик — вернуть по умолчанию"
-              />
-              {infoContent}
-            </aside>
-          )
-          : infoContent
-      )}
+          Компоненты те же самые, второй их версии не заводим: они всегда были
+          модальными окнами, обёртка .right-panel-host лишь снимала с них
+          позиционирование поверх экрана. Теперь снимать нечего. */}
+      {infoRequested && infoContent}
+      {/* Ветка ЗАМЕЩАЕТ переписку и возвращает её по явной кнопке.
+          Переписка при этом остаётся смонтированной ПОД веткой — панель лишь
+          накрывает её колонку. Это и есть выполнение требования «возврат не
+          теряет позицию прокрутки основного чата»: сохранять и восстанавливать
+          scrollTop руками не нужно, если лента никуда не девалась. Разбирать
+          её на время ветки значило бы вернуть человека вниз ленты — то есть
+          ровно туда, откуда он не уходил. */}
       {threadPaneOpen && activeThread && socket && (
         <ThreadPanel
           key={activeThread.rootId}
-          resizeHandle={!narrowLayout && (
-            <div
-              className="right-panel-resizer"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Ширина правой панели"
-              onPointerDown={handleRightResizeStart}
-              onPointerMove={handleRightResizeMove}
-              onPointerUp={handleRightResizeEnd}
-              onPointerCancel={handleRightResizeEnd}
-              onDoubleClick={() => saveUiPrefs({ ...uiPrefsRef.current, rightPanelWidth: DEFAULT_UI_PREFS.rightPanelWidth })}
-              title="Потяните, чтобы изменить ширину. Двойной клик — вернуть по умолчанию"
-            />
-          )}
           rootId={activeThread.rootId}
           currentUserId={currentUserId}
           socket={socket}

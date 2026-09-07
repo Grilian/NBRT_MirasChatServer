@@ -7,16 +7,22 @@
 /* Ширину списка чатов человек тянет мышью — она приезжает инлайновой
    переменной из Chat.tsx (см. uiPrefs.rosterWidth), 320px — запасное значение
    на случай, если переменной почему-то нет. */
-/* ---- Адаптивная раскладка: FULL → STANDARD → COMPACT → MOBILE ----
-   Режим выбирает JS (см. utils/layoutMode.ts) и вешает класс is-mode-*, а
-   непрерывную часть — сколько именно пикселей достаётся списку и переписке —
+/* ---- Адаптивная раскладка: STANDARD → COMPACT → MOBILE ----
+   Режим выбирает JS (см. shared/hooks/layoutMode.ts) и вешает класс is-mode-*,
+   а непрерывную часть — сколько именно пикселей достаётся списку и переписке —
    считает грид. Разделение принципиально: перерисовывать React на каждый
    пиксель перетаскивания рамки значит заставить окно ехать за курсором.
 
    Ширину списка ограничивает clamp прямо здесь: сколько бы человек ни
    растянул панель, ей не дадут отобрать у переписки её минимум (520px). При
    нехватке места сужается список, а не переписка — это и есть правило
-   «основной чат имеет главный приоритет». */
+   «основной чат имеет главный приоритет».
+
+   Формула --roster-actual обязана совпадать с формулой в layoutMode.ts:
+   разойдись они — грид переполнит контейнер. Раньше формул было три (обычная,
+   с правой областью и её же в компактном режиме) и держать их в согласии
+   приходилось руками; теперь одна, а компактный режим просто подставляет в
+   неё другое значение. */
 .chat-layout {
   position: relative; display: grid; width: 100%; height: 100%; overflow: hidden;
   --roster-actual: clamp(240px, min(var(--roster-w, 320px), calc(100% - 68px - 520px)), 560px);
@@ -24,57 +30,32 @@
 }
 .chat-layout.is-single-pane { grid-template-columns: 68px 1fr; }
 /* COMPACT — минимальный десктоп: рельс, иконки чатов, переписка. */
-.chat-layout.is-roster-compact { grid-template-columns: 68px 68px minmax(0, 1fr); }
-/* FULL — правая область встаёт рядом, НЕ поверх переписки. JS открывает её
-   только тогда, когда она действительно помещается, поэтому здесь можно
-   спокойно задавать ей твёрдый минимум. */
-/* С открытой правой областью список ужимается и под неё тоже — тот же расчёт,
-   что в layoutMode.ts (ужать панели в допустимых пределах прежде, чем менять
-   структуру). Разойдись эти две формулы — грид переполнил бы контейнер. */
-/* Сетка с правой областью одна и та же, чем бы область ни была занята —
-   веткой или сведениями. */
-.chat-layout.is-right-open,
-.chat-layout.is-thread-open {
-  /* Правая область тоже ужимается до своего минимума, прежде чем отбирать
-     место у списка, — та же последовательность, что в layoutMode.ts. */
-  --right-actual: clamp(350px, min(var(--right-w, 400px), calc(100% - 68px - 240px - 520px)), 620px);
-  --roster-actual: clamp(240px, min(var(--roster-w, 320px), calc(100% - 68px - 520px - var(--right-actual))), 560px);
-  grid-template-columns: 68px var(--roster-actual) minmax(520px, 1fr) var(--right-actual);
-}
-.chat-layout.is-right-open.is-roster-compact,
-.chat-layout.is-thread-open.is-roster-compact {
-  --right-actual: clamp(350px, min(var(--right-w, 400px), calc(100% - 68px - 68px - 520px)), 620px);
-  grid-template-columns: 68px 68px minmax(520px, 1fr) var(--right-actual);
-}
+.chat-layout.is-roster-compact { --roster-actual: 68px; }
 
-/* ---- Правая область для сведений о чате и профиля ----
-   Внутри — те же компоненты, что показываются модальными окнами на телефоне.
-   Второй вёрстки для них не заводим: здесь снимается только позиционирование
-   поверх экрана, а содержимое карточки остаётся ровно тем же. */
-.right-panel-host {
-  position: relative; min-width: 0; min-height: 0; display: flex; overflow: hidden;
-  background: var(--chat-bg); border-left: 1px solid var(--line);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, .08); z-index: 7;
-}
-.right-panel-host .modal-overlay {
-  position: static; inset: auto; z-index: auto;
-  width: 100%; padding: 0; background: none; backdrop-filter: none;
-}
-.right-panel-host .modal-card {
-  width: 100%; max-width: none; height: 100%; max-height: none;
-  border: none; border-radius: 0; box-shadow: none;
-}
+/* ---- Ветка ----
+   Ветка ЗАМЕЩАЕТ переписку, а не встаёт рядом четвёртой колонкой: так решено
+   концепцией редизайна, и с этим ушли и колонка, и вся механика вокруг неё.
 
-/* Разделитель правой области — на её ЛЕВОЙ границе, зеркально списку чатов. */
-.right-panel-resizer {
-  position: absolute; top: 0; left: 0; width: 9px; height: 100%; z-index: 20;
-  cursor: col-resize; touch-action: none; background: transparent;
+   Накрывает она переписку именно наложением, а не подменой содержимого
+   колонки, и это не приём вёрстки, а требование: переписка обязана остаться
+   смонтированной, чтобы возврат из ветки не терял место в ленте. Разбери её
+   на время ветки — и человек вернётся вниз ленты, то есть туда, откуда он не
+   уходил. Отсюда и смещение слева: ветка начинается там же, где переписка, а
+   ширина списка приезжает той же переменной, что и в гриде.
+
+   Правило заперто в min-width НАМЕРЕННО. Медиазапрос специфичности не
+   добавляет, а селектор здесь тяжелее мобильного (.chat-layout.is-thread-open
+   .thread-panel против .thread-panel) — без этой рамки десктопное смещение
+   пережило бы переход на узкий экран и ветка на телефоне открывалась бы со
+   сдвигом вправо на ширину несуществующего там списка. Ту же ловушку уже
+   ловили на кнопке «Ещё». 761px — это MOBILE_MAX_WIDTH + 1. */
+@media (min-width: 761px) {
+  .chat-layout.is-thread-open .thread-panel {
+    position: absolute; top: 0; bottom: 0; right: 0;
+    left: calc(68px + var(--roster-actual));
+    z-index: 7;
+  }
 }
-.right-panel-resizer::after {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px;
-  background: transparent; transition: background var(--ease);
-}
-.right-panel-resizer:hover::after { background: var(--accent); }
 
 /* ---- Рельс разделов ---- */
 .nav-rail {

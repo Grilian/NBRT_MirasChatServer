@@ -21,8 +21,9 @@ docs/        Решения, план работ, деплой, открытые
 ```
 
 Точки концентрации, которые правятся чаще всего:
-`client/src/pages/Chat.tsx`, `client/src/components/ChatWindow.tsx`,
-`client/src/styles/theme.css`, `server/index.js`, `server/db.js`.
+`client/src/features/chats/Chat.tsx`, `client/src/features/chats/ChatWindow.tsx`,
+`client/src/shared/styles/` (19 частей, собираются в `index.css`),
+`server/index.js`, `server/db/steps/`.
 
 ## Что читать под задачу
 
@@ -83,7 +84,15 @@ docs/        Решения, план работ, деплой, открытые
 **Деплой только в самом конце**, после всех работ и тестов. На `main` ничего не
 уезжает по ходу; прод живёт на 1.11.18.
 
-Готово: волна 0 (страховка), волна 1 (хвосты), волна 2 (документация).
+Готово: волна 0 (страховка), волна 1 (хвосты), волна 2 (документация), волна 3
+(структура и Vite), волна 4 (дизайн-система и примитивы). Волна 5 (каркас
+навигации) в работе.
+
+**Правая область удалена целиком** (07.09.2026, по концепции): ветка замещает
+переписку с явным возвратом, сведения и профиль стали окнами. Вместе с колонкой
+сняты режим `FULL`, `rightPanelOpen`/`rightPanelAutoClosed`,
+`uiPrefs.rightPanelWidth` и IPC `window:ensure-width`. Подробности —
+`docs/decisions/layout.md`.
 
 ---
 
@@ -95,7 +104,7 @@ docs/        Решения, план работ, деплой, открытые
 **Тесты гоняются оба.** `cd server && npm test` (node:test),
 `cd client && npx vitest run`. Зелёные — условие любого коммита.
 
-**Характеризующие тесты `Chat.tsx`** (`client/src/pages/Chat.*.test.tsx`) ходят
+**Характеризующие тесты `Chat.tsx`** (`client/src/features/chats/Chat.*.test.tsx`) ходят
 через ПРОПСЫ детей, а не через разметку: разметка при редизайне поменяется вся,
 а договор с детьми обязан пережить переезд. Стенд — `Chat.harness.tsx`.
 

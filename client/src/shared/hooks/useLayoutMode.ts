@@ -4,7 +4,7 @@ import { LayoutInput, LayoutState, resolveLayout } from './layoutMode';
 /**
  * Текущая раскладка приложения. Пересчитывается на изменение размера окна, но
  * состояние React меняется ТОЛЬКО когда меняется дискретный результат —
- * режим, компактность списка, видимость правой области.
+ * режим и компактность списка.
  *
  * Это не преждевременная оптимизация: `Chat.tsx` — самый большой компонент
  * приложения, и перерисовывать его на каждый пиксель перетаскивания рамки
@@ -20,7 +20,7 @@ export function useLayoutMode(input: Omit<LayoutInput, 'width'>): LayoutState {
   );
 
   // Свежий ввод для обработчика resize: подписка живёт один раз, а ширина
-  // списка и намерение открыть панель меняются независимо от неё.
+  // списка и решение человека о свёрнутости меняются независимо от неё.
   const inputRef = useRef(input);
   inputRef.current = input;
 
@@ -30,19 +30,17 @@ export function useLayoutMode(input: Omit<LayoutInput, 'width'>): LayoutState {
   const apply = (next: LayoutState) => {
     const prev = stateRef.current;
     const sameShape = prev.mode === next.mode
-      && prev.rosterCompact === next.rosterCompact
-      && prev.rightPanelOpen === next.rightPanelOpen
-      && prev.rightPanelAutoClosed === next.rightPanelAutoClosed;
+      && prev.rosterCompact === next.rosterCompact;
     if (sameShape) return;
     stateRef.current = next;
     setState(next);
   };
 
-  // Пересчёт при изменении входных данных (ширина списка, запрос панели).
+  // Пересчёт при изменении входных данных (ширина списка, свёрнутость).
   useEffect(() => {
     apply(resolveLayout({ ...input, width: currentWidth() }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input.rosterWidth, input.rightPanelRequested, input.rosterCollapsedByUser]);
+  }, [input.rosterWidth, input.rosterCollapsedByUser]);
 
   useEffect(() => {
     // Считаем синхронно, без requestAnimationFrame.

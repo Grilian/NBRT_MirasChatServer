@@ -33,7 +33,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * Открытие ветки в узком окне не должно наезжать на переписку — вместо
    * этого приложение выходит из узкого состояния (см. layoutMode.ts).
    */
-  ensureWindowWidth: (width) => ipcRenderer.invoke('window:ensure-width', width),
   flashWindow: () => ipcRenderer.send('window:flash'),
   onFocusChange: (callback) => {
     const listener = (_event, isFocused) => callback(isFocused);
