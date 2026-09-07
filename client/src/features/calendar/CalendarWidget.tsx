@@ -14,6 +14,10 @@ import EventDialog from './EventDialog';
 import MiniMonth from './MiniMonth';
 import MonthView from './MonthView';
 import TimeGridView from './TimeGridView';
+import WeekStrip from './WeekStrip';
+import { resolveNow } from './now';
+import { useLayoutMode } from '@/shared/hooks/useLayoutMode';
+import { getUiPrefs } from '@/features/settings/uiPrefs';
 import { CalendarOccurrence, CalendarScope, CalendarViewMode, EventDraft, SeriesScope } from './types';
 import './calendar.css';
 
@@ -43,8 +47,27 @@ const VIEW_LABELS: { value: CalendarViewMode; label: string }[] = [
   { value: 'month', label: 'Месяц' },
   { value: 'week', label: 'Неделя' },
   { value: 'day', label: 'День' },
-  { value: 'agenda', label: 'Расписание' },
+  // «Лента», а не «Расписание»: «Расписанием» теперь называется блок на
+  // «Главной», и два разных экрана под одним словом человек читает как одно и
+  // то же место.
+  { value: 'agenda', label: 'Лента' },
 ];
+
+/**
+ * Что показывать на телефоне.
+ *
+ * Месяц и день оттуда убраны намеренно. Месячная сетка на 360px даёт по 50px
+ * на клетку: туда не помещается ни название, ни время — остаются цветные
+ * полоски, то есть картинка, по которой всё равно надо тыкать наугад. Общую
+ * картину месяца даёт разворот полосы недели («Показать весь месяц»), а
+ * читать события всё равно приходится лентой. Отдельный «День» рядом с лентой
+ * не нужен: лента и так начинается с выбранного дня.
+ */
+const MOBILE_VIEWS: CalendarViewMode[] = ['agenda', 'week'];
+
+/** На телефоне лента идёт первой — это основной способ читать календарь там. */
+const MOBILE_VIEW_ORDER = (a: CalendarViewMode, b: CalendarViewMode) =>
+  MOBILE_VIEWS.indexOf(a) - MOBILE_VIEWS.indexOf(b);
 
 interface DraftTarget {
   occurrence: CalendarOccurrence | null;
@@ -64,6 +87,28 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
   const [draft, setDraft] = useState<DraftTarget | null>(null);
   const [details, setDetails] = useState<CalendarOccurrence | null>(null);
   const [actionError, setActionError] = useState('');
+  // Полоса недели: развёрнута ли она в месяц. Состояние живёт здесь, а не в
+  // самой полосе, потому что от него зависит и высота ленты под ней.
+  const [monthOpen, setMonthOpen] = useState(false);
+
+  // Узкий экран — тот же расчёт, что у всего приложения: заводить здесь свой
+  // медиазапрос значит получить ширину, на которой календарь уже мобильный, а
+  // навигация вокруг него ещё нет.
+  const layout = useLayoutMode({
+    rosterWidth: getUiPrefs().rosterWidth,
+    rosterCollapsedByUser: getUiPrefs().rosterCollapsed,
+  });
+  const narrow = layout.mode === 'mobile';
+
+  // На телефоне месяц и день не показываются вовсе (см. MOBILE_VIEWS), но в
+  // сохранённом состоянии они остаться могут — человек выбрал их на компьютере
+  // и открыл приложение на телефоне. Подменяем лентой на лету, а сам выбор не
+  // трогаем: вернётся за компьютер — увидит то, что оставил.
+  const effectiveMode: CalendarViewMode = narrow && !MOBILE_VIEWS.includes(mode) ? 'agenda' : mode;
+  const views = narrow
+    ? VIEW_LABELS.filter((v) => MOBILE_VIEWS.includes(v.value))
+      .sort((a, b) => MOBILE_VIEW_ORDER(a.value, b.value))
+    : VIEW_LABELS;
 
   // Направление последнего перехода: содержимое въезжает с той стороны, куда
   // листнули, — иначе смена месяца выглядит как мигание, и непонятно, вперёд
@@ -79,20 +124,31 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     return days;
   }, [occurrences]);
 
-  const heading = mode === 'week'
+  const heading = effectiveMode === 'week'
     ? weekTitle(anchor)
-    : mode === 'day'
+    : effectiveMode === 'day'
       ? formatDayLong(anchor)
-      : mode === 'agenda'
-        ? 'Ближайшие события'
+      : effectiveMode === 'agenda'
+        // На телефоне над лентой стоит полоса недели, и месяц с неё же и
+        // листается — заголовку правильнее называть месяц, а не «ближайшие».
+        ? (narrow ? monthTitle(anchor) : 'Ближайшие события')
         : monthTitle(anchor);
+
+  // Что идёт прямо сейчас. Один расчёт на оба применения — полосу в шапке и
+  // подпись на карточке в ленте (см. now.ts).
+  const nowState = useMemo(() => resolveNow(occurrences, Date.now()), [occurrences]);
 
   // Куда сдвинута дата от режима к режиму. По этому же правилу считаются
   // подписи соседних периодов в подсказках сверху и снизу.
   const shiftedAnchor = (direction: number): DayKey => {
-    if (mode === 'month') return addMonths(anchor, direction);
-    if (mode === 'week') return addDays(anchor, direction * 7);
-    if (mode === 'day') return addDays(anchor, direction);
+    if (effectiveMode === 'month') return addMonths(anchor, direction);
+    if (effectiveMode === 'week') return addDays(anchor, direction * 7);
+    if (effectiveMode === 'day') return addDays(anchor, direction);
+    // В ленте с полосой недели стрелки двигают ровно то, что видно: неделю, а
+    // развёрнутая полоса — месяц. Прежний шаг в 30 дней рядом с полосой читался
+    // бы как поломка: нажал «вперёд», а подсвеченное число уехало неизвестно
+    // куда. Без полосы (широкий экран) шаг остаётся прежним.
+    if (narrow) return monthOpen ? addMonths(anchor, direction) : addDays(anchor, direction * 7);
     return addDays(anchor, direction * 30);
   };
 
@@ -106,20 +162,20 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
   // куда именно он попадёт.
   const neighbourLabel = (direction: number): string => {
     const target = shiftedAnchor(direction);
-    if (mode === 'month') return monthShortTitle(target);
-    if (mode === 'week') return weekTitle(target);
+    if (effectiveMode === 'month') return monthShortTitle(target);
+    if (effectiveMode === 'week') return weekTitle(target);
     return formatDayLong(target);
   };
 
   // «Расписание» не листается: там длинный список, и прокручивать его — это
   // прокрутка, а не переход. Отсюда же скрыты подсказки и анимация.
-  const pageable = mode !== 'agenda';
+  const pageable = effectiveMode !== 'agenda';
 
   // Колесо и свайп листают то же, что стрелки в шапке. В сетке времени
   // переход случается, только когда сутки долистаны до края.
   useStepGestures(mainRef, shift, {
     enabled: pageable && !draft && !details,
-    scrollable: () => (mode === 'week' || mode === 'day' ? gridScrollRef.current : null),
+    scrollable: () => (effectiveMode === 'week' || effectiveMode === 'day' ? gridScrollRef.current : null),
   });
 
   useCalendarKeys({
@@ -242,11 +298,11 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
         <h1 className="cal-heading">{heading}</h1>
 
         <div className="cal-views">
-          {VIEW_LABELS.map((view) => (
+          {views.map((view) => (
             <button
               key={view.value}
               type="button"
-              className={`cal-view${mode === view.value ? ' is-active' : ''}`}
+              className={`cal-view${effectiveMode === view.value ? ' is-active' : ''}`}
               onClick={() => setMode(view.value)}
             >
               {view.label}
@@ -269,11 +325,36 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
         <p className="form-error cal-error" onAnimationEnd={() => setActionError('')}>{actionError}</p>
       )}
 
+      {/* Полоса «сейчас» — то, ради чего в календарь заглядывают посреди дня:
+          не «что сегодня было», а «где я должен быть в эту минуту». Событий на
+          весь день она не показывает (см. now.ts): выставка длиной в сутки
+          висела бы здесь весь день, вытесняя встречу через десять минут.
+          На телефоне её нет — там то же самое написано прямо на карточке в
+          ленте, и вторая полоса сверху отняла бы у списка целую строку. */}
+      {!narrow && (nowState.current || nowState.next) && (
+        <button
+          type="button"
+          className={'cal-upnext' + (nowState.current ? ' is-running' : '')}
+          onClick={() => openOccurrence(nowState.current || nowState.next!)}
+        >
+          <span className="cal-upnext-mark">
+            {nowState.current ? 'Сейчас' : 'Далее'}
+          </span>
+          <span className="cal-upnext-time">
+            {formatClock((nowState.current || nowState.next!).starts_at)}
+          </span>
+          <span className="cal-upnext-title">{(nowState.current || nowState.next!).title}</span>
+          <span className="cal-upnext-till">
+            до {formatClock((nowState.current || nowState.next!).ends_at)}
+          </span>
+        </button>
+      )}
+
       <div className="cal-body">
         <aside className="cal-side">
           <MiniMonth
             selected={anchor}
-            onSelect={(day) => { setAnchor(day); if (mode === 'agenda') setMode('day'); }}
+            onSelect={(day) => { setAnchor(day); if (effectiveMode === 'agenda') setMode('day'); }}
             markedDays={markedDays}
           />
 
@@ -309,6 +390,19 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
             </button>
           )}
 
+          {/* Полоса недели — мобильный способ ходить по датам. На широком
+              экране её место занимает мини-календарь слева, и вторая
+              навигация по числам там была бы просто дублем. */}
+          {narrow && effectiveMode === 'agenda' && (
+            <WeekStrip
+              anchor={anchor}
+              onSelect={setAnchor}
+              occurrences={occurrences}
+              expanded={monthOpen}
+              onToggleExpanded={() => setMonthOpen((open) => !open)}
+            />
+          )}
+
           {/* key на обёртке: смена даты пересоздаёт узел, и анимация въезда
               запускается заново. Без этого CSS-анимация отработала бы один раз
               за всю жизнь компонента. В месяце ключом идёт сам месяц, а не
@@ -317,10 +411,10 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
               переигрывать анимацию въезда — меняется только подсветка
               выбранного дня. */}
           <div
-            key={`${mode}:${mode === 'month' ? monthKeyOf(anchor) : anchor}`}
+            key={`${effectiveMode}:${effectiveMode === 'month' ? monthKeyOf(anchor) : anchor}`}
             className={`cal-page${pageable ? (direction >= 0 ? ' is-next' : ' is-prev') : ''}`}
           >
-            {mode === 'month' && (
+            {effectiveMode === 'month' && (
               <MonthView
                 anchor={anchor}
                 selected={anchor}
@@ -332,10 +426,10 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
               />
             )}
 
-            {(mode === 'week' || mode === 'day') && (
+            {(effectiveMode === 'week' || effectiveMode === 'day') && (
               <TimeGridView
                 anchor={anchor}
-                days={mode === 'week' ? weekDays(anchor) : [anchor]}
+                days={effectiveMode === 'week' ? weekDays(anchor) : [anchor]}
                 occurrences={occurrences}
                 onCreateAt={(day, minutes) => openCreate(day, minutes)}
                 onOpenEvent={openOccurrence}
@@ -343,11 +437,15 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
               />
             )}
 
-            {mode === 'agenda' && (
+            {effectiveMode === 'agenda' && (
               <AgendaView
                 occurrences={occurrences}
                 onOpenEvent={openOccurrence}
                 onToggleTask={toggleTask}
+                /* На телефоне лента начинается с выбранного в полосе дня —
+                   иначе выбор числа ничего бы не менял. На широком экране
+                   лента остаётся сплошной: там рядом мини-календарь. */
+                from={narrow ? anchor : undefined}
               />
             )}
           </div>

@@ -285,18 +285,34 @@
 /* ---- Расписание ---- */
 .cal-agenda { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 32px; max-width: 720px; }
 .cal-agenda-day { padding: 12px 0 4px; border-bottom: 1px solid var(--line); }
-.cal-agenda-caption { margin: 0 0 8px; font: 600 13px/1 var(--font-display); color: var(--ink-muted); }
+.cal-agenda-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 0 8px; }
+.cal-agenda-caption { margin: 0; font: 600 13px/1 var(--font-display); color: var(--ink-muted); }
 .cal-agenda-day.is-today .cal-agenda-caption { color: var(--accent); }
+.cal-agenda-count { flex: none; font: 400 12px/1 var(--font-ui); color: var(--ink-faint); }
 .cal-agenda-items { display: flex; flex-direction: column; }
-.cal-agenda-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; min-width: 0; }
-.cal-agenda-time { flex: none; width: 68px; font-size: 12.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.cal-agenda-row { display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; min-width: 0; }
+.cal-agenda-time {
+  flex: none; width: 68px; display: flex; flex-direction: column; gap: 1px;
+  font-size: 12.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums;
+}
+.cal-agenda-till { font-size: 11.5px; color: var(--ink-faint); }
 .cal-agenda-title {
   flex: 1; min-width: 0; text-align: left; border: none; background: transparent; cursor: pointer;
   color: var(--ink); font-size: 14px; padding: 2px 6px; border-radius: 5px;
-  display: flex; align-items: baseline; gap: 8px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
 }
 .cal-agenda-title:hover { background: var(--row-hover); }
-.cal-agenda-place { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Название события НЕ обрезается: в ленте его не переспросишь, а «Экскурсия
+   «Хра…» не отличить от другой экскурсии. Переносится на вторую строку. */
+.cal-agenda-name { min-width: 0; }
+.cal-agenda-place { font-size: 12px; color: var(--ink-faint); }
+/* Идущее сейчас выделено кромкой слева, а не цветом всей строки: строка
+   остаётся читаемой, но взгляд цепляется. */
+.cal-agenda-row.is-running { border-left: 2px solid var(--accent); margin-left: -8px; padding-left: 6px; }
+.cal-agenda-now {
+  font: 700 10.5px/1.3 var(--font-ui); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--accent);
+}
 .cal-agenda-row.is-done .cal-agenda-title { text-decoration: line-through; color: var(--ink-faint); }
 .cal-check {
   flex: none; width: 17px; height: 17px; border-radius: 50%; cursor: pointer;
@@ -403,3 +419,69 @@
      места меньше: ужимаем по высоте, не убирая. */
   .cal-peek { padding: 3px 12px; font-size: 11px; }
 }
+
+/* ===== Полоса «сейчас / далее» =====
+   Класс НЕ .cal-now: это имя уже занято линией текущего времени в сетке
+   (position: absolute), и полоса от неё улетала за пределы календаря поверх
+   рельса. Поймано живой проверкой.
+   Отвечает на вопрос «где я должен быть в эту минуту». Кнопка целиком: то, что
+   идёт сейчас, чаще всего и хотят открыть. */
+.cal-upnext {
+  flex: none; display: flex; align-items: baseline; gap: 10px; width: 100%;
+  padding: 8px 14px; cursor: pointer; text-align: left; color: inherit;
+  border: none; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font: inherit;
+}
+.cal-upnext:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.cal-upnext-mark {
+  flex: none; font: 700 11px/1.4 var(--font-ui); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+.cal-upnext.is-running .cal-upnext-mark { color: var(--accent); }
+.cal-upnext-time {
+  flex: none; font: 600 13px/1.4 var(--font-ui); color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+/* Название не обрезается: оно и есть ответ. Длинное переносится, полоса
+   становится выше — это правильнее, чем «Экскурсия «Хра…». */
+.cal-upnext-title { flex: 1; min-width: 0; font: 500 13px/1.4 var(--font-ui); color: var(--ink); }
+.cal-upnext-till { flex: none; font: 400 12px/1.4 var(--font-ui); color: var(--ink-muted); }
+
+/* ===== Полоса недели (телефон) ===== */
+.cal-strip {
+  flex: none; padding: 8px 8px 2px;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); margin: 0 0 12px;
+}
+.cal-strip-heads, .cal-strip-week { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-strip-head {
+  text-align: center; padding-bottom: 4px;
+  font: 500 11px/1.3 var(--font-ui); color: var(--ink-faint);
+  text-transform: capitalize;
+}
+.cal-strip-day {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 6px 0 5px; cursor: pointer; color: var(--ink);
+  border: none; border-radius: var(--radius-md); background: none; font: inherit;
+}
+.cal-strip-day.is-weekend .cal-strip-num { color: var(--ink-muted); }
+.cal-strip-day:hover { background: var(--row-hover); }
+.cal-strip-num { font: 600 15px/1.15 var(--font-ui); font-variant-numeric: tabular-nums; }
+/* Сегодняшнее число подчёркнуто цветом даже когда выбрано не оно: иначе,
+   уйдя на другую неделю, человек теряет точку отсчёта. */
+.cal-strip-day.is-today .cal-strip-num { color: var(--accent); }
+.cal-strip-day.is-selected { background: var(--accent); }
+.cal-strip-day.is-selected .cal-strip-num,
+.cal-strip-day.is-selected.is-today .cal-strip-num { color: var(--accent-ink); }
+/* Точка занятости. Место под неё есть ВСЕГДА, даже когда её нет: иначе числа
+   с событиями и без прыгали бы по вертикали. */
+.cal-strip-dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; }
+.cal-strip-dot.is-busy { background: var(--accent); }
+.cal-strip-day.is-selected .cal-strip-dot.is-busy { background: var(--accent-ink); }
+.cal-strip-toggle {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 0 6px; cursor: pointer; border: none; background: none;
+  color: var(--ink-muted); font: 500 12px/1.2 var(--font-ui);
+}
+.cal-strip-toggle:hover { color: var(--ink); }
