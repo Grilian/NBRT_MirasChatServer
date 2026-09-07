@@ -145,13 +145,21 @@ interface NavRailProps {
   onOpenMore?: () => void;
   /** Открытый сейчас раздел лежит за «Ещё» — подсвечиваем саму кнопку. */
   moreActive?: boolean;
+  /**
+   * Подписи стоят РЯДОМ с иконками, а не под ними, и рельс шире.
+   *
+   * Решает раскладка (`layout.railExpanded`), а не медиазапрос: подписи —
+   * первая уступка при сужении окна, и условие их появления обязано жить там
+   * же, где остальные уступки, иначе два независимых порога снова разойдутся.
+   */
+  expanded?: boolean;
 }
 
-const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, onOpenMenu, menuOpen = false, accountType, onOpenMore, moreActive = false }) => {
+const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, onOpenMenu, menuOpen = false, accountType, onOpenMore, moreActive = false, expanded = false }) => {
   const sections = SECTIONS.filter((s) => isSectionAllowedFor(accountType, s.id));
 
   return (
-    <nav className="nav-rail" aria-label="Разделы">
+    <nav className={'nav-rail' + (expanded ? ' is-expanded' : '')} aria-label="Разделы">
       <div className="rail-brand">
         <button
           type="button"

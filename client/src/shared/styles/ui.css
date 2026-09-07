@@ -160,9 +160,9 @@
   text-transform: uppercase;
   color: var(--ink-faint);
 }
-/* В свёрнутом рельсе подписи нет — вместо неё разделительная черта: место
-   под текст там всё равно занято значками. */
-.nav-rail.is-icons .rail-group {
+/* В рельсе-иконках подписи нет — вместо неё разделительная черта: 68px под
+   слово «РАБОТА» не хватает, а обрезать его многоточием нельзя. */
+.nav-rail:not(.is-expanded) .rail-group {
   height: 1px; padding: 0; margin: var(--space-3) var(--space-3);
   overflow: hidden; background: var(--line); color: transparent;
 }

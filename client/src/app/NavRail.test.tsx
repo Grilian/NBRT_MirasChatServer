@@ -73,6 +73,27 @@ describe('рельс', () => {
     expect(container.querySelector('.rail-item-more')).toHaveClass('is-active');
   });
 
+  test('подписи включает раскладка, а не медиазапрос', () => {
+    // Подписи — первая уступка при сужении окна. Условие обязано приезжать
+    // из layoutMode вместе с остальными уступками: второй независимый порог
+    // в CSS разошёлся бы с первым, и рельс менял бы вид не там, где считает
+    // раскладка.
+    const icons = render(<NavRail {...base} />);
+    expect(icons.container.querySelector('.nav-rail')).not.toHaveClass('is-expanded');
+
+    const labelled = render(<NavRail {...base} expanded />);
+    expect(labelled.container.querySelector('.nav-rail')).toHaveClass('is-expanded');
+  });
+
+  test('названия разделов в разметке есть всегда — их прячет только оформление', () => {
+    // Подпись не выкидывается из DOM в узком рельсе: она остаётся именем
+    // кнопки для экранных читалок, а спрятана визуально.
+    const { container } = render(<NavRail {...base} />);
+    const labels = [...container.querySelectorAll('.rail-label')].map((n) => n.textContent);
+    expect(labels).toContain('Пространства');
+    expect(labels).toContain('Настройки');
+  });
+
   test('заголовок группы «Работа» стоит перед «Пространствами»', () => {
     const { container } = render(<NavRail {...base} />);
     const head = container.querySelector('.rail-group');

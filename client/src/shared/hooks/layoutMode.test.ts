@@ -9,13 +9,29 @@ const at = (width: number, over: Partial<typeof base> = {}) =>
   resolveLayout({ ...base, ...over, width });
 
 describe('порядок уступок при сужении окна', () => {
-  test('на широком окне открыты все три области', () => {
+  test('на широком окне открыты все три области, рельс с подписями', () => {
     const state = at(1600);
     expect(state.mode).toBe('standard');
     expect(state.rosterCompact).toBe(false);
+    expect(state.railExpanded).toBe(true);
+    expect(state.railWidth).toBe(LAYOUT_SIZES.navRailWide);
   });
 
-  test('первым уступает место список чатов, а не переписка', () => {
+  test('первыми уступают ПОДПИСИ на рельсе, а не список и не переписка', () => {
+    // Раздел без подписи опознаётся по иконке и подсказке, список чатов без
+    // имён и превью — никак. Поэтому оформление платит первым.
+    const width = LAYOUT_SIZES.navRailWide + LAYOUT_SIZES.rosterMin + LAYOUT_SIZES.chatMin - 1;
+    const state = at(width);
+
+    expect(state.railExpanded).toBe(false);
+    expect(state.railWidth).toBe(LAYOUT_SIZES.navRail);
+    // Список при этом ещё полный: до него очередь не дошла.
+    expect(state.rosterCompact).toBe(false);
+    expect(state.mode).toBe('standard');
+    expect(state.chatWidth).toBeGreaterThanOrEqual(LAYOUT_SIZES.chatMin);
+  });
+
+  test('следом уступает место список чатов, а не переписка', () => {
     // Полный список со своим минимумом уже не оставляет переписке её минимума.
     const width = LAYOUT_SIZES.navRail + LAYOUT_SIZES.rosterMin + LAYOUT_SIZES.chatMin - 30;
     const state = at(width);
@@ -39,6 +55,31 @@ describe('порядок уступок при сужении окна', () => {
     }
   });
 
+  test('подписи на рельсе никогда не появляются раньше, чем помещаются', () => {
+    // Каждая уступка обязана быть монотонной: сузил окно — подписи ушли и
+    // сами не вернулись, пока место не появилось снова.
+    let lastExpanded = false;
+    for (let width = MOBILE_MAX_WIDTH + 1; width <= 2400; width += 1) {
+      const state = at(width);
+      if (lastExpanded) expect(state.railExpanded).toBe(true);
+      lastExpanded = state.railExpanded;
+      if (state.railExpanded) {
+        expect(width).toBeGreaterThanOrEqual(
+          LAYOUT_SIZES.navRailWide + LAYOUT_SIZES.rosterMin + LAYOUT_SIZES.chatMin
+        );
+      }
+    }
+  });
+
+  test('свёрнутый вручную список ОТДАЁТ рельсу место под подписи', () => {
+    // Свернул список сам — значит освободил место, и рельс вправе его занять.
+    // Это не нарушение порядка уступок: порядок про НЕХВАТКУ места, а тут её
+    // нет. Ширина взята такая, где с полным списком подписи не помещаются.
+    const width = LAYOUT_SIZES.navRailWide + LAYOUT_SIZES.rosterMin + LAYOUT_SIZES.chatMin - 60;
+    expect(at(width).railExpanded).toBe(false);
+    expect(at(width, { rosterCollapsedByUser: true }).railExpanded).toBe(true);
+  });
+
   test('четвёртой области не существует ни на одной ширине', () => {
     // Правая колонка убрана вместе со всей своей механикой. Проверка тут не
     // ради типов (их и так проверяет компилятор), а ради того, чтобы возврат
@@ -47,7 +88,7 @@ describe('порядок уступок при сужении окна', () => {
     for (let width = 300; width <= 2400; width += 17) {
       const state = at(width);
       expect(Object.keys(state).sort())
-        .toEqual(['chatWidth', 'mode', 'rosterCompact', 'rosterWidth']);
+        .toEqual(['chatWidth', 'mode', 'railExpanded', 'railWidth', 'rosterCompact', 'rosterWidth']);
     }
   });
 });
@@ -79,7 +120,7 @@ describe('переписка не сжимается ниже рабочего �
       for (const rosterWidth of [240, 320, 460, 560]) {
         const s = at(width, { rosterWidth });
         if (s.mode === 'mobile') continue;
-        expect(LAYOUT_SIZES.navRail + s.rosterWidth + s.chatWidth).toBeLessThanOrEqual(width);
+        expect(s.railWidth + s.rosterWidth + s.chatWidth).toBeLessThanOrEqual(width);
       }
     }
   });

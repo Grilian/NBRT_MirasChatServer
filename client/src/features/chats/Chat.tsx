@@ -2930,6 +2930,7 @@ const Chat: React.FC = () => {
         + ` is-mode-${layout.mode}`
         + (isChats ? '' : ' is-single-pane')
         + (layout.rosterCompact ? ' is-roster-compact' : '')
+        + (layout.railExpanded ? ' is-rail-expanded' : '')
         + (conversationOpen ? ' is-conversation-view' : '')
         + (threadPaneOpen ? ' is-thread-open' : '')
         + (skipPaneAnim ? ' is-no-pane-anim' : '')}
@@ -2968,6 +2969,7 @@ const Chat: React.FC = () => {
         unreadTotal={totalUnread}
         onOpenMenu={() => setAppMenuOpen(true)}
         menuOpen={appMenuOpen}
+        expanded={layout.railExpanded}
         accountType={currentAccountType}
         onOpenMore={narrowLayout ? () => setMoreSheetOpen(true) : undefined}
         moreActive={moreSheetOpen || mobileOverflowFor(currentAccountType).includes(section)}

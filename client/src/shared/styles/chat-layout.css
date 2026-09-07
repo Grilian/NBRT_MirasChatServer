@@ -25,12 +25,16 @@
    неё другое значение. */
 .chat-layout {
   position: relative; display: grid; width: 100%; height: 100%; overflow: hidden;
-  --roster-actual: clamp(240px, min(var(--roster-w, 320px), calc(100% - 68px - 520px)), 560px);
-  grid-template-columns: 68px var(--roster-actual) minmax(0, 1fr);
+  --rail-actual: 68px;
+  --roster-actual: clamp(240px, min(var(--roster-w, 320px), calc(100% - var(--rail-actual) - 520px)), 560px);
+  grid-template-columns: var(--rail-actual) var(--roster-actual) minmax(0, 1fr);
 }
-.chat-layout.is-single-pane { grid-template-columns: 68px 1fr; }
+.chat-layout.is-single-pane { grid-template-columns: var(--rail-actual) 1fr; }
 /* COMPACT — минимальный десктоп: рельс, иконки чатов, переписка. */
 .chat-layout.is-roster-compact { --roster-actual: 68px; }
+/* Рельс с подписями — первая уступка при сужении окна, решает layoutMode.ts.
+   Число обязано совпадать с LAYOUT_SIZES.navRailWide. */
+.chat-layout.is-rail-expanded { --rail-actual: 210px; }
 
 /* ---- Ветка ----
    Ветка ЗАМЕЩАЕТ переписку, а не встаёт рядом четвёртой колонкой: так решено
@@ -41,7 +45,7 @@
    смонтированной, чтобы возврат из ветки не терял место в ленте. Разбери её
    на время ветки — и человек вернётся вниз ленты, то есть туда, откуда он не
    уходил. Отсюда и смещение слева: ветка начинается там же, где переписка, а
-   ширина списка приезжает той же переменной, что и в гриде.
+   ширины рельса и списка приезжают теми же переменными, что и в гриде.
 
    Правило заперто в min-width НАМЕРЕННО. Медиазапрос специфичности не
    добавляет, а селектор здесь тяжелее мобильного (.chat-layout.is-thread-open
@@ -52,7 +56,7 @@
 @media (min-width: 761px) {
   .chat-layout.is-thread-open .thread-panel {
     position: absolute; top: 0; bottom: 0; right: 0;
-    left: calc(68px + var(--roster-actual));
+    left: calc(var(--rail-actual) + var(--roster-actual));
     z-index: 7;
   }
 }
@@ -64,6 +68,7 @@
   padding: 6px 4px 8px; gap: 4px;
 }
 .rail-brand { display: flex; justify-content: center; padding: 2px 0 6px; }
+
 .rail-brand .roundel { width: 30px; height: 30px; font-size: 14px; }
 
 .rail-items { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }

@@ -26,8 +26,17 @@ import { ROSTER_MAX_WIDTH, ROSTER_MIN_WIDTH } from '@/features/settings/uiPrefs'
 
 /** Ширины областей, px. Подобраны замером реальной вёрстки, а не «на глаз». */
 export const LAYOUT_SIZES = {
-  /** Рельс разделов — фиксированный, см. .chat-layout в chat-layout.css. */
+  /** Рельс разделов в иконках, см. .chat-layout в chat-layout.css. */
   navRail: 68,
+  /**
+   * Рельс с подписями — как в концепции редизайна.
+   *
+   * 210px — это не «покрасивее», а ширина, при которой самое длинное название
+   * раздела («Пространства», 12 знаков) помещается целиком рядом с иконкой и
+   * счётчиком. Обрезать подписи многоточием здесь нельзя: правило концепции
+   * прямо запрещает это для важного текста, а название раздела — ровно оно.
+   */
+  navRailWide: 210,
   /** Пределы полного списка чатов — те же, что у ручного изменения ширины. */
   rosterMin: ROSTER_MIN_WIDTH,
   rosterMax: ROSTER_MAX_WIDTH,
@@ -74,6 +83,18 @@ export interface LayoutState {
   mode: LayoutMode;
   /** Список чатов показывает только аватары. */
   rosterCompact: boolean;
+  /**
+   * Рельс разделов показывает подписи рядом с иконками.
+   *
+   * Ось СВОЯ, отдельная от `mode`: режим описывает список чатов, а рельс
+   * уступает место раньше него и по своему условию. Свести их в один
+   * четвёртый режим значило бы получить состояние «человек сам свернул
+   * список, но места вагон» — и не суметь ответить, широкий это режим или
+   * компактный.
+   */
+  railExpanded: boolean;
+  /** Фактическая ширина рельса, px. */
+  railWidth: number;
   /** Фактическая ширина списка после ограничений, px. */
   rosterWidth: number;
   /** Сколько остаётся переписке — для отладки и проверок. */
@@ -92,19 +113,28 @@ function fits(width: number, parts: number[]): boolean {
 /**
  * Единственное место, где решается, как выглядит приложение при данной ширине.
  *
- * Порядок уступок задан требованиями и менять его нельзя: сначала список чатов
- * сжимается в иконки, и только потом — мобильный режим. Переписка не ужимается
- * ниже своего минимума ни на одном шаге: ради этого всё и делается.
+ * Порядок уступок задан требованиями и менять его нельзя: сначала рельс
+ * разделов теряет подписи и сжимается в иконки, затем список чатов сжимается в
+ * иконки, и только потом — мобильный режим. Переписка не ужимается ниже своего
+ * минимума ни на одном шаге: ради этого всё и делается.
+ *
+ * Почему подписи уступают ПЕРВЫМИ: раздел и без подписи опознаётся по иконке и
+ * по подсказке, а список чатов без имён и превью не опознаётся никак. Отдавать
+ * ради подписей место переписке или списку значит платить содержимым за
+ * оформление.
  */
 export function resolveLayout(input: LayoutInput): LayoutState {
-  const { navRail, rosterMin, rosterMax, rosterCompact, chatMin } = LAYOUT_SIZES;
+  const { navRail, navRailWide, rosterMin, rosterMax, rosterCompact, chatMin } = LAYOUT_SIZES;
   const width = Math.max(0, input.width);
 
   const mobile = (): LayoutState => ({
     // В мобильном режиме ширины областей не участвуют в раскладке вовсе:
-    // экран занимает ровно один экран приложения.
+    // экран занимает ровно один экран приложения. Рельс там — нижняя панель,
+    // подписи в ней есть всегда и от ширины не зависят.
     mode: 'mobile',
     rosterCompact: false,
+    railExpanded: false,
+    railWidth: 0,
     rosterWidth: input.rosterWidth,
     chatWidth: width,
   });
@@ -124,16 +154,33 @@ export function resolveLayout(input: LayoutInput): LayoutState {
   // предусмотрено, сразу мобильный.
   if (!fits(width, [navRail, rosterCompact, chatMin])) return mobile();
 
+  // Подписи на рельсе — если широкий рельс помещается рядом с ПОЛНЫМ списком.
+  //
+  // Считать здесь по фактической ширине списка нельзя, и это не мелочь:
+  // свёрнутый АДАПТИВОМ список освободил место не потому, что оно лишнее, а
+  // потому, что его не хватало, — и рельс, забравший это место под подписи,
+  // получил бы 210px оформления рядом с чатами, от которых остались одни
+  // аватары. Ровно обратный порядок уступок. Поймано тестом на монотонность:
+  // на 798px подписи возвращались сами.
+  //
+  // Свёрнутый ЧЕЛОВЕКОМ список — другое дело: он распорядился местом сам, и
+  // рельс вправе его занять.
+  const collapsedByUser = input.rosterCollapsedByUser === true;
+  const railExpanded = fits(width, [navRailWide, collapsedByUser ? rosterCompact : rosterMin, chatMin]);
+  const railWidth = railExpanded ? navRailWide : navRail;
+
   // Переписке достаётся всё, что осталось, но не меньше её минимума: при
   // нехватке места сужается не она, а сам список (в пределах своего минимума).
   const rosterActual = compact
     ? rosterCompact
-    : clamp(width - navRail - chatMin, rosterMin, desiredRoster);
+    : clamp(width - railWidth - chatMin, rosterMin, desiredRoster);
 
   return {
     mode: compact ? 'compact' : 'standard',
     rosterCompact: compact,
+    railExpanded,
+    railWidth,
     rosterWidth: rosterActual,
-    chatWidth: width - navRail - rosterActual,
+    chatWidth: width - railWidth - rosterActual,
   };
 }

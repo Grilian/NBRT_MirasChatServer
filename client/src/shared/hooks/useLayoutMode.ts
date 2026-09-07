@@ -4,7 +4,7 @@ import { LayoutInput, LayoutState, resolveLayout } from './layoutMode';
 /**
  * Текущая раскладка приложения. Пересчитывается на изменение размера окна, но
  * состояние React меняется ТОЛЬКО когда меняется дискретный результат —
- * режим и компактность списка.
+ * режим, компактность списка и подписи на рельсе.
  *
  * Это не преждевременная оптимизация: `Chat.tsx` — самый большой компонент
  * приложения, и перерисовывать его на каждый пиксель перетаскивания рамки
@@ -30,7 +30,8 @@ export function useLayoutMode(input: Omit<LayoutInput, 'width'>): LayoutState {
   const apply = (next: LayoutState) => {
     const prev = stateRef.current;
     const sameShape = prev.mode === next.mode
-      && prev.rosterCompact === next.rosterCompact;
+      && prev.rosterCompact === next.rosterCompact
+      && prev.railExpanded === next.railExpanded;
     if (sameShape) return;
     stateRef.current = next;
     setState(next);

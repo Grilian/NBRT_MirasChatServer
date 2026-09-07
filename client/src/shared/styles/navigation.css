@@ -56,6 +56,49 @@
   }
   .rail-soon { top: 7px; right: 5px; }
 
+  /* ---- Рельс с подписями ----
+     Подписи стоят РЯДОМ с иконкой, а не под ней: в строку помещается и
+     название целиком, и счётчик у правого края — то, ради чего рельс и
+     расширяется. Класс вешает React по `layout.railExpanded`, а не
+     медиазапрос: подписи — первая уступка при сужении окна, и её условие
+     обязано жить там же, где остальные уступки.
+
+     Правила стоят внутри того же icons-only блока и сразу за ним: они его
+     перекрывают, и разнесённые по файлам читались бы как два независимых
+     оформления рельса. Каждое свойство, заданное выше, здесь обязано быть
+     перезадано ЯВНО — на `display: none` у подписи я уже наступил:
+     остальные свойства применились, а текста не было. */
+  .nav-rail.is-expanded { padding: 8px 8px 10px; gap: 2px; }
+  .nav-rail.is-expanded .rail-brand { justify-content: flex-start; padding: 0 4px 8px; }
+  .nav-rail.is-expanded .rail-item {
+    flex-direction: row; align-items: center; justify-content: flex-start;
+    min-height: 42px; gap: 12px; padding: 8px 12px; border-radius: var(--radius-lg);
+  }
+  /* display: contents — чтобы значок и счётчик стали прямыми элементами
+     строки: иначе счётчик остаётся приколотым к углу иконки, и к правому
+     краю подписной строки его не вынести. Заодно уходит подложка-плитка под
+     иконкой — в подписной строке её роль играет подсветка всей строки. */
+  .nav-rail.is-expanded .rail-icon { display: contents; }
+  .nav-rail.is-expanded .rail-icon svg { width: 21px; height: 21px; flex: none; }
+  .nav-rail.is-expanded .rail-label {
+    display: block; flex: 1; min-width: 0; text-align: left;
+    font: 500 var(--text-sm)/var(--leading-sm) var(--font-ui);
+    /* Названия разделов не обрезаются: 210px подобраны под самое длинное из
+       них («Пространства»). Появится длиннее — расширять рельс, а не резать. */
+    white-space: nowrap; overflow: visible; text-overflow: clip;
+  }
+  .nav-rail.is-expanded .rail-badge {
+    position: static; top: auto; left: auto; flex: none; margin-left: auto;
+    border: none; min-width: 20px; height: 20px; line-height: 20px;
+  }
+  .nav-rail.is-expanded .rail-soon {
+    position: static; top: auto; right: auto; flex: none; margin-left: auto;
+  }
+  /* «Настройки» уходят вниз — это служебный пункт, а не один из рабочих
+     разделов. Так же и в рельсе-иконках. */
+  .rail-item-settings { margin-top: auto; }
+
+
   /* Заголовок «Чаты» на десктопе больше не занимает отдельную строку: поиск
      начинается на той же высоте, что hamburger в рельсе. */
   .roster-head { padding: 7px 10px 8px; }
