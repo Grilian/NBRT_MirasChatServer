@@ -631,8 +631,9 @@ router.put('/admin/custom/enabled-bulk', verifySuperAdmin, (req, res) => {
 
     // Каждый выбранный тянет за собой свои тона — правило то же, что поштучно.
     const all = db.prepare('SELECT id, unicode_key FROM emoji_items WHERE unicode_key IS NOT NULL').all();
+    const picked = new Set(ids);
     const canonicals = new Set();
-    for (const row of all) if (ids.includes(row.id)) canonicals.add(emojiCanonicalKey(row.unicode_key));
+    for (const row of all) if (picked.has(row.id)) canonicals.add(emojiCanonicalKey(row.unicode_key));
     const target = new Set(ids);
     for (const row of all) if (canonicals.has(emojiCanonicalKey(row.unicode_key))) target.add(row.id);
 

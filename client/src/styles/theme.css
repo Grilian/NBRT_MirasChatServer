@@ -4893,3 +4893,4 @@ button.status-preset-row { cursor: pointer; }
   .sa-cell-versions { grid-column: 3 / -1; }
 }
 .sa-catalog-more { justify-self: start; margin-top: 6px; }
+.sa-boot { padding: 40px; text-align: center; color: var(--ink-muted); font-size: 14px; }

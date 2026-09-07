@@ -1,11 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import Login from './pages/Login';
 import Chat from './pages/Chat';
-import SuperAdminApp from './pages/SuperAdminApp';
 import TitleBar from './components/TitleBar';
 import { isNativeMobile } from './utils/mobileNotify';
 import { reportAppVersion } from './utils/reportVersion';
+
+// Панель управления открывается ОДНИМ человеком и только по #superadmin, а
+// весит она вместе с правкой смайликов и стикеров заметную часть бандла.
+// Обычному сотруднику этот код не нужен ни разу за всё время работы, поэтому
+// он грузится отдельным куском по требованию, а не в общей сборке.
+const SuperAdminApp = lazy(() => import('./pages/SuperAdminApp'));
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
@@ -70,7 +75,11 @@ function App() {
   };
 
   if (isSuperAdminRoute) {
-    return <SuperAdminApp />;
+    return (
+      <Suspense fallback={<div className="sa-boot">Загрузка панели управления…</div>}>
+        <SuperAdminApp />
+      </Suspense>
+    );
   }
 
   return (

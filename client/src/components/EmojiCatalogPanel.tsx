@@ -133,12 +133,19 @@ const EmojiCatalogPanel: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, []);
 
+  // Ручки правки возвращают полный каталог сами, поэтому перечитывать его
+  // вторым запросом незачем: выдача весит мегабайты, и на каждое нажатие
+  // галочки их уезжало вдвое больше нужного.
   const run = async (tag: string, fn: () => Promise<any>) => {
     setBusy(tag);
     setError('');
     try {
-      await fn();
-      await load();
+      const res = await fn();
+      const body = res?.data;
+      const fresh = Array.isArray(body) ? body : body?.packs;
+      if (Array.isArray(fresh)) setPacks(fresh);
+      if (body?.assetPacks) setSystem((prev) => (prev ? { ...prev, assetPacks: body.assetPacks } : prev));
+      if (!Array.isArray(fresh) && !body?.assetPacks) await load();
     } catch (e: any) {
       setError(e.response?.data?.error || 'Не удалось выполнить действие');
     } finally {
