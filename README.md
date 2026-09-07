@@ -1,6 +1,9 @@
 # NBRT_MirasChatServer
 
-Монорепозиторий MirasChat: `client` (веб, React), `server` (Node/Express + Socket.io + SQLite), `desktop` (Electron-обёртка клиента под Windows), `mobile` (Capacitor).
+Монорепозиторий MirasChat: `client` (веб, React 19 + TypeScript 5 + Vite), `server` (Node/Express 5 + Socket.io + SQLite), `desktop` (Electron под Windows и Linux), `mobile` (Capacitor).
+
+Этот файл — эксплуатационная инструкция: как выложить, как собрать, как настроить.
+Почему всё устроено именно так — в `docs/`, начиная с `CLAUDE.md` и `docs/PLAN.md`.
 
 ## Обновление продакшн-сервера после `git pull`
 
@@ -106,7 +109,7 @@ npm run prepare-app
 
 Одна команда делает два шага (можно запускать и по отдельности: `npm run build:client`, `npm run sync`):
 
-1. `scripts/build-client.js` собирает `client/` в режиме production в `client/build-mobile` (отдельно от обычного `client/build`, чтобы не перетирать веб-сборку) с `PUBLIC_URL=.` — внутри APK нет веб-сервера, пути должны быть относительными — и копирует результат в `mobile/www`.
+1. `scripts/build-client.js` собирает `client/` в режиме production в `client/build-mobile` (отдельно от обычного `client/build`, чтобы не перетирать веб-сборку) и копирует результат в `mobile/www`. Пути внутри сборки относительные (`base: './'` в `client/vite.config.ts`) — внутри APK нет веб-сервера.
 2. `npx cap sync android` копирует `mobile/www` в `android/app/src/main/assets/public` и обновляет список плагинов Capacitor.
 
 Шаг обязателен после **любой** правки в `client/` — Gradle сам клиент не пересобирает.
@@ -568,7 +571,7 @@ curl -s https://cagrizzz.ru/miraschat/updates/latest.yml
 
 ## Версионирование
 
-- **Веб-клиент** (`client/`): версию не нужно вручную трогать. `client/scripts/generate-version.js` запускается автоматически перед `npm start`/`npm run build` (хуки `prestart`/`prebuild` в `client/package.json`) и штампует короткий git-хэш + время сборки в `client/src/version.ts` (в `.gitignore`, не коммитится). Именно эта версия видна в UI (см. выше).
+- **Веб-клиент** (`client/`): версию не нужно вручную трогать. `client/scripts/generate-version.cjs` запускается автоматически перед `npm start`/`npm run build` (хуки `prestart`/`prebuild` в `client/package.json`) и штампует короткий git-хэш + время сборки в `client/src/version.ts` (в `.gitignore`, не коммитится). Именно эта версия видна в UI (см. выше).
 - **Десктоп-приложение** (`desktop/`): версия — это поле `"version"` в `desktop/package.json`, её нужно поднимать **вручную** перед каждой сборкой инсталлятора (`npm run dist:win`), она попадает в имя файла (`MirasChat Setup X.Y.Z.exe`) и в метаданные Electron-приложения. Автоматически не меняется — не забывайте бампить перед `dist:win`.
 - **Android-приложение** (`mobile/`): `versionCode` и `versionName` в `mobile/android/app/build.gradle`, тоже **вручную** перед каждой сборкой APK — подробности в разделе «Сборка Android-приложения». Внутри самого приложения (Настройки → низ списка) показывается git-версия веб-клиента, как и в вебе, — она к `versionName` отношения не имеет.
 
