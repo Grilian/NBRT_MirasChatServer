@@ -9,6 +9,19 @@
   width: 100%; margin: 0 0 14px; min-height: 590px; border-radius: 0;
   background: linear-gradient(180deg, #151c23 0%, #10161d 100%);
 }
+/* Без фотографии — вертикальный размыв ЛИЧНОГО цвета человека (того же, что у
+   круглого аватара). Тёмный низ обязателен: имя, статус и плашка с данными
+   лежат прямо на этом фоне белым, и светлый низ съел бы их. Поэтому цвет
+   идёт сверху, а к низу уходит почти в чёрный. */
+.user-info-modal .user-info-top.has-no-photo {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--profile-tone, #2b3a46) 78%, #ffffff 22%) 0%,
+    var(--profile-tone, #2b3a46) 34%,
+    color-mix(in srgb, var(--profile-tone, #2b3a46) 42%, #0b1015 58%) 72%,
+    #0b1015 100%
+  );
+}
 /* ВАЖНО: файл редактора уже сохранён строго в 3:4. Публичный профиль не
    должен снова растягивать этот кадр на фактическую высоту содержимого:
    у чужого профиля есть ряд действий, поэтому .user-info-top выше, чем в
@@ -66,6 +79,12 @@
 @media (max-width: 760px) {
   .user-info-modal { width: 100%; max-width: none; max-height: none; height: 100%; border-radius: 0; }
   .user-info-modal .user-info-top { min-height: min(690px, 82vh); }
+  /* ...но только КОГДА ЕСТЬ ФОТО. Без него высоту задавать нечем: снимка,
+     который продолжался бы вниз, нет, и фиксированные 690px оставляли под
+     плашкой с данными 172 пикселя пустого градиента. Поймано измерением
+     живого экрана. Минимум оставляем — верх профиля обязан читаться как
+     обложка, а не как строчка заголовка. */
+  .user-info-modal .user-info-top.has-no-photo { min-height: min(430px, 58vh); }
   .user-info-modal .user-info-top-content { padding-top: min(430px, 51vh); }
 }
 

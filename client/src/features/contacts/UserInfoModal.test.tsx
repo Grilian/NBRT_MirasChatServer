@@ -22,8 +22,30 @@ test('notification action calls the real handler without a development label', a
   expect(status).not.toHaveTextContent('в разработке');
 });
 
-test('unfinished profile actions still keep their development label', () => {
+test('в ряду действий остались только настоящие', () => {
+  // Их было четыре, и три отвечали «— в разработке»: звонок, поиск по
+  // переписке и «Ещё». Ряд, где работает одна кнопка из четырёх, стоит
+  // человеку трёх попыток, прежде чем он поймёт, что нажимать нечего.
+  render(<UserInfoModal user={user} currentUserId={1} onClose={vi.fn()} onWrite={vi.fn()} />);
+
+  expect(screen.getByRole('button', { name: 'Написать' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Отключить уведомления' })).toBeInTheDocument();
+  for (const gone of ['Звонок', 'Поиск по переписке', 'Ещё']) {
+    expect(screen.queryByRole('button', { name: gone })).not.toBeInTheDocument();
+  }
+});
+
+test('«Написать» открывает переписку, а не показывает заглушку', () => {
+  // Действие, ради которого на профиль и заходят: раньше его не было вовсе.
+  const onWrite = vi.fn();
+  render(<UserInfoModal user={user} currentUserId={1} onClose={vi.fn()} onWrite={onWrite} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Написать' }));
+  expect(onWrite).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+});
+
+test('без обработчика кнопки «Написать» нет — она не рисуется вхолостую', () => {
   render(<UserInfoModal user={user} currentUserId={1} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Звонок' }));
-  expect(screen.getByRole('status')).toHaveTextContent('Звонок — в разработке');
+  expect(screen.queryByRole('button', { name: 'Написать' })).not.toBeInTheDocument();
 });

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '@/shared/api/client';
 import Avatar from '@/shared/ui/Avatar';
+import { colorForName } from '@/shared/lib/avatar';
 import Modal from '@/shared/ui/Modal';
 import { nameFor } from '@/shared/lib/user';
 import { formatDate } from '@/shared/lib/time';
@@ -44,6 +45,8 @@ interface UserInfoModalProps {
   onOpenMessage?: (chatId: string, messageId: number) => void;
   /** Просмотр собственного публичного профиля: те же данные, что видят другие, без действий над собеседником. */
   ownProfilePreview?: boolean;
+  /** Открыть переписку с этим человеком. Без него кнопка «Написать» не рисуется. */
+  onWrite?: () => void;
   profileStatus?: { emoji: string; label: string } | null;
   customEmoji?: CustomEmojiMap;
   onEditProfile?: () => void;
@@ -65,17 +68,29 @@ const icon = (...paths: string[]) => (
 );
 
 // Уведомления уже подключены; остальные действия пока остаются заделом под UI.
-const PLANNED_ACTIONS = [
-  { key: 'call', label: 'Звонок', icon: icon('M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.6a2 2 0 0 1-.4 2.1L8.1 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.4c.8.3 1.7.6 2.6.7a2 2 0 0 1 1.7 2Z') },
+/**
+ * Круглые действия под именем.
+ *
+ * Их было четыре, и три из них отвечали «— в разработке»: звонок, поиск по
+ * переписке и «Ещё». При этом действия, ради которого на профиль и заходят —
+ * НАПИСАТЬ — не было вовсе. Ряд из четырёх кнопок, где работает одна, выглядит
+ * богаче, но стоит человеку трёх попыток, прежде чем он поймёт, что нажимать
+ * нечего.
+ *
+ * Осталось два настоящих. Звонков в приложении нет; поиск по тексту сообщений
+ * отложен решением пользователя (см. docs/OPEN_QUESTIONS.md), и до его
+ * появления кнопка была бы обещанием. Появятся — вернутся сюда же.
+ */
+const PROFILE_ACTIONS = [
+  { key: 'write', label: 'Написать', icon: icon('M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.9L3 20.5l1.6-4.9A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4Z') },
   { key: 'mute', label: 'Уведомления', icon: icon('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9', 'M13.7 21a2 2 0 0 1-3.4 0') },
-  { key: 'search', label: 'Поиск по переписке', icon: icon('M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z', 'm21 21-4.3-4.3') },
-  { key: 'more', label: 'Ещё', icon: icon('M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2', 'M19 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2', 'M5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2') },
 ];
 
 const UserInfoModal: React.FC<UserInfoModalProps> = ({
   user, online, notificationsMuted = false, onToggleNotifications,
   canModerate, groups = [], comment, onUpdateComment, chatId, currentUserId, onOpenMessage,
   ownProfilePreview = false, profileStatus = null, customEmoji = {}, onEditProfile, onClose,
+  onWrite,
 }) => {
   const name = nameFor(user);
   const coverUrl = resolveUploadUrl(user.avatarPath);
@@ -118,6 +133,10 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
   };
 
   const runProfileAction = async (key: string, label: string) => {
+    if (key === 'write') {
+      onWrite?.();
+      return;
+    }
     if (key !== 'mute') {
       setSoonNote({ text: label, planned: true });
       return;
@@ -176,7 +195,15 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
             уходит в размытие, и уже по размытому снимку идут имя, кнопки и
             плашка с данными. Цвет фона под ними берётся из самой фотографии —
             поэтому у каждого человека профиль своего оттенка. */}
-        <div className={'user-info-top' + (coverUrl ? '' : ' has-no-photo')}>
+        {/* Без фотографии верх профиля красится ЛИЧНЫМ цветом человека — тем
+            же, что у его круглого аватара. Одинаковая тёмная плита у всех, кто
+            не поставил фото, делала их профили неразличимыми: на экране, где
+            всё остальное — тоже текст, цвет остаётся единственным, что
+            отличает Бориса от Бориса. */}
+        <div
+          className={'user-info-top' + (coverUrl ? '' : ' has-no-photo')}
+          style={coverUrl ? undefined : ({ ['--profile-tone' as string]: colorForName(name) })}
+        >
           {coverUrl && <img className="user-info-cover-img" src={coverUrl} alt="" />}
           <div className="user-info-cover-fade" />
           <div className="user-info-floating-head">
@@ -204,7 +231,7 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({
             {/* В своём превью не показываем действия над собеседником: это именно публичный вид профиля. */}
             {!ownProfilePreview && (
             <div className="user-info-actions">
-              {PLANNED_ACTIONS.map((action) => (
+              {PROFILE_ACTIONS.filter((a) => a.key !== 'write' || !!onWrite).map((action) => (
                 <button
                   key={action.key}
                   type="button"

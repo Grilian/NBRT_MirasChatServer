@@ -2996,6 +2996,20 @@ const Chat: React.FC = () => {
       currentUserId={currentUserId}
       customEmoji={customEmoji}
       onOpenMessage={handleOpenMessage}
+      // Действие, ради которого на профиль и заходят. Через handleStartChat, а
+      // не handleSelectChat: человека могло не быть в контактах вовсе, и тогда
+      // переписки с ним ещё не существует — её надо завести.
+      onWrite={() => {
+        setInfoModalUserId(null);
+        handleStartChat({
+          id: infoModalUser.id,
+          username: infoModalUser.username,
+          display_name: infoModalUser.display_name,
+          avatar_path: infoModalUser.avatarPath,
+          group_id: null,
+          group_name: infoModalUser.groupName || null,
+        });
+      }}
       onClose={() => setInfoModalUserId(null)}
     />
   ) : null;
