@@ -243,6 +243,31 @@ test('invalid group policy does not partially save other fields', async () => {
   assert.deepEqual(row, { name: 'Original', announcements_only: 0 });
 });
 
+test('group name has a length limit — otherwise "do not truncate" is unenforceable', async () => {
+  // Предела не было вовсе, и это не абстрактная дыра: имя чата показывается в
+  // шапке переписки БЕЗ обрезки (там человек убеждается, в каком он чате), и
+  // без предела на сервере шапка превращалась бы в стену текста. Самое
+  // длинное название на проде — 18 знаков, так что 120 никого не стесняет.
+  const ownerId = createUser('long_name_owner');
+  const token = tokenFor(ownerId);
+  const tooLong = 'я'.repeat(121);
+
+  const created = await request('/api/groups', { token, method: 'POST', body: { name: tooLong } });
+  assert.equal(created.response.status, 400);
+
+  const ok = await request('/api/groups', { token, method: 'POST', body: { name: 'я'.repeat(120) } });
+  assert.equal(ok.response.status, 200);
+
+  // Переименование обязано проверять то же самое: иначе предел обходится в
+  // два шага — создать коротким именем и тут же переименовать.
+  const renamed = await request(`/api/groups/${ok.data.id}`, {
+    token, method: 'PUT', body: { name: tooLong },
+  });
+  assert.equal(renamed.response.status, 400);
+  const row = db.prepare('SELECT name FROM chat_groups WHERE id = ?').get(ok.data.id);
+  assert.equal(row.name.length, 120);
+});
+
 test('invalid moderation patch does not partially rename a user', async () => {
   const userId = createUser('moderated_user');
   const superToken = jwt.sign(

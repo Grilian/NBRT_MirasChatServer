@@ -467,6 +467,12 @@
 /* Имя и превью намеренно разведены сильнее, чем были: имя — насыщенное и
    полужирное, превью — бледное. При близких весах строка читается как
    однородная каша, и взгляд не цепляется за имя, по которому чат и ищут. */
+/* В СТРОКЕ СПИСКА имя, наоборот, обрезается — и это не противоречие правилу
+   «не обрезать», а его применение. Список сканируют глазом сверху вниз, и
+   возможность это делать даёт одинаковая высота строк: имена в две строки
+   заставляли бы перечитывать список целиком. Начало названия при этом
+   различает строки, полное имя даёт подсказка по наведению (title), а
+   окончательно оно читается в шапке переписки, где не обрезается. */
 .row-name { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ink); }
 .row-name span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .badge-admin { flex: none; font-size: 9.5px; font-weight: 700; color: var(--gold-strong); background: color-mix(in srgb, var(--gold) 16%, transparent); border-radius: 5px; padding: 1px 5px; letter-spacing: .04em; }
@@ -541,7 +547,15 @@
 }
 .conv-head-identity:disabled { cursor: default; }
 .conv-title { flex: 1; min-width: 0; }
-.conv-title .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+/* Имя чата в шапке ПЕРЕНОСИТСЯ, а не обрезается многоточием.
+   Шапка — единственное место, где человек убеждается, в каком он чате, и на
+   телефоне подсказки по наведению нет вовсе: «Методический совет по
+   краеведе…» там не отличить от другого совета. Заголовок из-за этого бывает
+   в две строки — так и должно быть, высоту задаёт содержимое.
+   Безграничным это не делает: длина названия группы ограничена на сервере
+   (MAX_GROUP_NAME), иначе шапка превращалась бы в стену текста.
+   В СТРОКЕ СПИСКА, наоборот, обрезка остаётся — см. .row-name. */
+.conv-title .name { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; color: var(--ink); }
 .conv-title .status { font-size: 13px; color: var(--accent); display: flex; align-items: center; gap: 5px; }
 .conv-title .status.is-offline { color: var(--ink-muted); }
 .conv-title .status.is-broadcast { color: var(--ink-muted); }

@@ -161,6 +161,17 @@ router.get('/', verifyToken, (req, res) => {
   }
 });
 
+/**
+ * Предел длины названия группы.
+ *
+ * Не перестраховка: без предела правило «важный текст не обрезается»
+ * невыполнимо в принципе — имя из пяти тысяч знаков придётся резать везде, где
+ * его показывают, и первым делом в шапке переписки, то есть ровно там, где
+ * человек убеждается, в каком он чате. 120 знаков — с огромным запасом: самое
+ * длинное название на проде занимает 18.
+ */
+const MAX_GROUP_NAME = 120;
+
 // Создатель становится единственным 'owner'; себя в список участников
 // добавлять не нужно — POST добавляет его автоматически. Канал-объявление
 // может завести кто угодно (не только сам админ/модератор) — это его
@@ -170,6 +181,7 @@ router.post('/', verifyToken, (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Название группы обязательно' });
+    if (name.length > MAX_GROUP_NAME) return res.status(400).json({ error: 'Название группы слишком длинное' });
     const announcementsOnly = !!req.body.announcements_only;
 
     const memberIds = Array.isArray(req.body.member_ids)
@@ -219,6 +231,7 @@ router.put('/:id', verifyToken, requireMember, requireOwner, (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Название группы обязательно' });
+    if (name.length > MAX_GROUP_NAME) return res.status(400).json({ error: 'Название группы слишком длинное' });
 
     // Сначала валидируем всё тело. Раньше имя/режим объявлений успевали
     // сохраниться, а затем неверная write_policy возвращала 400 — клиент видел
