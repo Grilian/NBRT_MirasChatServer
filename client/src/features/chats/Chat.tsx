@@ -91,6 +91,8 @@ import {
   saveUiPrefs
 } from '@/features/settings/uiPrefs';
 import { useLayoutMode } from '@/shared/hooks/useLayoutMode';
+import TopBar from '@/app/TopBar';
+import { SearchHit, SearchTarget } from '@/features/search/globalSearch';
 import { APP_NAME } from '@/app/version';
 import {
   OutgoingMessage,
@@ -2681,6 +2683,73 @@ const Chat: React.FC = () => {
     || (c.comment || '').toLowerCase().includes(searchNeedle)
   ));
   const chatsById = new Map(allChats.map(chat => [chat.id, chat]));
+
+  // Куда может увести глобальный поиск в верхней панели.
+  //
+  // Источников два, и второй обязателен: `allChats` — это уже заведённые
+  // переписки и свои контакты, а найти нужно ЛЮБОГО сотрудника, в том числе
+  // того, кому ещё ни разу не писали. Разделение типов аккаунтов при этом не
+  // ослабляется ни на шаг: справочник фильтрует сервер (`GET /api/users`), и
+  // в `directory` чужой стороны просто нет.
+  const searchScope: SearchTarget[] = (() => {
+    // Логин и подразделение есть только в справочнике: строка списка чатов их
+    // не носит, ей они не нужны. Без этой сшивки поиск по логину работал бы
+    // ровно для тех, кому ещё НИ РАЗУ не писали, и переставал работать, стоит
+    // добавить человека в контакты, — поймано живой проверкой на «bob».
+    const staffById = new Map(directory.map((u) => [u.id, u]));
+    const known = new Set<string>();
+    const scope: SearchTarget[] = [];
+    for (const chat of allChats) {
+      known.add(chat.id);
+      const staff = chat.userId ? staffById.get(chat.userId) : undefined;
+      scope.push({
+        chatId: chat.id,
+        name: chat.name,
+        kind: chat.section === 'group'
+          ? (chat.announcementsOnly ? 'channel' : 'group')
+          : chat.section === 'general' ? 'channel'
+            : chat.section === 'self' ? 'service' : 'chat',
+        username: staff?.username || null,
+        detail: chat.comment || staff?.department || staff?.group_name || staff?.position || null,
+        avatarPath: chat.avatarPath || null,
+        userId: chat.userId ?? null,
+        online: chat.online,
+      });
+    }
+    for (const person of directory) {
+      const chatId = chatIdFor(currentUserId, person.id);
+      if (known.has(chatId) || person.id === currentUserId) continue;
+      scope.push({
+        chatId,
+        name: person.display_name || person.username,
+        kind: 'person',
+        username: person.username,
+        detail: person.department || person.group_name || person.position || null,
+        avatarPath: person.avatar_path,
+        userId: person.id,
+        online: onlineUsers.includes(person.id),
+      });
+    }
+    return scope;
+  })();
+
+  // Верхняя панель — только десктоп. На телефоне навигация снизу, у каждого
+  // раздела своя шапка, и 52px сверху там ничего не улучшают.
+  const showTopBar = !narrowLayout;
+
+  const handleSearchPick = (hit: SearchHit) => {
+    // Сотрудник, которому ещё ни разу не писали, чата не имеет: открывается
+    // его карточка — тот же путь, что из «Контактов». Пытаться открыть
+    // несуществующий чат бессмысленно, `handleSelectChat` такой id и не
+    // примет: он специально отказывается показывать переписку, которой не
+    // знает, чтобы не открыть вместо неё ПРОШЛУЮ.
+    if (hit.kind === 'person' && hit.userId) {
+      setInfoModalUserId(hit.userId);
+      return;
+    }
+    goToSection('chats');
+    handleSelectChat(hit.chatId);
+  };
   const recentChats = recentChatIds
     .map(chatId => chatsById.get(chatId))
     .filter((chat): chat is RosterChat => !!chat)
@@ -2931,6 +3000,7 @@ const Chat: React.FC = () => {
         + (isChats ? '' : ' is-single-pane')
         + (layout.rosterCompact ? ' is-roster-compact' : '')
         + (layout.railExpanded ? ' is-rail-expanded' : '')
+        + (showTopBar ? ' has-top-bar' : '')
         + (conversationOpen ? ' is-conversation-view' : '')
         + (threadPaneOpen ? ' is-thread-open' : '')
         + (skipPaneAnim ? ' is-no-pane-anim' : '')}
@@ -2952,6 +3022,18 @@ const Chat: React.FC = () => {
         onDismiss={dismissToast}
       />
 
+      {showTopBar && (
+        <TopBar
+          targets={searchScope}
+          onPick={handleSearchPick}
+          selfName={currentDisplayName}
+          selfAvatarPath={currentAvatarPath}
+          online={socketConnected}
+          onOpenMenu={() => setAppMenuOpen(true)}
+          menuOpen={appMenuOpen}
+        />
+      )}
+
       <NavRail
         active={settingsModalOpen ? 'settings' : (peopleOpen ? 'people' : section)}
         // На десктопе «Контакты» и «Настройки» — компактные окна поверх
@@ -2967,8 +3049,6 @@ const Chat: React.FC = () => {
           goToSection(id);
         }}
         unreadTotal={totalUnread}
-        onOpenMenu={() => setAppMenuOpen(true)}
-        menuOpen={appMenuOpen}
         expanded={layout.railExpanded}
         accountType={currentAccountType}
         onOpenMore={narrowLayout ? () => setMoreSheetOpen(true) : undefined}

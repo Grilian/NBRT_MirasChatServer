@@ -52,7 +52,6 @@ describe('рельс', () => {
     active: 'chats' as const,
     onSelect: () => {},
     unreadTotal: 0,
-    onOpenMenu: () => {},
     accountType: 'staff',
   };
 

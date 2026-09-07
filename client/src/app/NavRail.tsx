@@ -138,8 +138,6 @@ interface NavRailProps {
   active: SectionId;
   onSelect: (id: SectionId) => void;
   unreadTotal: number;
-  onOpenMenu: () => void;
-  menuOpen?: boolean;
   accountType?: string;
   /** Открыть шторку «Ещё» — только нижняя панель на телефоне. */
   onOpenMore?: () => void;
@@ -155,26 +153,14 @@ interface NavRailProps {
   expanded?: boolean;
 }
 
-const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, onOpenMenu, menuOpen = false, accountType, onOpenMore, moreActive = false, expanded = false }) => {
+const NavRail: React.FC<NavRailProps> = ({ active, onSelect, unreadTotal, accountType, onOpenMore, moreActive = false, expanded = false }) => {
   const sections = SECTIONS.filter((s) => isSectionAllowedFor(accountType, s.id));
 
   return (
+    // Марки и кнопки меню на рельсе больше нет: и то и другое переехало в
+    // верхнюю панель — марка налево, меню на свой аватар направо. Держать
+    // гамбургер ещё и здесь значило бы два входа в одно меню на одном экране.
     <nav className={'nav-rail' + (expanded ? ' is-expanded' : '')} aria-label="Разделы">
-      <div className="rail-brand">
-        <button
-          type="button"
-          className={'rail-menu-button' + (menuOpen ? ' is-open' : '')}
-          onClick={onOpenMenu}
-          aria-label="Открыть меню"
-          aria-expanded={menuOpen}
-          title="Меню"
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
-            <path d="M4 7h16M4 12h16M4 17h16" />
-          </svg>
-        </button>
-      </div>
-
       <div className="rail-items">
         {sections.map((section) => {
           const isActive = active === section.id;
