@@ -46,6 +46,30 @@ interface CalendarData {
 }
 
 /**
+ * Выбранный вид календаря переживает перезаход.
+ *
+ * Человек выбирает вид один раз и надолго: кто живёт лентой, тот живёт ею
+ * всегда. Сбрасывать его на «Месяц» при каждом открытии значит заставлять
+ * переключать заново — а это ровно то, на что и пожаловались при тестировании.
+ *
+ * На устройстве, а не на сервере: это настройка вида, как ширина списка чатов
+ * и свёрнутость рельса, и синхронизировать её между телефоном и компьютером не
+ * нужно — там разные виды и удобны.
+ */
+const VIEW_STORAGE_KEY = 'calendarViewMode';
+const VIEW_MODES: CalendarViewMode[] = ['month', 'week', 'day', 'agenda'];
+
+function loadViewMode(): CalendarViewMode {
+  try {
+    const saved = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (saved && (VIEW_MODES as string[]).includes(saved)) return saved as CalendarViewMode;
+  } catch {
+    // приватный режим — вернём умолчание, ронять календарь незачем
+  }
+  return 'month';
+}
+
+/**
  * Загрузка вхождений для текущего режима и даты.
  *
  * С сервера приходит всё, что человеку положено видеть, одним ответом, а
@@ -56,7 +80,15 @@ interface CalendarData {
  * нужен один слой, а не весь календарь.
  */
 export function useCalendarData(scope?: CalendarScope, changeToken = 0): CalendarData {
-  const [mode, setMode] = useState<CalendarViewMode>('month');
+  const [mode, setModeState] = useState<CalendarViewMode>(loadViewMode);
+  const setMode = useCallback((next: CalendarViewMode) => {
+    setModeState(next);
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, next);
+    } catch {
+      // не смогли запомнить — вид всё равно сменится, просто на этот раз
+    }
+  }, []);
   const [anchor, setAnchor] = useState<DayKey>(todayKey);
   const [all, setAll] = useState<CalendarOccurrence[]>([]);
   const [canPublishGlobal, setCanPublishGlobal] = useState(false);
