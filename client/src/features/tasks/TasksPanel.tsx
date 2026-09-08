@@ -4,7 +4,7 @@ import { nameFor } from '@/shared/lib/user';
 import Avatar from '@/shared/ui/Avatar';
 import {
   createTask, deleteTask, fetchTaskJournal, fetchTasks, restoreTask,
-  setTaskArchived, setTaskStatus, updateTask,
+  setTaskArchived, setTaskAssignee, setTaskStatus, updateTask,
 } from './api';
 import TaskDialog from './TaskDialog';
 import TaskDeleteDialog from './TaskDeleteDialog';
@@ -378,6 +378,13 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
           onSave={handleSave}
           onDelete={editing !== 'new' && editing ? () => setDeleting(editing) : undefined}
           onStatusChange={editing !== 'new' && editing && !editing.archived ? (status) => changeStatus(editing.id, status) : undefined}
+          onAssigneeChange={editing !== 'new' && editing ? async (assigneeId) => {
+            const saved = await setTaskAssignee(editing.id, assigneeId);
+            // Перечитываем список: карточка на доске обязана показать нового
+            // исполнителя сразу, а не после следующего события с сервера.
+            load();
+            return saved;
+          } : undefined}
           onArchiveChange={editing !== 'new' && editing ? (archived) => archiveTask(editing, archived) : undefined}
         />
       )}

@@ -271,3 +271,17 @@
 }
 .task-delete-input:focus { outline: none; border-color: var(--accent); }
 .task-delete-note { margin: 0; font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-muted); }
+
+/* Выбор исполнителя: плоский ряд имён, а не выпадающий список. Причастных у
+   задачи единицы, и список из трёх пунктов, спрятанный под клик, стоит
+   человеку лишнего действия. «Не поручена» — такой же вариант, а не пустое
+   место: снять исполнителя надо уметь так же просто, как назначить. */
+.task-assignee-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.task-chip-btn {
+  padding: 4px 11px; border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: none; cursor: pointer; color: var(--ink-muted);
+  font: 500 var(--text-xs)/1.6 var(--font-ui);
+}
+.task-chip-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
+.task-chip-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.task-chip-btn:disabled { opacity: .6; cursor: default; }

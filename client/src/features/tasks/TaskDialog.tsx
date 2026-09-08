@@ -22,6 +22,12 @@ interface TaskDialogProps {
    */
   onDelete?: () => void | Promise<void>;
   onStatusChange?: (status: TaskStatus) => Promise<void>;
+  /**
+   * Передать задачу. Отдельно от `onSave`, потому что и право другое: править
+   * задачу может только постановщик, а передать её — ещё и текущий
+   * исполнитель, сдавая свою работу. `null` — снять исполнителя.
+   */
+  onAssigneeChange?: (assigneeId: number | null) => Promise<TaskItem>;
   onArchiveChange?: (archived: boolean) => Promise<void>;
   /** Текст сообщения, из которого заводят задачу (пункт меню в переписке). */
   initialDescription?: string;
@@ -32,7 +38,8 @@ interface TaskDialogProps {
 const END_OF_DAY_MINUTES = 23 * 60 + 59;
 
 const TaskDialog: React.FC<TaskDialogProps> = ({
-  task, currentUserId, onClose, onSave, onDelete, onStatusChange, onArchiveChange, initialDescription
+  task, currentUserId, onClose, onSave, onDelete, onStatusChange, onArchiveChange,
+  onAssigneeChange, initialDescription
 }) => {
   // Править задачу может только тот, кто её поставил. Раньше форма
   // показывалась всем причастным одинаково, и «Сохранить» у них упиралось в
@@ -40,10 +47,24 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
   // ошибка была в том, что кнопку вообще показывали. Причастный видит
   // карточку задачи, а меняет только статус — из списка.
   const readOnly = !!task && !task.can_edit;
+  /**
+   * Передать задачу вправе постановщик или ТЕКУЩИЙ исполнитель — сдать свою
+   * работу другому нормальный ход. Права считает сервер и отдаёт готовым
+   * признаком: считать их здесь заново значит завести вторую копию правила,
+   * которая разъедется с первой.
+   */
+  const canAssign = !task || task.can_assign;
   const [title, setTitle] = useState(task?.title || '');
   const [description, setDescription] = useState(task?.description || initialDescription || '');
   const [dueDate, setDueDate] = useState(task?.due_at ? toDateInput(task.due_at) : '');
   const [participants, setParticipants] = useState<TaskPerson[]>(task?.participants || []);
+  /**
+   * Ответственный — ОДИН, и его можно передать другому. Держим отдельным
+   * состоянием, а не «первым из причастных»: причастность отвечает на вопрос
+   * «кто видит», а исполнитель — «с кого спрос», и это разные вещи.
+   */
+  const [assignee, setAssignee] = useState<TaskPerson | null>(task?.assignee || null);
+  const [assigning, setAssigning] = useState(false);
   const [people, setPeople] = useState<DirectoryEntry[]>([]);
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
@@ -87,6 +108,69 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
           </button>
         ))}
       </div>
+    </div>
+  );
+
+  /**
+   * Кому поручена задача.
+   *
+   * У СУЩЕСТВУЮЩЕЙ задачи передача уходит на сервер сразу, отдельной ручкой:
+   * это не правка текста, и права у неё свои — передать вправе и текущий
+   * исполнитель, которому форма целиком недоступна. У НОВОЙ задачи выбор
+   * просто копится в состоянии и уезжает вместе с созданием.
+   */
+  const chooseAssignee = async (person: TaskPerson | null) => {
+    if (assigning) return;
+    if (!task || !onAssigneeChange) { setAssignee(person); return; }
+    setAssigning(true);
+    setError('');
+    try {
+      const saved = await onAssigneeChange(person ? person.id : null);
+      setAssignee(saved.assignee);
+      // Исполнитель обязан быть среди причастных — сервер добавляет его сам,
+      // и форма обязана показать тот же состав, иначе следующее сохранение
+      // затрёт его обратно.
+      setParticipants(saved.participants);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Не удалось передать задачу');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  /** Кого можно назначить: причастные и сам постановщик. */
+  const assignableFrom: TaskPerson[] = [
+    ...participants,
+    ...(task && task.created_by.id !== currentUserId ? [task.created_by] : []),
+  ];
+
+  const assigneePicker = (canAssign || !task) && (
+    <div className="field">
+      <label>Исполнитель</label>
+      <div className="task-assignee-picker">
+        <button
+          type="button"
+          className={'task-chip-btn' + (assignee ? '' : ' is-active')}
+          disabled={assigning}
+          onClick={() => chooseAssignee(null)}
+        >
+          Не поручена
+        </button>
+        {assignableFrom.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={'task-chip-btn' + (assignee?.id === p.id ? ' is-active' : '')}
+            disabled={assigning}
+            onClick={() => chooseAssignee(p)}
+          >
+            {nameFor(p)}
+          </button>
+        ))}
+      </div>
+      {assignableFrom.length === 0 && (
+        <span className="task-hint">Сначала добавьте причастных — поручить можно только им</span>
+      )}
     </div>
   );
 
@@ -150,6 +234,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
         description: description.trim(),
         due_at: dueDate ? instantOf(dueDate, END_OF_DAY_MINUTES) : null,
         participant_ids: participants.map((p) => p.id),
+        assignee_id: assignee ? assignee.id : null,
       });
       onClose();
     } catch (err: any) {
@@ -182,6 +267,10 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
                 Причастные: {task!.participants.map((p) => nameFor(p)).join(', ')}
               </div>
             )}
+            {task!.assignee && (
+              <div className="task-view-row">Исполнитель: {nameFor(task!.assignee)}</div>
+            )}
+            {assigneePicker}
             {statusPicker}
             {archiveButton}
           </div>
@@ -236,6 +325,10 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
               )}
             </div>
           </div>
+
+          {/* Исполнитель — ПОСЛЕ причастных: поручить можно только тому, кто
+              задачу видит, и порядок полей это прямо показывает. */}
+          {assigneePicker}
 
           <div className="task-dialog-actions">
             {/* Удалить может ЛЮБОЙ причастный, а не только постановщик
