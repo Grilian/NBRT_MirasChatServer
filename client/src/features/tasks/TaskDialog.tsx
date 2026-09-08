@@ -54,8 +54,16 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
    * работу другому нормальный ход. Права считает сервер и отдаёт готовым
    * признаком: считать их здесь заново значит завести вторую копию правила,
    * которая разъедется с первой.
+   *
+   * ПРАВО МЕНЯЕТСЯ ПРЯМО В ЭТОМ ОКНЕ: сдав работу, человек перестаёт быть
+   * исполнителем и передавать больше не может. Поэтому держим состоянием и
+   * обновляем ответом сервера. Поймано на проде 08.09.2026: живой человек
+   * передал задачу и получил три отказа 403 подряд, потому что ряд имён
+   * остался нажимаемым, хотя права уже не было.
    */
-  const canAssign = !task || task.can_assign;
+  const [canAssign, setCanAssign] = useState(!task || task.can_assign);
+  /** Было ли право в начале — чтобы отличить «потерял» от «и не было». */
+  const hadAssignRight = useRef(!task || task.can_assign);
   const [title, setTitle] = useState(task?.title || '');
   const [description, setDescription] = useState(task?.description || initialDescription || '');
   const [dueDate, setDueDate] = useState(task?.due_at ? toDateInput(task.due_at) : '');
@@ -135,6 +143,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
     try {
       const saved = await onAssigneeChange(person ? person.id : null);
       setAssignee(saved.assignee);
+      setCanAssign(saved.can_assign);
       // Исполнитель обязан быть среди причастных — сервер добавляет его сам,
       // и форма обязана показать тот же состав, иначе следующее сохранение
       // затрёт его обратно.
@@ -146,11 +155,20 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
     }
   };
 
-  /** Кого можно назначить: причастные и сам постановщик. */
-  const assignableFrom: TaskPerson[] = [
+  /**
+   * Кого можно назначить: причастные и сам постановщик.
+   *
+   * С отсевом повторов: постановщик обычно и так среди причастных, и без него
+   * его имя стояло в ряду дважды — выбрать можно любое, а выглядит как ошибка
+   * данных. Поймано тестом при разборе отказов 403 на проде.
+   */
+  const assignableFrom: TaskPerson[] = [];
+  for (const candidate of [
     ...participants,
     ...(task && task.created_by.id !== currentUserId ? [task.created_by] : []),
-  ];
+  ]) {
+    if (!assignableFrom.some((p) => p.id === candidate.id)) assignableFrom.push(candidate);
+  }
 
   /**
    * Выбор исполнителя: в ряду стоят ТОЛЬКО ЛЮДИ.
@@ -164,8 +182,19 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
    *
    * Теперь состояние написано словами, а снятие — отдельное действие и только
    * тогда, когда есть что снимать.
+   *
+   * Если право передавать только что потеряно (сдал работу — перестал быть
+   * исполнителем), ряд имён не просто исчезает: молча пропавшие кнопки
+   * читаются как сбой. Пишем, почему.
    */
-  const assigneePicker = (canAssign || !task) && (
+  const assigneePicker = !canAssign ? (hadAssignRight.current && (
+    <div className="field">
+      <label>Исполнитель</label>
+      <span className="task-hint">
+        Задача передана — менять исполнителя теперь может он сам или постановщик.
+      </span>
+    </div>
+  )) : (
     <div className="field">
       <label>Исполнитель</label>
       {assignableFrom.length === 0 ? (
@@ -347,9 +376,11 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
                 Причастные: {task!.participants.map((p) => nameFor(p)).join(', ')}
               </div>
             )}
-            {task!.assignee && (
-              <div className="task-view-row">Исполнитель: {nameFor(task!.assignee)}</div>
-            )}
+            {/* Из состояния, а не из пропса: исполнителя могли сменить прямо
+                здесь, и строка обязана показывать то, что есть сейчас. */}
+            <div className="task-view-row">
+              Исполнитель: {assignee ? nameFor(assignee) : 'не назначен'}
+            </div>
             {assigneePicker}
             {statusPicker}
             {archiveButton}
