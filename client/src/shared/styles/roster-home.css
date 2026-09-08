@@ -150,13 +150,26 @@
 }
 .home-go { width: 16px; height: 16px; flex: none; color: var(--ink-faint); }
 
-/* ---- Две колонки: расписание и «не потерять» ---- */
+/* ---- Две колонки: расписание и «не потерять» ----
+
+   Колонки занимают ВЕСЬ остаток экрана и прокручиваются каждая внутри себя, а
+   не удлиняют страницу. Расписание на день бывает и в двадцать строк; если бы
+   оно росло вниз, «Главная» превращалась бы в длинную ленту, где шапка со
+   статусом и плитки уезжают из виду — а они и есть то, ради чего сюда заходят.
+   Внутренняя прокрутка ничего не режет: список целиком доступен, просто на
+   своём месте. На узком экране это снимается — там колонка одна и лишний
+   вложенный скролл только мешает (см. media внизу). */
 .home-columns {
   display: grid; gap: var(--space-4);
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
-  align-items: start;
+  align-items: stretch;
+  flex: 1; min-height: 0;
 }
-.home-col-side { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.home-col-side {
+  display: flex; flex-direction: column; gap: var(--space-4);
+  min-width: 0; min-height: 0; overflow-y: auto;
+}
+.home-panel-schedule { min-height: 0; }
 .home-panel {
   min-width: 0; display: flex; flex-direction: column; gap: var(--space-3);
   padding: var(--space-4); border: 1px solid var(--line);
@@ -178,16 +191,25 @@
 .home-panel-link:hover { text-decoration: underline; }
 .home-panel-note { margin: 0; color: var(--ink-muted); font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui); }
 
-.home-schedule { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.home-schedule {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0; overflow-y: auto;
+}
+/* Разделители между строками, а не зазор: расписание читают глазом сверху
+   вниз, и линия отделяет «17:00 Экскурсия» от следующей строки надёжнее, чем
+   два пикселя воздуха, — особенно когда название перенеслось на вторую. */
+.home-schedule li + li { border-top: 1px solid var(--line); }
 .home-event {
   width: 100%; display: flex; align-items: baseline; gap: var(--space-3);
-  padding: var(--space-2) var(--space-3); cursor: pointer; text-align: left; color: inherit;
-  border: none; border-radius: var(--radius-md); background: none;
+  padding: var(--space-3) var(--space-2); cursor: pointer; text-align: left; color: inherit;
+  border: none; border-left: 2px solid transparent; background: none;
   transition: background var(--ease);
 }
 .home-event:hover { background: var(--row-hover); }
 .home-event-time {
-  flex: none; min-width: 64px; color: var(--accent);
+  flex: none; min-width: 64px; display: flex; flex-direction: column; gap: 2px;
+  color: var(--accent);
   font: 600 var(--text-sm)/var(--leading-sm) var(--font-ui);
   font-variant-numeric: tabular-nums;
 }
@@ -195,6 +217,25 @@
   flex: 1; min-width: 0; color: var(--ink);
   font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui);
 }
+
+/* Идущее сейчас — единственное выделение в списке: полоса слева, подложка и
+   слово «сейчас». Полосу видно боковым зрением, слово отвечает на вопрос
+   прямо, а не оттенком, который на светлой теме почти не читается. */
+.home-event.is-running {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-left-color: var(--accent);
+}
+.home-event.is-running:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.home-event-now {
+  align-self: flex-start; padding: 0 6px; border-radius: var(--radius-pill);
+  background: var(--accent); color: var(--accent-ink);
+  font: 600 var(--text-xs)/1.6 var(--font-ui); letter-spacing: .02em;
+  text-transform: none;
+}
+/* Прошедшее не прячем — на него ссылаются («что там было утром»), — но гасим,
+   чтобы оставшийся день читался первым. */
+.home-event.is-past .home-event-time { color: var(--ink-faint); }
+.home-event.is-past .home-event-title { color: var(--ink-muted); }
 
 .home-attention {
   display: flex; align-items: center; gap: var(--space-3); width: 100%;
@@ -216,6 +257,17 @@
 .home-attention-hint { font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-muted); }
 
 .home-next { flex-direction: row; align-items: center; gap: var(--space-3); }
+/* Когда событие есть, карточка — кнопка и ведёт к нему: выглядеть она должна
+   так же, как её соседи-кнопки, иначе нажимать её никто не догадается. */
+.home-next.is-clickable {
+  width: 100%; cursor: pointer; text-align: left; color: inherit;
+  transition: background var(--ease), border-color var(--ease);
+}
+.home-next.is-clickable:hover {
+  background: var(--row-hover);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+.home-next-copy { display: flex; flex-direction: column; gap: 1px; }
 .home-next-mark {
   flex: none; width: 38px; height: 38px; display: grid; place-items: center;
   border-radius: 50%; color: var(--accent);
@@ -241,8 +293,13 @@
    второй рядом ничего не даёт, кроме шанса их рассинхронизировать. */
 @media (max-width: 760px) {
   .home-section { padding: var(--space-5) var(--space-4) var(--space-4); gap: var(--space-5); }
-  .home-columns { grid-template-columns: minmax(0, 1fr); }
+  .home-columns { grid-template-columns: minmax(0, 1fr); flex: none; }
   .home-hero-greeting { font-size: var(--text-xl); }
+  /* Одна колонка — прокрутка снова общая, страничная. Вложенный скролл внутри
+     страничного на телефоне не разобрать пальцем: жест попадает то в список,
+     то в страницу. */
+  .home-col-side, .home-schedule { overflow: visible; }
+  .home-schedule { flex: none; }
 }
 
 /* ===== Окно статуса ===== */

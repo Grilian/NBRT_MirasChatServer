@@ -12,10 +12,12 @@ vi.mock('@/shared/api/client', () => ({
 
 const mockedApi = api as unknown as { get: Mock };
 
+const ME = 7;
+/** Ничьи задачи, заведённые кем-то другим: их вправе взять любой, включая меня. */
 const TASKS = [
-  { id: 1, title: 'Смета', status: 'not_started' },
-  { id: 2, title: 'Отчёт', status: 'in_progress' },
-  { id: 3, title: 'Сделано', status: 'done' },
+  { id: 1, title: 'Смета', status: 'not_started', created_by: { id: 3 }, assignee: null },
+  { id: 2, title: 'Отчёт', status: 'in_progress', created_by: { id: 3 }, assignee: null },
+  { id: 3, title: 'Сделано', status: 'done', created_by: { id: 3 }, assignee: null },
 ];
 
 // Компонент считает расписание в московском времени (см. calendar/dates.ts),
@@ -50,7 +52,9 @@ const setup = (unreadTotal = 18, over: Record<string, unknown> = {}) => {
     onOpenCalendarEvent: vi.fn(),
     onOpenFiles: vi.fn(),
   };
-  render(<HomeSection displayName="Алиса" unreadTotal={unreadTotal} {...handlers} {...over} />);
+  render(
+    <HomeSection displayName="Алиса" currentUserId={ME} unreadTotal={unreadTotal} {...handlers} {...over} />,
+  );
   return handlers;
 };
 
@@ -82,7 +86,7 @@ test('счётчики и расписание ведут в свои разде
   fireEvent.click(screen.getByText('непрочитанных сообщений').closest('button')!);
   expect(handlers.onOpenChats).toHaveBeenCalled();
 
-  fireEvent.click(screen.getByText('задачи в работе').closest('button')!);
+  fireEvent.click(screen.getByText('задачи на мне').closest('button')!);
   expect(handlers.onOpenTasks).toHaveBeenCalled();
 });
 
@@ -137,10 +141,10 @@ test('просроченные задачи попадают в «Требует
   mockedApi.get.mockImplementation((url: string) => (url === '/tasks'
     ? Promise.resolve({
       data: [
-        { id: 1, status: 'in_progress', due_at: Date.now() - 86_400_000 },
-        { id: 2, status: 'not_started', due_at: Date.now() + 86_400_000 },
+        { id: 1, status: 'in_progress', due_at: Date.now() - 86_400_000, created_by: { id: 3 }, assignee: { id: ME } },
+        { id: 2, status: 'not_started', due_at: Date.now() + 86_400_000, created_by: { id: 3 }, assignee: { id: ME } },
         // Завершённая просроченной не считается: срок ей уже безразличен.
-        { id: 3, status: 'done', due_at: Date.now() - 86_400_000 },
+        { id: 3, status: 'done', due_at: Date.now() - 86_400_000, created_by: { id: 3 }, assignee: { id: ME } },
       ],
     })
     : Promise.resolve({ data: { events: [], birthdays: [] } })));
@@ -195,13 +199,34 @@ test('на «Главной» есть вход в файлы — на теле�
 
 test('счётчики склоняются по-русски', async () => {
   mockedApi.get.mockImplementation((url: string) => (url === '/tasks'
-    ? Promise.resolve({ data: [{ id: 1, status: 'in_progress' }] })
+    ? Promise.resolve({ data: [{ id: 1, status: 'in_progress', created_by: { id: 3 }, assignee: { id: ME } }] })
     : Promise.resolve({ data: { events: [], birthdays: [] } })));
 
   setup(2);
 
-  expect(await screen.findByText('задача в работе')).toBeInTheDocument();
+  expect(await screen.findByText('задача на мне')).toBeInTheDocument();
   expect(screen.getByText('непрочитанных сообщения')).toBeInTheDocument();
+});
+
+test('плитка задач считает ТО ЖЕ, что покажет вкладка «Моя работа»', async () => {
+  // Живая находка: «Главная» считала все активные задачи подряд и показывала
+  // «1 задача в работе», а вкладка «Моя работа» была пуста — задача заведена
+  // самим человеком и никому не назначена. Число, которое не сходится с тем,
+  // куда оно ведёт, хуже отсутствующего.
+  mockedApi.get.mockImplementation((url: string) => (url === '/tasks'
+    ? Promise.resolve({
+      data: [
+        { id: 1, status: 'in_progress', created_by: { id: ME }, assignee: null },
+        { id: 2, status: 'in_progress', created_by: { id: ME }, assignee: { id: 3 } },
+        { id: 3, status: 'in_progress', created_by: { id: 3 }, assignee: { id: ME } },
+      ],
+    })
+    : Promise.resolve({ data: { events: [], birthdays: [] } })));
+
+  setup(0);
+
+  await waitFor(() => expect(screen.getByText('задача на мне')).toBeInTheDocument());
+  expect(tiles()[1].querySelector('.home-stat-count')!.textContent).toBe('1');
 });
 
 describe('«сколько у меня есть» до ближайшего события', () => {

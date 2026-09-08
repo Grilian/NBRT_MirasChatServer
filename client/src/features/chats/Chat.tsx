@@ -3439,6 +3439,7 @@ const Chat: React.FC = () => {
         <main className="section-host">
           <HomeSection
             displayName={currentDisplayName}
+            currentUserId={currentUserId}
             unreadTotal={totalUnread}
             status={describeStatus(currentStatusPreset, currentStatusCustom, customEmoji)}
             customEmoji={customEmoji}

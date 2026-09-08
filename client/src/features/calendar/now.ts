@@ -40,7 +40,19 @@ export function resolveNow(occurrences: CalendarOccurrence[], now: number): NowS
   return { current, next };
 }
 
+/**
+ * Идёт ли отрезок прямо сейчас.
+ *
+ * Границы передаются числами, а не объектом: то же самое спрашивает «Главная»,
+ * а у неё своя форма события (`startAt`/`endAt`). Правило «что считается
+ * текущим» обязано быть одно на всех — иначе полоса в календаре и подпись на
+ * «Главной» однажды разойдутся в показаниях.
+ */
+export function isRunningAt(startAt: number, endAt: number, allDay: boolean, now: number): boolean {
+  return !allDay && startAt <= now && endAt > now;
+}
+
 /** Идёт ли это вхождение прямо сейчас. */
 export function isRunning(occurrence: CalendarOccurrence, now: number): boolean {
-  return !occurrence.all_day && occurrence.starts_at <= now && occurrence.ends_at > now;
+  return isRunningAt(occurrence.starts_at, occurrence.ends_at, !!occurrence.all_day, now);
 }

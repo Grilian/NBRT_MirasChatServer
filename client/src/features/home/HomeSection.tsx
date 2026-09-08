@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '@/shared/api/client';
 import { fetchRange } from '@/features/calendar/api';
 import { formatClock, instantOf, todayKey } from '@/features/calendar/dates';
+import { isRunningAt } from '@/features/calendar/now';
 import { CustomEmojiMap, renderTextWithEmoji } from '@/features/emoji/customEmoji';
+import { isMyWork } from '@/features/tasks/scope';
+import { plural } from '@/shared/lib/plural';
 
 // «Главная» — стартовый экран приложения.
 //
@@ -39,12 +42,18 @@ interface DayEvent {
   title: string;
   time: string;
   startAt: number;
+  endAt: number;
   allDay: boolean;
   target: HomeCalendarTarget;
 }
 
 interface Props {
   displayName: string;
+  /**
+   * Свой id: без него нельзя отличить «мою работу» от чужой, а число на
+   * плитке обязано совпадать с тем, что человек увидит, нажав её.
+   */
+  currentUserId: number;
   /** Непрочитанное считает сам чат-раздел — там оно уже живое по сокету. */
   unreadTotal: number;
   /** Свой статус: показывается в шапке и оттуда же меняется. */
@@ -60,16 +69,6 @@ interface Props {
    * остаётся самым коротким входом туда.
    */
   onOpenFiles: () => void;
-}
-
-/** «1 задача / 2 задачи / 5 задач». */
-function plural(count: number, one: string, few: string, many: string): string {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return many;
-  if (mod10 === 1) return one;
-  if (mod10 >= 2 && mod10 <= 4) return few;
-  return many;
 }
 
 function greeting(date: Date): string {
@@ -104,6 +103,9 @@ interface StatTile {
   onOpen: () => void;
 }
 
+/** Как часто пересчитывается «сейчас». Минута — цена ошибки подписи. */
+const NOW_TICK_MS = 30000;
+
 const stroke = {
   viewBox: '0 0 24 24',
   fill: 'none',
@@ -120,7 +122,7 @@ const ChevronRight = () => (
 );
 
 const HomeSection: React.FC<Props> = ({
-  displayName, unreadTotal, status, customEmoji = {}, onOpenStatus,
+  displayName, currentUserId, unreadTotal, status, customEmoji = {}, onOpenStatus,
   onOpenChats, onOpenTasks, onOpenCalendar, onOpenCalendarEvent, onOpenFiles,
 }) => {
   const [tasksCount, setTasksCount] = useState<number | null>(null);
@@ -139,9 +141,13 @@ const HomeSection: React.FC<Props> = ({
     api.get('/tasks')
       .then(({ data }) => {
         if (!alive) return;
-        // «Назначенные мне» — то, что ещё нужно сделать. Завершённые в сводке
-        // не нужны: это список дел, а не отчёт.
-        const open = (data || []).filter((task: any) => task.status !== 'done');
+        // Считаем ровно то, что человек увидит, нажав плитку: свою работу,
+        // ещё не сделанную. Завершённые в сводке не нужны — это список дел, а
+        // не отчёт. Правило «моей работы» общее с самим разделом (scope.ts):
+        // разойтись в числах им больше нечем.
+        const open = (data || []).filter(
+          (task: any) => task.status !== 'done' && isMyWork(task, currentUserId),
+        );
         setTasksCount(open.length);
         const now = Date.now();
         setOverdueCount(open.filter((task: any) => task.due_at && task.due_at < now).length);
@@ -158,6 +164,7 @@ const HomeSection: React.FC<Props> = ({
         if (!alive) return;
         const all = [...data.events, ...data.birthdays].map((item: any) => {
           const startAt = item.starts_at ?? item.start_at ?? 0;
+          const endAt = item.ends_at ?? item.end_at ?? startAt;
           const id = String(item.id ?? `${item.event_id ?? 'event'}:${item.occurrence_start ?? startAt}`);
           return {
             id,
@@ -165,6 +172,7 @@ const HomeSection: React.FC<Props> = ({
             // Событие на весь день времени не имеет — так и показываем.
             time: item.all_day ? 'весь день' : formatClock(startAt),
             startAt,
+            endAt,
             allDay: !!item.all_day,
             target: { occurrenceId: id, startAt },
           };
@@ -175,7 +183,7 @@ const HomeSection: React.FC<Props> = ({
       .catch(() => { if (alive) setEvents([]); });
 
     return () => { alive = false; };
-  }, []);
+  }, [currentUserId]);
 
   // Плитки стоят ВСЕГДА, включая нули. Ноль — такой же ответ, как и любое
   // другое число: «на сегодня ничего не назначено» человек хочет видеть с утра
@@ -193,7 +201,7 @@ const HomeSection: React.FC<Props> = ({
     {
       id: 'tasks',
       count: tasksCount ?? 0,
-      label: plural(tasksCount ?? 0, 'задача в работе', 'задачи в работе', 'задач в работе'),
+      label: plural(tasksCount ?? 0, 'задача на мне', 'задачи на мне', 'задач на мне'),
       tone: 'tasks',
       icon: <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></svg>,
       onOpen: onOpenTasks,
@@ -208,9 +216,32 @@ const HomeSection: React.FC<Props> = ({
     },
   ], [unreadTotal, tasksCount, events, onOpenChats, onOpenTasks, onOpenCalendar]);
 
-  const now = Date.now();
+  // «Сейчас» обязано двигаться само: «Главную» держат открытой весь день, и
+  // подпись, застывшая на утреннем часе, врёт заметнее, чем её отсутствие.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), NOW_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+
   const nextEvent = (events || []).find((event) => !event.allDay && event.startAt > now);
   const today = new Date();
+
+  // Расписание прокручивается к текущему (а если ничего не идёт — к
+  // ближайшему) событию ОДИН раз, когда список пришёл. Иначе человек, зашедший
+  // в четыре часа дня, видит утро и должен листать до себя. Повторно не
+  // трогаем: увести список из-под руки в момент чтения хуже, чем не угадать.
+  const runningEvent = (events || []).find((event) => isRunningAt(event.startAt, event.endAt, event.allDay, now));
+  const focusId = runningEvent?.id ?? nextEvent?.id ?? null;
+  const focusRow = useRef<HTMLLIElement | null>(null);
+  const scrolledRef = useRef(false);
+  useEffect(() => {
+    if (scrolledRef.current || !events || events.length === 0) return;
+    scrolledRef.current = true;
+    const row = focusRow.current;
+    // scrollIntoView есть не во всякой среде (в jsdom его нет вовсе).
+    if (row && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+  }, [events]);
 
   return (
     <div className="home-section">
@@ -273,9 +304,23 @@ const HomeSection: React.FC<Props> = ({
           {events !== null && events.length > 0 && (
             <ul className="home-schedule">
               {events.map((event) => (
-                <li key={event.id}>
-                  <button type="button" className="home-event" onClick={() => onOpenCalendarEvent(event.target)}>
-                    <span className="home-event-time">{event.time}</span>
+                <li key={event.id} ref={event.id === focusId ? focusRow : undefined}>
+                  <button
+                    type="button"
+                    className={
+                      'home-event'
+                      + (isRunningAt(event.startAt, event.endAt, event.allDay, now) ? ' is-running' : '')
+                      + (!event.allDay && event.endAt <= now ? ' is-past' : '')
+                    }
+                    onClick={() => onOpenCalendarEvent(event.target)}
+                  >
+                    <span className="home-event-time">
+                      {event.time}
+                      {/* «Сейчас» — то, ради чего в расписание заглядывают
+                          посреди дня: не «что было», а «где я должен быть». */}
+                      {isRunningAt(event.startAt, event.endAt, event.allDay, now)
+                        && <span className="home-event-now">сейчас</span>}
+                    </span>
                     {/* Название переносится целиком: обрезанное «Экскурсия
                         «Хра…» не отличить от другой экскурсии, а переспросить
                         его в сводке не у кого. */}
@@ -314,20 +359,39 @@ const HomeSection: React.FC<Props> = ({
           </section>
 
           {/* «Спокойный день» — не заглушка пустоты, а ответ на вопрос «сколько
-              у меня есть»: время начала человек и так видит в расписании. */}
-          <section className="home-panel home-next">
-            <span className="home-next-mark" aria-hidden="true">
-              <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5l3 1.8" /></svg>
-            </span>
-            <div className="home-next-copy">
-              <p className="home-next-title">{nextEvent ? 'Ближайшее событие' : 'Спокойный день'}</p>
-              <p className="home-next-hint">
-                {nextEvent
-                  ? `${nextEvent.title} — ${untilLabel(nextEvent.startAt, now)}`
-                  : 'Больше сегодня ничего не запланировано'}
-              </p>
-            </div>
-          </section>
+              у меня есть»: время начала человек и так видит в расписании.
+
+              Когда событие есть, карточка — КНОПКА и ведёт к нему же: человек,
+              прочитавший «через сорок минут», следующим движением хочет
+              открыть само событие, а не искать его глазами в расписании. */}
+          {nextEvent ? (
+            <button
+              type="button"
+              className="home-panel home-next is-clickable"
+              onClick={() => onOpenCalendarEvent(nextEvent.target)}
+            >
+              <span className="home-next-mark" aria-hidden="true">
+                <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5l3 1.8" /></svg>
+              </span>
+              <span className="home-next-copy">
+                <span className="home-next-title">Ближайшее событие</span>
+                <span className="home-next-hint">
+                  {nextEvent.title} — {untilLabel(nextEvent.startAt, now)}
+                </span>
+              </span>
+              <ChevronRight />
+            </button>
+          ) : (
+            <section className="home-panel home-next">
+              <span className="home-next-mark" aria-hidden="true">
+                <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5l3 1.8" /></svg>
+              </span>
+              <div className="home-next-copy">
+                <p className="home-next-title">Спокойный день</p>
+                <p className="home-next-hint">Больше сегодня ничего не запланировано</p>
+              </div>
+            </section>
+          )}
 
           <section className="home-panel home-shortcuts">
             <div className="home-panel-head"><div><h2>Разделы</h2></div></div>

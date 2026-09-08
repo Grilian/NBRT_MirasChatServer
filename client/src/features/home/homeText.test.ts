@@ -45,3 +45,36 @@ describe('на «Главной» важный текст не обрезает�
     expect(body).not.toMatch(/(^|[^-])height:/);
   });
 });
+
+describe('расписание не удлиняет «Главную», а прокручивается внутри', () => {
+  // Жалоба с личного тестирования: «календарь не должен увеличивать страницу,
+  // он должен быть до конца экрана и работать в скролле». Пятнадцать событий
+  // дня иначе уносят вниз и шапку со статусом, и плитки — то, ради чего на
+  // «Главную» и заходят.
+  test('список событий — свой скролл, а не рост страницы', () => {
+    const body = ruleBody('.home-schedule');
+    expect(body).toContain('overflow-y: auto');
+    expect(body).toContain('min-height: 0');
+  });
+
+  test('колонки занимают остаток экрана', () => {
+    // Без flex: 1 / min-height: 0 внутренний скролл не включится: колонка
+    // вырастет по содержимому, и прокручиваться будет снова страница.
+    const body = ruleBody('.home-columns');
+    expect(body).toContain('flex: 1');
+    expect(body).toContain('min-height: 0');
+  });
+
+  test('на узком экране вложенный скролл снимается', () => {
+    // Скролл внутри скролла пальцем не разобрать: жест попадает то в список,
+    // то в страницу.
+    const narrow = CSS.slice(CSS.indexOf('@media (max-width: 760px)'));
+    expect(narrow).toContain('.home-col-side, .home-schedule { overflow: visible; }');
+  });
+
+  test('строки разделены линией, а идущее сейчас выделено', () => {
+    expect(CSS).toContain('.home-schedule li + li { border-top: 1px solid var(--line); }');
+    const running = ruleBody('.home-event.is-running');
+    expect(running).toContain('border-left-color: var(--accent)');
+  });
+});
