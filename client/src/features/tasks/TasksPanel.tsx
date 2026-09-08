@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { dayKeyOf, formatDayLong, todayKey } from '@/features/calendar/dates';
+import { plural } from '@/shared/lib/plural';
 import { nameFor } from '@/shared/lib/user';
 import Avatar from '@/shared/ui/Avatar';
 import {
   createTask, deleteTask, fetchTaskJournal, fetchTasks, restoreTask,
   setTaskArchived, setTaskAssignee, setTaskStatus, updateTask,
 } from './api';
+import { isInvolved, isMyWork } from './scope';
 import TaskDialog from './TaskDialog';
 import TaskDeleteDialog from './TaskDeleteDialog';
 import {
@@ -95,14 +97,29 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
   const [editing, setEditing] = useState<TaskItem | null | 'new'>(null);
   const [deleting, setDeleting] = useState<TaskItem | null>(null);
 
+  /**
+   * Журнал грузится ОТДЕЛЬНО от списков и его падение не роняет раздел.
+   *
+   * Было наоборот: три запроса шли одним Promise.all, и отказ ЛЮБОГО из них
+   * гасил доску целиком — вместо задач человек видел «Не удалось загрузить
+   * задачи», хотя сами задачи пришли. Поймано на живой сборке против сервера,
+   * где ручки журнала ещё нет: раздел выглядел полностью сломанным из-за
+   * второстепенной выдачи.
+   *
+   * Доска и архив — то, ради чего сюда приходят, и только их отказ считается
+   * отказом раздела. Журнал молча остаётся пустым: вкладка честно скажет
+   * «удалённых задач нет», а не соврёт про остальное.
+   */
   const load = () => {
     setLoading(true);
-    Promise.all([fetchTasks(false), fetchTasks(true), fetchTaskJournal()])
-      .then(([active, archived, log]) => {
-        setTasks(active); setArchivedTasks(archived); setJournal(log); setError(false);
+    Promise.all([fetchTasks(false), fetchTasks(true)])
+      .then(([active, archived]) => {
+        setTasks(active); setArchivedTasks(archived); setError(false);
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
+
+    fetchTaskJournal().then(setJournal).catch(() => setJournal([]));
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,11 +133,10 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
   // «Моя работа» — то, за что спрашивают с меня: где я исполнитель, а также
   // ничьи задачи, которые я вправе взять. Переключатель «Все» расширяет до
   // всего, к чему я причастен.
-  const myWork = useMemo(() => tasks.filter((t) => (
-    wideScope
-      ? t.created_by.id !== currentUserId || t.assignee?.id === currentUserId
-      : t.assignee?.id === currentUserId || (!t.assignee && t.created_by.id !== currentUserId)
-  )), [tasks, wideScope, currentUserId]);
+  const myWork = useMemo(
+    () => tasks.filter((t) => (wideScope ? isInvolved(t, currentUserId) : isMyWork(t, currentUserId))),
+    [tasks, wideScope, currentUserId],
+  );
 
   const authored = useMemo(
     () => tasks.filter((t) => t.created_by.id === currentUserId),
@@ -128,10 +144,20 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
   );
 
   const boardTasks = tab === 'work' ? myWork : authored;
-  const overdueCount = tasks.filter((t) => {
-    const due = dueLabel(t);
-    return due?.overdue;
-  }).length;
+
+  // Подпись под заголовком описывает ТО, ЧТО НА ЭКРАНЕ, а не всё подряд.
+  // Раньше она считала все видимые задачи, включая поставленные другим, и
+  // получалось «2 просрочено» над пустой вкладкой «Моя работа» — число, к
+  // которому на этом экране не притронуться. То же расхождение нашлось между
+  // «Главной» и разделом, и лечится оно одинаково: считаем ровно тот набор,
+  // который человек видит.
+  const overdueCount = boardTasks.filter((t) => dueLabel(t)?.overdue).length;
+  const headCount = tab === 'archive' ? archivedTasks.length
+    : tab === 'journal' ? journal.length
+      : boardTasks.length;
+  const headLabel = tab === 'archive' ? plural(headCount, 'задача в архиве', 'задачи в архиве', 'задач в архиве')
+    : tab === 'journal' ? plural(headCount, 'запись', 'записи', 'записей')
+      : plural(headCount, 'задача', 'задачи', 'задач');
 
   const changeStatus = async (taskId: number, next: TaskStatus) => {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: next } : t)));
@@ -220,7 +246,7 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
           <div className="status">
             {loading ? 'Загрузка…' : (
               <>
-                {tasks.length} активных
+                {headCount} {headLabel}
                 {overdueCount > 0 && <span className="task-overdue-note"> · {overdueCount} просрочено</span>}
               </>
             )}

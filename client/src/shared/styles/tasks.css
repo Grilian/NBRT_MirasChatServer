@@ -54,8 +54,21 @@
 .task-due.is-overdue { color: var(--unread); font-weight: 600; }
 
 .task-dialog { max-width: 460px; }
-.task-dialog-body { padding: 4px 20px 22px; }
-.task-dialog-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+/* Тело диалога прокручивается САМО. Карточка окна ограничена 80vh и режет всё,
+   что не поместилось (overflow: hidden): без прокрутки здесь на невысоком окне
+   до кнопки «Сохранить» было не добраться вовсе. */
+.task-dialog-body { padding: 4px 20px 22px; flex: 1; min-height: 0; overflow-y: auto; }
+/* Кнопка сохранения ПРИКЛЕЕНА к низу окна, а не уезжает вместе с формой.
+   На личном тестировании «создание задачи не работало» именно поэтому: форма
+   с причастными и исполнителем выше экрана, а «Сохранить» оставалась за
+   нижним краем — нажать было нечего. Отрицательные поля растягивают подложку
+   на всю ширину тела, иначе прокручиваемый текст просвечивал бы по бокам. */
+.task-dialog-actions {
+  display: flex; align-items: center; gap: 8px;
+  position: sticky; bottom: -22px; z-index: 1;
+  margin: 6px -20px -22px; padding: 12px 20px 16px;
+  background: var(--paper-raised); border-top: 1px solid var(--line);
+}
 .task-dialog-actions .btn-primary { width: auto; flex: 1; margin-top: 0; }
 
 .task-participants-picked { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 26px; }
@@ -66,9 +79,17 @@
 .task-chip button { border: none; background: none; color: var(--ink-faint); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px; }
 .task-chip button:hover { color: var(--unread); }
 .task-people-search { position: relative; }
+/* Подсказки стоят В ПОТОКЕ, а не поверх. Всплывающий список обрезался
+   карточкой окна (у неё overflow: hidden), и последние строки были не видны и
+   недостижимы — поймано на живой сборке. В потоке список раздвигает форму, а
+   форма прокручивается, и до любой строки можно доехать. */
 .task-suggest-list {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--paper-raised); border: 1px solid var(--line);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-sm); max-height: 220px; overflow-y: auto; z-index: 5;
+  margin-top: 4px; background: var(--paper-raised); border: 1px solid var(--line);
+  border-radius: var(--radius-md); max-height: 220px; overflow-y: auto;
+  /* Запас под приклеенную кнопку «Сохранить»: список сам подтягивается в
+     видимую часть (scrollIntoView в TaskDialog), а этот отступ не даёт ему
+     остановиться ровно под кнопкой. */
+  scroll-margin-bottom: 76px;
 }
 .task-suggest-row {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left;

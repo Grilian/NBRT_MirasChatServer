@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '@/shared/api/client';
 import { dayKeyOf, formatDayLong, instantOf, toDateInput } from '@/features/calendar/dates';
 import { nameFor } from '@/shared/lib/user';
@@ -244,6 +244,18 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
     }
   };
 
+  // Подсказки людей ПОДТЯГИВАЕМ В ВИДИМУЮ ЧАСТЬ окна. Форма длиннее экрана, и
+  // список, раскрывшийся у нижнего края, оказывался наполовину за кнопкой
+  // «Сохранить» — на личном тестировании это выглядело как «не видно
+  // последнего в списке». Отступ снизу (scroll-margin-bottom в tasks.css)
+  // оставляет место под ту самую кнопку.
+  const suggestRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = suggestRef.current;
+    if (!node || typeof node.scrollIntoView !== 'function') return;
+    node.scrollIntoView({ block: 'nearest' });
+  }, [suggestions.length]);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card task-dialog" onClick={(e) => e.stopPropagation()}>
@@ -315,7 +327,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
                 onChange={(e) => setQuery(e.target.value)}
               />
               {suggestions.length > 0 && (
-                <div className="task-suggest-list">
+                <div className="task-suggest-list" ref={suggestRef}>
                   {suggestions.map((p) => (
                     <button type="button" key={p.id} className="task-suggest-row" onClick={() => addParticipant(p)}>
                       {nameFor(p)} <span className="cal-suggest-count">@{p.username}</span>
