@@ -145,32 +145,52 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
     ...(task && task.created_by.id !== currentUserId ? [task.created_by] : []),
   ];
 
+  /**
+   * Выбор исполнителя: в ряду стоят ТОЛЬКО ЛЮДИ.
+   *
+   * Раньше первой кнопкой в том же ряду стояла «Не поручена» — той же формы и
+   * того же цвета, что имена, и в выбранном состоянии она горела синим ровно
+   * как выбранный человек. Читалось это как «исполнитель — Не поручена», а не
+   * как «никому не поручено»: состояние притворялось именем. На личном
+   * тестировании так и вышло — человек добавил причастного и решил, что этим
+   * назначил его.
+   *
+   * Теперь состояние написано словами, а снятие — отдельное действие и только
+   * тогда, когда есть что снимать.
+   */
   const assigneePicker = (canAssign || !task) && (
     <div className="field">
       <label>Исполнитель</label>
-      <div className="task-assignee-picker">
-        <button
-          type="button"
-          className={'task-chip-btn' + (assignee ? '' : ' is-active')}
-          disabled={assigning}
-          onClick={() => chooseAssignee(null)}
-        >
-          Не поручена
-        </button>
-        {assignableFrom.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={'task-chip-btn' + (assignee?.id === p.id ? ' is-active' : '')}
-            disabled={assigning}
-            onClick={() => chooseAssignee(p)}
-          >
-            {nameFor(p)}
-          </button>
-        ))}
-      </div>
-      {assignableFrom.length === 0 && (
+      {assignableFrom.length === 0 ? (
         <span className="task-hint">Сначала добавьте причастных — поручить можно только им</span>
+      ) : (
+        <>
+          <div className="task-assignee-picker">
+            {assignableFrom.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={'task-chip-btn' + (assignee?.id === p.id ? ' is-active' : '')}
+                disabled={assigning}
+                onClick={() => chooseAssignee(p)}
+              >
+                {nameFor(p)}
+              </button>
+            ))}
+          </div>
+          {assignee ? (
+            <button
+              type="button"
+              className="task-assignee-clear"
+              disabled={assigning}
+              onClick={() => chooseAssignee(null)}
+            >
+              Снять исполнителя
+            </button>
+          ) : (
+            <span className="task-hint">Пока никому не поручена — выберите, с кого спрос</span>
+          )}
+        </>
       )}
     </div>
   );

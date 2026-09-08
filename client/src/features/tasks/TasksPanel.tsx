@@ -213,9 +213,14 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
           {/* Исполнитель — один, и это ответ на вопрос «с кого спрос».
               Не назначен — так и написано: пустое место читалось бы как
               «данные не загрузились». */}
+          {/* ИМЯ, а не только кружок аватара: доска отвечает на вопрос «с кого
+              спрос», а инициалы в кружке на него не отвечают — их надо
+              расшифровывать, и у двух Галин они совпадут. Поймано на личном
+              тестировании: «в задачах не отображается назначенный человек». */}
           {task.assignee ? (
-            <span className="task-card-assignee" title={`Исполнитель: ${nameFor(task.assignee)}`}>
+            <span className="task-card-assignee">
               <Avatar name={nameFor(task.assignee)} avatarPath={task.assignee.avatar_path} size="sm" />
+              <span className="task-card-assignee-name">{nameFor(task.assignee)}</span>
             </span>
           ) : (
             <span className="task-card-free">Не поручена</span>

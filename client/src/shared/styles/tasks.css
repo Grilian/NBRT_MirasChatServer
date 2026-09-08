@@ -209,12 +209,19 @@
   font: 400 var(--text-xs)/var(--leading-xs) var(--font-ui); color: var(--ink-muted);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+/* Переносится, а не сжимается: имя исполнителя не обрезаем, а срок рядом с
+   ним обязан остаться читаемым — на узкой карточке они просто встают в две
+   строки. */
 .task-card-foot {
-  display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1);
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2); margin-top: var(--space-1);
 }
 .task-card-foot .task-due { flex: 1; min-width: 0; font: 500 var(--text-xs)/1.4 var(--font-ui); color: var(--ink-muted); }
 .task-card-foot .task-due.is-overdue { color: var(--danger); }
-.task-card-assignee { flex: none; line-height: 0; }
+.task-card-assignee { flex: none; display: flex; align-items: center; gap: 6px; }
+.task-card-assignee-name {
+  font: 500 var(--text-xs)/1.4 var(--font-ui); color: var(--ink-muted);
+}
 .task-card-free {
   flex: none; padding: 1px 7px; border-radius: var(--radius-pill);
   background: var(--paper-sunken); color: var(--ink-faint);
@@ -306,3 +313,12 @@
 .task-chip-btn:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); }
 .task-chip-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .task-chip-btn:disabled { opacity: .6; cursor: default; }
+/* Снятие исполнителя — действие, а не вариант выбора, поэтому и выглядит
+   иначе: ссылкой под рядом имён, а не ещё одной фишкой в самом ряду. */
+.task-assignee-clear {
+  align-self: flex-start; margin-top: var(--space-1); padding: 0;
+  border: none; background: none; cursor: pointer; color: var(--accent);
+  font: 500 var(--text-xs)/1.5 var(--font-ui);
+}
+.task-assignee-clear:hover { text-decoration: underline; }
+.task-assignee-clear:disabled { opacity: .6; cursor: default; }
