@@ -137,3 +137,27 @@ describe('выбор конкретного пака оформления (e~<un
     expect(toPlainText(':e~ffffff~apple:', map)).toBe(':e~ffffff~apple:');
   });
 });
+
+test('старый код :u_1f913: показывается смайликом, а не текстом', () => {
+  // Переход на Unicode переписал СООБЩЕНИЯ, но не всё остальное: свой статус
+  // так и хранит `:u_1f913:`, и человек видел на экране технический код.
+  // Правило «код не должен быть виден НИГДЕ» распространяется и на него.
+  const map = buildEmojiMap([
+    { name: 'u_1f913', file_path: '/uploads/emoji/nerd.webp', unicode_key: '1f913', fallback: '🤓' },
+  ] as never);
+
+  const { container } = render(<div>{renderMessageText(':u_1f913: за работой', map)}</div>);
+  expect(container.querySelector('img')).toHaveAttribute('src', expect.stringContaining('nerd.webp'));
+  expect(container.textContent).not.toContain(':u_1f913:');
+});
+
+test('код, который не может быть символом, остаётся текстом', () => {
+  // `u_12` — это скорее имя, чем символ U+0012: подменять его пустотой или
+  // случайным глифом значит менять содержимое чужого сообщения.
+  const map = buildEmojiMap([
+    { name: 'u_1f913', file_path: '/uploads/emoji/nerd.webp', unicode_key: '1f913', fallback: '🤓' },
+  ] as never);
+
+  const { container } = render(<div>{renderMessageText(':u_12:', map)}</div>);
+  expect(container.textContent).toContain(':u_12:');
+});

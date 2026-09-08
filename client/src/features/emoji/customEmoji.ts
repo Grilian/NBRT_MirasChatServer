@@ -191,6 +191,31 @@ function unicodeAt(text: string, start: number, map: CustomEmojiMap): EmojiMatch
   } : null;
 }
 
+/**
+ * Старый код вида `:u_1f913:` → сам символ 🤓.
+ *
+ * Имена картинкам давали по коду эмодзи (`u_1f4a2`, составные `u_1f1f7_1f1fa`),
+ * и до перехода на Unicode такой код лежал прямо в тексте. Переход переписал
+ * СООБЩЕНИЯ, но не всё остальное: свой статус, например, так и хранит
+ * `:u_1f913:`, и человек видит на экране технический код вместо смайлика —
+ * ровно то, что правило «код не должен быть виден НИГДЕ» и запрещает.
+ *
+ * Отсекаем и мусор, и то, что кодовой точкой быть не может: `u_12` — это
+ * скорее имя, чем символ U+0012. Та же проверка, что у `fallbackFromName` на
+ * сервере.
+ */
+function charFromLegacyName(name: string): string | null {
+  const m = /^u_([0-9a-f_]+)$/.exec(name);
+  if (!m) return null;
+  const points = m[1].split('_').filter(Boolean).map((p) => parseInt(p, 16));
+  if (!points.length || points.some((p) => !Number.isFinite(p) || p < 0x80 || p > 0x10ffff)) return null;
+  try {
+    return String.fromCodePoint(...points);
+  } catch {
+    return null;
+  }
+}
+
 function emojiMatches(text: string, map: CustomEmojiMap): EmojiMatch[] {
   const matches: EmojiMatch[] = [];
   let index = 0;
@@ -210,6 +235,25 @@ function emojiMatches(text: string, map: CustomEmojiMap): EmojiMatch[] {
         if (item) {
           matches.push({ start: index, end: index + token[0].length, name, token: token[0], item });
           index += token[0].length;
+          continue;
+        }
+      }
+
+      // Старый код `:u_1f913:` — переводим в сам символ и ищем его оформление
+      // как обычный юникодный смайлик.
+      const legacy = /^:(u_[0-9a-f_]{2,64}):/.exec(text.slice(index));
+      if (legacy) {
+        const char = charFromLegacyName(legacy[1]);
+        // Ищем ПОЛУЧЕННЫЙ СИМВОЛ тем же деревом, что и обычные смайлики: так
+        // работает вся нормализация (тона, селекторы начертания), и второй
+        // копии правил не заводится.
+        const resolved = char ? unicodeAt(char, 0, map) : null;
+        if (resolved) {
+          matches.push({
+            start: index, end: index + legacy[0].length,
+            name: resolved.name, token: legacy[0], item: resolved.item,
+          });
+          index += legacy[0].length;
           continue;
         }
       }
