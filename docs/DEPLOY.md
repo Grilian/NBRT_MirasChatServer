@@ -15,6 +15,50 @@
 - Расписание обновлений (`notBefore`) на проде настроено пользователем — не трогать без явной просьбы.
 - **Старые сборки на проде теперь не чистятся «по умолчанию»: каждая из них — точка отката** (кнопка в панели переписывает манифесты на ту версию, что ЛЕЖИТ рядом). На 14.08.2026 оставлены 1.10.0, 1.9.0 и 1.8.2 при 824 МБ занятых и 38 ГБ свободных — места это не стоит ничего. 1.8.2 держится ещё и потому, что у 1.9.0 нет linux-сборок вовсе, и без неё откат Astra было бы некуда сделать. В `updates/` лежат также древние `MirasChat-test*` — ничей манифест на них не ссылается, но и трогать их без просьбы незачем.
 
+**Тестовый стенд на проде (08.09.2026, на время проверки редизайна)**
+- **Зачем.** Клиент ветки `redesign` не работает со старым сервером: прежняя
+  раскладка вложений `/uploads/chat-images/…` больше не принимается, из текста
+  убран старый вид кода смайлика, а ручек `/tasks/journal`, `/tasks/:id/assignee`
+  и `/tasks/:id/restore` на проде нет вовсе. Обновить один сервер нельзя — под
+  ним сидят живые 1.11.18. Поэтому рядом поднят второй экземпляр.
+- **Что где.** Код ветки — `/home/gri/projects/miraschat-test` (перенесён
+  `git archive` + `scp`, ветка наружу НЕ публиковалась). Процесс в pm2 —
+  `MirasChatTest`, порт **3011**, `SOCKET_IO_PATH=/miraschat-test/socket.io`,
+  свой `JWT_SECRET`. Веб — `/home/gri/projects/miraschat-test/web` (собран с
+  `VITE_API_BASE_URL=https://cagrizzz.ru/miraschat-test/api`). Адрес —
+  `https://cagrizzz.ru/miraschat-test/`.
+- **Данные — снимок боевой базы** (`sqlite3 .backup`, консистентно при живом
+  сервере), вложения — жёсткими ссылками (`cp -al`, места не занимают, запись
+  идёт в свои файлы).
+- **Три вещи убраны намеренно, иначе стенд полез бы в настоящий мир:**
+  1. `fcm-service-account.json` НЕ переносится — с копией базы там живые токены
+     устройств, и тестовое сообщение ушло бы пушем настоящим людям (сервер
+     видит отсутствие ключа и пуши выключает сам);
+  2. таблицы `google_calendar_*` очищены — синхронизация ДВУСТОРОННЯЯ
+     (`insertEvent`/`patchEvent`/`deleteEvent`), и тестовое событие создалось бы
+     в личном календаре живого человека; скопировалось 1 аккаунт и 444 привязки;
+  3. `device_tokens` очищена, `MIRAS_URL`/`MIRAS_CHAT_TOKEN`/`CHAT_SHARED_SECRET`
+     оставлены пустыми.
+- **nginx правится только с паролем** (`sudo -n` на этой машине не работает).
+  Готовые скрипты лежат в домашнем каталоге: `sudo bash ~/enable-miraschat-test.sh`
+  добавляет три `location` сразу после боевого блока `/miraschat/`, проверяет
+  `nginx -t` и при ошибке возвращает копию
+  (`cagrizzz.ru.before-test-stand`); `sudo bash ~/disable-miraschat-test.sh`
+  снимает стенд обратно.
+- **Снять после проверки:** `sudo bash ~/disable-miraschat-test.sh`, затем
+  `rm -rf ~/projects/miraschat-test`. Боевой `/miraschat/` скриптами не
+  затрагивается ни на одном шаге.
+- **Сборки для стенда** делаются теми же переменными, ради которых они и
+  заведены:
+  `MIRASCHAT_API_BASE_URL=https://cagrizzz.ru/miraschat-test/api`,
+  `MIRASCHAT_SOCKET_URL=https://cagrizzz.ru`,
+  `MIRASCHAT_SOCKET_PATH=/miraschat-test/socket.io`.
+  **В Git Bash их задавать нельзя:** MSYS превращает значение, начинающееся со
+  слэша, в путь Windows, и `SOCKET_IO_PATH` уехал в
+  `C:/Program Files/Git/miraschat-test/socket.io` — сборка молча собралась с
+  неработающим сокетом. Задавать в PowerShell (`$env:…`) либо с
+  `MSYS_NO_PATHCONV=1`.
+
 **Окружение сборки (машина пользователя)**
 - Android-тулчейн поставлен переносимо в `C:\Users\Gri\dev-tools` (12.08.2026): JDK 17 Temurin (`jdk-17.0.20+8`) + Android SDK (`android-sdk`: cmdline-tools latest, platform-tools, `platforms;android-34`, `build-tools;34.0.0`). Установщиков нет и быть не может — на машине НЕТ ни winget, ни chocolatey, ни прав администратора, поэтому всё распаковано из zip вручную. `JAVA_HOME`/`ANDROID_HOME`/`ANDROID_SDK_ROOT` и `PATH` прописаны в переменные среды ПОЛЬЗОВАТЕЛЯ (не системные — админ не нужен). Лицензии SDK приняты. `mobile/android/local.properties` (`sdk.dir`) создан и gitignored.
 - Версии зафиксированы проектом, не выбраны произвольно: AGP 8.2.1 (`mobile/android/build.gradle`) требует именно JDK 17, `compileSdk 34` (`variables.gradle`) — platform/build-tools 34. Gradle 8.2.1 приезжает сам через wrapper, ставить не нужно.
