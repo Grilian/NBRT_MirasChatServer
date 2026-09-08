@@ -16,6 +16,9 @@ import {
 
 interface TasksPanelProps {
   currentUserId: number;
+  /** Своё имя: справочник `/users` себя не возвращает, а показать надо. */
+  currentUserName: string;
+  currentUsername: string;
   /**
    * Меняется, когда сервер сообщил, что задачи изменились (событие
    * 'tasks_changed'). Без этого статус, поставленный другим причастным, не
@@ -85,7 +88,8 @@ function whenLabel(ms: number): string {
 }
 
 const TasksPanel: React.FC<TasksPanelProps> = ({
-  currentUserId, changeToken = 0, draftDescription = null, onDraftConsumed, initialTab, onClose
+  currentUserId, currentUserName, currentUsername, changeToken = 0,
+  draftDescription = null, onDraftConsumed, initialTab, onClose
 }) => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<TaskItem[]>([]);
@@ -414,6 +418,8 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
         <TaskDialog
           task={editing === 'new' ? null : editing}
           currentUserId={currentUserId}
+          currentUserName={currentUserName}
+          currentUsername={currentUsername}
           initialDescription={editing === 'new' ? (draftDescription || undefined) : undefined}
           onClose={() => { setEditing(null); onDraftConsumed?.(); }}
           onSave={handleSave}

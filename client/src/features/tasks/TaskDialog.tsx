@@ -16,6 +16,13 @@ interface DirectoryEntry {
 interface TaskDialogProps {
   task: TaskItem | null;
   currentUserId: number;
+  /**
+   * Своё имя и логин. Справочник `/users` отдаёт всех, КРОМЕ запросившего
+   * (`WHERE u.id != ?`), поэтому найти себя в нём нельзя — а показать себя в
+   * задаче надо.
+   */
+  currentUserName: string;
+  currentUsername: string;
   onClose: () => void;
   onSave: (draft: TaskDraft) => Promise<void>;
   /**
@@ -40,8 +47,8 @@ interface TaskDialogProps {
 const END_OF_DAY_MINUTES = 23 * 60 + 59;
 
 const TaskDialog: React.FC<TaskDialogProps> = ({
-  task, currentUserId, onClose, onSave, onDelete, onStatusChange, onArchiveChange,
-  onAssigneeChange, initialDescription
+  task, currentUserId, currentUserName, currentUsername, onClose, onSave, onDelete,
+  onStatusChange, onArchiveChange, onAssigneeChange, initialDescription
 }) => {
   // Править задачу может только тот, кто её поставил. Раньше форма
   // показывалась всем причастным одинаково, и «Сохранить» у них упиралось в
@@ -74,6 +81,15 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
    * «кто видит», а исполнитель — «с кого спрос», и это разные вещи.
    */
   const [assignee, setAssignee] = useState<TaskPerson | null>(task?.assignee || null);
+  /**
+   * Выбирали ли исполнителя РУКАМИ.
+   *
+   * Пока не выбирали, задача сама переезжает на первого добавленного
+   * причастного — так просили. А если причастных нет вовсе, у новой задачи
+   * исполнителем остаётся сам постановщик: задача, с которой никого не
+   * спросят, заводится по недосмотру легче всего.
+   */
+  const assigneePicked = useRef(false);
   const [assigning, setAssigning] = useState(false);
   const [people, setPeople] = useState<DirectoryEntry[]>([]);
   const [query, setQuery] = useState('');
@@ -137,6 +153,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
    */
   const chooseAssignee = async (person: TaskPerson | null) => {
     if (assigning) return;
+    assigneePicked.current = true;
     if (!readOnly || !task || !onAssigneeChange) { setAssignee(person); return; }
     setAssigning(true);
     setError('');
@@ -156,7 +173,35 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
   };
 
   /**
-   * Кого можно назначить: причастные и сам постановщик.
+   * Сам человек — тоже участник задачи, и его надо ВИДЕТЬ.
+   *
+   * Раньше постановщик не появлялся нигде: в «Причастных» его нет (сервер
+   * считает видимость по «автор ИЛИ причастный» и в этот список его не
+   * пишет), в исполнителях тоже — ряд собирался из причастных, а себя туда
+   * никто не добавлял. Выходило, что заведя задачу, человек выглядел к ней
+   * непричастным и не мог взять её на себя. Жалоба пользователя 08.09.2026.
+   */
+  const me: TaskPerson | null = useMemo(() => {
+    if (task) return task.created_by.id === currentUserId ? task.created_by : null;
+    return {
+      id: currentUserId,
+      username: currentUsername,
+      display_name: currentUserName || currentUsername,
+      avatar_path: null,
+    };
+  }, [task, currentUserId, currentUserName, currentUsername]);
+
+  // Новая задача по умолчанию на себе: список людей приезжает запросом, и до
+  // его ответа поставить некого — поэтому не в начальном состоянии, а как
+  // только стало известно, кто мы. Ровно один раз и только пока не тронуто
+  // руками и не выбран никто другой.
+  useEffect(() => {
+    if (task || !me || assigneePicked.current) return;
+    setAssignee((prev) => prev || me);
+  }, [task, me]);
+
+  /**
+   * Кого можно назначить: сам постановщик, причастные и автор чужой задачи.
    *
    * С отсевом повторов: постановщик обычно и так среди причастных, и без него
    * его имя стояло в ряду дважды — выбрать можно любое, а выглядит как ошибка
@@ -164,6 +209,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
    */
   const assignableFrom: TaskPerson[] = [];
   for (const candidate of [
+    ...(me ? [me] : []),
     ...participants,
     ...(task && task.created_by.id !== currentUserId ? [task.created_by] : []),
   ]) {
@@ -274,8 +320,9 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
     setParticipants((prev) => [...prev, added]);
     // Первый причастный сразу становится исполнителем: задача без исполнителя —
     // задача, с которой никого не спросят, и заводить её так по недосмотру
-    // проще всего. Выбор не окончательный — ряд имён рядом, и снять тоже можно.
-    setAssignee((prev) => prev || added);
+    // проще всего. Но только пока исполнителя не выбрали руками — иначе выбор
+    // человека молча перебивался бы следующим добавленным.
+    if (!assigneePicked.current) setAssignee(added);
     setQuery('');
   };
 
@@ -418,13 +465,24 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
           <div className="field">
             <label>Причастные</label>
             <div className="task-participants-picked">
+              {/* Себя показываем всегда и без крестика: из своей задачи не
+                  выйти, а не видеть себя в списке — значит выглядеть к ней
+                  непричастным. На сервер эта фишка не уезжает: там видимость
+                  считается по «автор ИЛИ причастный». */}
+              {me && (
+                <span className="task-chip is-self" title="Вы поставили эту задачу">
+                  {nameFor(me)} · вы
+                </span>
+              )}
               {participants.map((p) => (
                 <span key={p.id} className="task-chip">
                   {nameFor(p)}
                   <button type="button" onClick={() => removeParticipant(p.id)} aria-label="Убрать">×</button>
                 </span>
               ))}
-              {participants.length === 0 && <span className="task-hint">Пока никого — задачу увидите только вы</span>}
+              {participants.length === 0 && (
+                <span className="task-hint">Больше никого — задачу пока видите только вы</span>
+              )}
             </div>
             <div className="task-people-search">
               <input

@@ -36,6 +36,8 @@ test('сдав работу, человек теряет право переда
     <TaskDialog
       task={task}
       currentUserId={39}
+      currentUserName="Я"
+      currentUsername="me"
       onClose={vi.fn()}
       onSave={vi.fn()}
       onAssigneeChange={onAssigneeChange}

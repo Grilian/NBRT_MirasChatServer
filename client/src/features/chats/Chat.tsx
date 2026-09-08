@@ -3330,6 +3330,8 @@ const Chat: React.FC = () => {
         <Modal onClose={() => setTasksModalOpen(false)} className="tasks-modal">
           <TasksPanel
             currentUserId={currentUserId}
+            currentUserName={currentDisplayName}
+            currentUsername={currentUsername}
             changeToken={tasksChangeToken}
             onClose={() => setTasksModalOpen(false)}
           />
@@ -3474,6 +3476,8 @@ const Chat: React.FC = () => {
         <main className="section-host">
           <TasksPanel
             currentUserId={currentUserId}
+            currentUserName={currentDisplayName}
+            currentUsername={currentUsername}
             changeToken={tasksChangeToken}
             draftDescription={taskDraftText}
             onDraftConsumed={() => setTaskDraftText(null)}

@@ -78,6 +78,9 @@
 }
 .task-chip button { border: none; background: none; color: var(--ink-faint); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px; }
 .task-chip button:hover { color: var(--unread); }
+/* Себя из своей задачи не убрать — крестика нет, и фишка тише остальных:
+   она сообщает факт, а не предлагает действие. */
+.task-chip.is-self { background: none; border: 1px dashed var(--line); color: var(--ink-muted); }
 .task-people-search { position: relative; }
 /* Подсказки стоят В ПОТОКЕ, а не поверх. Всплывающий список обрезался
    карточкой окна (у неё overflow: hidden), и последние строки были не видны и
