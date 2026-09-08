@@ -223,7 +223,7 @@ const Chat: React.FC = () => {
   // иначе он врал бы при обрыве связи, когда сообщения уже никуда не уходят.
   const [socketConnected, setSocketConnected] = useState(false);
   const [socketAuthenticated, setSocketAuthenticated] = useState(false);
-  const [connectionState, setConnectionState] = useState<'offline' | 'connecting' | 'server-unavailable' | 'connected'>(() => (
+  const [connectionState, setConnectionState] = useState<'offline' | 'connecting' | 'server-unavailable' | 'session-invalid' | 'connected'>(() => (
     typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'connecting'
   ));
   const [users, setUsers] = useState<User[]>([]);
@@ -1005,16 +1005,29 @@ const Chat: React.FC = () => {
     window.addEventListener('offline', handleBrowserOffline);
     window.addEventListener('online', handleBrowserOnline);
 
+    // Сервер прямо говорит, что токен недействителен, — и это НЕ «сервер
+    // недоступен». Разница видна человеку: в первом случае надо ждать, во
+    // втором — войти заново, а ожидание не кончится никогда. Поймано на
+    // тестовом стенде: у него свой ключ подписи, приложение осталось со старым
+    // токеном и бесконечно писало «Повторное подключение…» при полностью
+    // живом сервере. В бою то же самое случится с любым переставшим быть
+    // действительным сеансом.
+    newSocket.on('auth_error', () => setConnectionState('session-invalid'));
+
     newSocket.on('connect', () => {
       setConnectionState('connecting');
       newSocket.timeout(10_000).emit(
         'user_online',
         localStorage.getItem('token'),
-        (timeoutError: Error | null, response?: { ok?: boolean }) => {
+        (timeoutError: Error | null, response?: { ok?: boolean; error?: string }) => {
           if (timeoutError || !response?.ok) {
             setSocketConnected(false);
             setSocketAuthenticated(false);
-            setConnectionState(navigator.onLine === false ? 'offline' : 'server-unavailable');
+            setConnectionState(
+              response?.error === 'invalid_token'
+                ? 'session-invalid'
+                : navigator.onLine === false ? 'offline' : 'server-unavailable',
+            );
             return;
           }
           setSocketConnected(true);
@@ -3547,9 +3560,20 @@ const Chat: React.FC = () => {
             <div className={`connection-banner is-${connectionState}`} role="status" aria-live="polite">
               {connectionState === 'offline'
                 ? 'Нет интернета. Сообщения останутся в очереди.'
-                : connectionState === 'server-unavailable'
-                  ? 'Сервер недоступен. Повторное подключение…'
-                  : 'Соединение…'}
+                : connectionState === 'session-invalid'
+                  ? (
+                    <>
+                      Сеанс больше не действителен — войдите заново.
+                      {/* Выход не делаем сами: localStorage.clear() унесёт и
+                          очередь неотправленных сообщений. Решает человек. */}
+                      <button type="button" className="connection-banner-action" onClick={handleLogout}>
+                        Войти заново
+                      </button>
+                    </>
+                  )
+                  : connectionState === 'server-unavailable'
+                    ? 'Сервер недоступен. Повторное подключение…'
+                    : 'Соединение…'}
             </div>
           )}
 

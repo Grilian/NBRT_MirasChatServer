@@ -566,10 +566,19 @@
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
 }
 .connection-banner.is-offline,
-.connection-banner.is-server-unavailable {
+.connection-banner.is-server-unavailable,
+.connection-banner.is-session-invalid {
   color: var(--unread); background: color-mix(in srgb, var(--unread) 10%, var(--sidebar));
   border-bottom-color: color-mix(in srgb, var(--unread) 24%, var(--line));
 }
+/* Единственная полоса, из которой есть выход: остальные состояния проходят
+   сами, а недействительный сеанс не пройдёт никогда — нужно действие. */
+.connection-banner-action {
+  margin-left: 8px; padding: 1px 9px; cursor: pointer;
+  border: 1px solid currentColor; border-radius: var(--radius-pill);
+  background: none; color: inherit; font: 600 12px/1.5 var(--font-ui);
+}
+.connection-banner-action:hover { background: color-mix(in srgb, var(--unread) 18%, transparent); }
 
 /* Три точки «печатает…» рядом с текстом в шапке */
 .typing-dots { display: inline-flex; align-items: flex-end; gap: 2.5px; padding-bottom: 2px; }

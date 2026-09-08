@@ -250,17 +250,51 @@ test('всплеск правок схлопывается в ОДНО чтен�
 
 test('серверные события, на которые никто не подписан, — осиротевшие', () => {
   // Не проверка «должно работать», а фиксация текущего положения дел:
-  // calendar_notification и auth_error сервер шлёт, а слушателя у них нет,
-  // то есть до человека они не доходят вовсе. Тест обязан упасть, когда
-  // слушателя заведут, — чтобы заметку в CLAUDE.md обновили вместе с кодом.
+  // calendar_notification сервер шлёт, а слушателя у него нет — приглашения и
+  // напоминания доходят только пушем, то есть только на Android. Тест обязан
+  // упасть, когда слушателя заведут, чтобы заметку в OPEN_QUESTIONS обновили
+  // вместе с кодом. Так и вышло с `auth_error` 08.09.2026: он был осиротевшим,
+  // слушателя завели — тест упал и переехал строкой ниже.
   act(() => { render(<Chat />); });
   expect(socket.listens('calendar_notification')).toBe(false);
-  expect(socket.listens('auth_error')).toBe(false);
   // А эти подписаны — если подписка потеряется при переезде, тест это покажет.
+  expect(socket.listens('auth_error')).toBe(true);
   expect(socket.listens('chat_message')).toBe(true);
   expect(socket.listens('emoji_changed')).toBe(true);
   expect(socket.listens('chat_cleared')).toBe(true);
   expect(socket.listens('attachment_archived')).toBe(true);
   expect(socket.listens('reactions_changed')).toBe(true);
   expect(socket.listens('thread_message')).toBe(true);
+});
+
+test('недействительный сеанс отличается от недоступного сервера', async () => {
+  // Живая находка на тестовом стенде: у него свой ключ подписи, приложение
+  // осталось со старым токеном — и писало «Сервер недоступен. Повторное
+  // подключение…» при полностью живом сервере. Ждать там нечего: пока человек
+  // не войдёт заново, не изменится ничего.
+  await mount();
+
+  await act(async () => { socket.fire('connect'); });
+  await act(async () => { socket.ack(null, { ok: false, error: 'invalid_token' }); });
+
+  await waitFor(() => {
+    expect(document.querySelector('.connection-banner')!.textContent)
+      .toContain('Сеанс больше не действителен');
+  });
+  expect(document.body.textContent).not.toContain('Сервер недоступен');
+  // Выход не делается сам: localStorage.clear() унёс бы и очередь
+  // неотправленных сообщений — решает человек.
+  expect(document.querySelector('.connection-banner-action')).toBeTruthy();
+});
+
+test('обычный отказ подтверждения по-прежнему читается как недоступный сервер', async () => {
+  await mount();
+
+  await act(async () => { socket.fire('connect'); });
+  await act(async () => { socket.ack(null, { ok: false }); });
+
+  await waitFor(() => {
+    expect(document.querySelector('.connection-banner')!.textContent)
+      .toContain('Сервер недоступен');
+  });
 });
