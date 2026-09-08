@@ -218,16 +218,34 @@ test('архивация вложения снимает картинку, но 
   });
 });
 
+const catalogReads = () => api.calls.filter(([, u]) => u.startsWith('/emoji/catalog')).length;
+
 test('правка смайликов заставляет перечитать каталог отрисовки', async () => {
   await mount();
-  const before = api.calls.filter(([, u]) => u.startsWith('/emoji/catalog')).length;
+  const before = catalogReads();
 
   await act(async () => { socket.fire('emoji_changed'); });
+  // Чтение отложено: см. EMOJI_RELOAD_DELAY_MS в Chat.tsx.
+  await waitFor(() => expect(catalogReads()).toBeGreaterThan(before), { timeout: 3000 });
+});
 
-  await waitFor(() => {
-    const after = api.calls.filter(([, u]) => u.startsWith('/emoji/catalog')).length;
-    expect(after).toBeGreaterThan(before);
+test('всплеск правок схлопывается в ОДНО чтение каталога', async () => {
+  // Администратор включает десяток смайликов подряд, и на каждое нажатие
+  // прилетает своё `emoji_changed`. Каталог весит 140 КБ сжатыми и
+  // перечитывается целиком: двадцать правок при тридцати клиентах — под сотню
+  // мегабайт на ровном месте. Настоящая дельта осталась незакрытым вопросом,
+  // но всплеск обязан стоить одного чтения, а не десяти.
+  await mount();
+  const before = catalogReads();
+
+  await act(async () => {
+    for (let i = 0; i < 10; i += 1) socket.fire('emoji_changed');
   });
+
+  await waitFor(() => expect(catalogReads()).toBe(before + 1), { timeout: 3000 });
+  // И дальше не догоняет: отложенное чтение было одно, а не десять подряд.
+  await act(async () => { await new Promise((r) => setTimeout(r, 400)); });
+  expect(catalogReads()).toBe(before + 1);
 });
 
 test('серверные события, на которые никто не подписан, — осиротевшие', () => {

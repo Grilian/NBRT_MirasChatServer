@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { App as CapApp } from '@capacitor/app';
 import ChatList, { Chat as RosterChat, ChatSection } from './ChatList';
@@ -9,8 +9,20 @@ import { runTopBackInterceptor } from '@/shared/hooks/backInterceptors';
 import { useSwipeSections } from '@/shared/hooks/useSwipeSections';
 import DeleteMessagesModal, { DeleteRequest } from './DeleteMessagesModal';
 import { MessageReaction } from './ReactionDetailsModal';
-import SettingsPanel from '@/features/settings/SettingsPanel';
-import ProfileEdit from '@/features/settings/ProfileEdit';
+
+/**
+ * Тяжёлые разделы грузятся ОТДЕЛЬНО, по первому открытию.
+ *
+ * Календарь — 2831 строка, настройки — 1791, задачи — 957; всё это ехало в
+ * общем куске каждому, кто открыл приложение ради переписки. Разделы за
+ * навигацией: пока человек не нажал «Календарь», их код ему не нужен вовсе.
+ *
+ * Переписка, список чатов и ветки НЕ ленивые намеренно: это то, ради чего
+ * приложение открывают, и подгружать их отдельным запросом значит показать
+ * заглушку на самом частом пути.
+ */
+const SettingsPanel = React.lazy(() => import('@/features/settings/SettingsPanel'));
+const ProfileEdit = React.lazy(() => import('@/features/settings/ProfileEdit'));
 import DirectoryModal from '@/features/contacts/DirectoryModal';
 import UserInfoModal from '@/features/contacts/UserInfoModal';
 import CreateGroupModal, { CreatedGroup } from '@/features/groups/CreateGroupModal';
@@ -21,11 +33,11 @@ import NavRail, { SectionId, isSectionAllowedFor, mobileOverflowFor, mobileSecti
 import Sheet from '@/shared/ui/Sheet';
 import AppMenuDrawer from '@/app/AppMenuDrawer';
 import SectionStub from '@/app/SectionStub';
-import FilesSection from '@/features/files/FilesSection';
+const FilesSection = React.lazy(() => import('@/features/files/FilesSection'));
 import HomeSection, { HomeCalendarTarget } from '@/features/home/HomeSection';
-import TasksPanel from '@/features/tasks/TasksPanel';
-import CalendarSection from '@/features/calendar/CalendarSection';
-import PeopleSection from '@/features/contacts/PeopleSection';
+const TasksPanel = React.lazy(() => import('@/features/tasks/TasksPanel'));
+const CalendarSection = React.lazy(() => import('@/features/calendar/CalendarSection'));
+const PeopleSection = React.lazy(() => import('@/features/contacts/PeopleSection'));
 import NotificationStack, { ToastNotification } from '@/features/notifications/NotificationStack';
 import api from '@/shared/api/client';
 import type { ChatGroupSummary, LastMessage, Message, User } from '@/shared/api/types';
@@ -162,6 +174,9 @@ export const QUICK_ACCESS_LABEL = 'Быстрый доступ';
 // Синтетический "чат" для уведомлений о задачах: тосты и системные уведомления
 // группируются по chatId, а у задачи переписки нет. Префикс с двоеточием не
 // может совпасть ни с одним настоящим chat_id.
+/** Насколько откладывается перечитывание каталога смайликов (см. emoji_changed). */
+const EMOJI_RELOAD_DELAY_MS = 1500;
+
 const TASKS_TOAST_ID = 'section:tasks';
 
 // Общий чат и группы: у сообщения несколько получателей, поэтому «прочитано»
@@ -662,6 +677,14 @@ const Chat: React.FC = () => {
   useEffect(() => onNotificationPrefsChanged(setNotificationPrefs), []);
 
   // То же самое для настроек интерфейса (группировка контактов, ширина списка).
+  /**
+   * Отложенное перечитывание каталога смайликов: см. обработчик
+   * `emoji_changed`. Ссылкой, а не состоянием — перерисовывать приложение
+   * из-за таймера незачем.
+   */
+  const emojiReloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (emojiReloadTimer.current) clearTimeout(emojiReloadTimer.current); }, []);
+
   const [uiPrefs, setUiPrefs] = useState<UiPrefs>(getUiPrefs);
 
   // Единая адаптивная раскладка: STANDARD → COMPACT → MOBILE.
@@ -1070,11 +1093,28 @@ const Chat: React.FC = () => {
 
     // Правка смайликов в панели управления доходит до всех сразу, а не на
     // следующем реконнекте: каталог общий, персонализации в нём нет.
+    // Правки в панели идут ОЧЕРЕДЬЮ, а не по одной: администратор включает
+    // десяток смайликов подряд, и на каждое нажатие прилетает своё
+    // `emoji_changed`. Каталог при этом весит 140 КБ сжатыми и перечитывается
+    // ЦЕЛИКОМ — двадцать правок при тридцати клиентах это под сотню мегабайт
+    // на ровном месте.
+    //
+    // Схлопываем всплеск в одно чтение. Полторы секунды — время, за которое
+    // человек успевает нажать следующую кнопку в панели, но не успевает
+    // заметить, что смайлик обновился не мгновенно.
+    //
+    // Настоящая дельта («что именно изменилось») остаётся правильным решением
+    // и незакрытым вопросом — см. docs/OPEN_QUESTIONS.md. Но она меняет
+    // контракт события, а это отдельная работа.
     newSocket.on('emoji_changed', () => {
-      reloadEmojiCatalog();
-      // Панель выбора держит свой кэш и перечитывает его при открытии — без
-      // сброса она показала бы старый состав, пока её не откроют дважды.
-      invalidateEmojiPackCache();
+      if (emojiReloadTimer.current) clearTimeout(emojiReloadTimer.current);
+      emojiReloadTimer.current = setTimeout(() => {
+        emojiReloadTimer.current = null;
+        reloadEmojiCatalog();
+        // Панель выбора держит свой кэш и перечитывает его при открытии — без
+        // сброса она показала бы старый состав, пока её не откроют дважды.
+        invalidateEmojiPackCache();
+      }, EMOJI_RELOAD_DELAY_MS);
     });
 
     // То же и для стикеров — свой каталог и свой кэш пикера, независимые от
@@ -3414,7 +3454,9 @@ const Chat: React.FC = () => {
 
       {section === 'documents' && (
         <main className="section-host">
-          <FilesSection onOpenMessage={handleOpenMessage} />
+          <Suspense fallback={<div className="section-loading">Загрузка…</div>}>
+            <FilesSection onOpenMessage={handleOpenMessage} />
+          </Suspense>
         </main>
       )}
 
