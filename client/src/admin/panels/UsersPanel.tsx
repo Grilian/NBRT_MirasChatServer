@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import superAdminApi from '@/shared/api/superAdminClient';
 import { ACCOUNT_TYPE_LABELS, AccountType, ROLE_LABELS } from '@/shared/lib/accountMeta';
 import { AppVersions, Group, PASSWORD_STATUS_LABELS, UserRow } from '../types';
+import Modal, { ModalHead } from '@/shared/ui/Modal';
 
 function UserSettingsModal({
   user, groups, departments, onChange, onClose
@@ -11,14 +12,8 @@ function UserSettingsModal({
   onClose: () => void;
 }) {
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card sa-user-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="conv-head">
-          <div className="conv-title"><div className="settings-title">{user.display_name || user.username}</div></div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-        </div>
+    <Modal onClose={onClose} className="sa-user-modal">
+        <ModalHead title={user.display_name || user.username} onClose={onClose} />
 
         <div className="sa-user-modal-body">
           <div className="user-info-field">
@@ -73,8 +68,7 @@ function UserSettingsModal({
             </label>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

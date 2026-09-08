@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '@/shared/api/client';
 import { dayKeyOf, formatDayLong, instantOf, toDateInput } from '@/features/calendar/dates';
 import { nameFor } from '@/shared/lib/user';
+import Modal, { ModalHead } from '@/shared/ui/Modal';
 import { TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskDraft, TaskItem, TaskPerson, TaskStatus } from './types';
 import { AUTOFOCUS_ON_OPEN } from '@/shared/hooks/autoFocus';
 
@@ -256,15 +257,10 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
     node.scrollIntoView({ block: 'nearest' });
   }, [suggestions.length]);
 
+  // persistent: промах мимо карточки не должен стирать заполненную форму.
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card task-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="conv-head">
-          <div className="conv-title"><div className="settings-title">{task ? 'Задача' : 'Новая задача'}</div></div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-        </div>
+    <Modal onClose={onClose} className="task-dialog" persistent>
+      <ModalHead title={task ? 'Задача' : 'Новая задача'} onClose={onClose} />
 
         {readOnly ? (
           <div className="task-dialog-body">
@@ -355,8 +351,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
           </div>
         </form>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 };
 

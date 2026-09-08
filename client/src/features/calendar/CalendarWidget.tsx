@@ -20,6 +20,7 @@ import { useLayoutMode } from '@/shared/hooks/useLayoutMode';
 import { getUiPrefs } from '@/features/settings/uiPrefs';
 import { CalendarOccurrence, CalendarScope, CalendarViewMode, EventDraft, SeriesScope } from './types';
 import './calendar.css';
+import Modal from '@/shared/ui/Modal';
 
 export interface CalendarOpenTarget {
   occurrenceId: string;
@@ -473,8 +474,7 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
       )}
 
       {details && (
-        <div className="modal-overlay" onClick={() => setDetails(null)}>
-          <div className="modal-card cal-details" onClick={(event) => event.stopPropagation()}>
+        <Modal onClose={() => setDetails(null)} className="cal-details">
             <div className="conv-head">
               <div className="cal-dialog-heading">
                 {details.source === 'birthday' ? 'День рождения' : 'Событие'}
@@ -514,8 +514,7 @@ const CalendarWidget: React.FC<CalendarWidgetProps> = ({
                 </div>
               )}
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

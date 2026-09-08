@@ -4,6 +4,7 @@ import { APP_NAME, APP_VERSION } from './version';
 import { applyThemePreference, getThemePreference } from '@/shared/lib/theme';
 import { describeStatus } from '@/features/status/statusMeta';
 import { CustomEmojiMap, renderTextWithEmoji } from '@/features/emoji/customEmoji';
+import { useDismissibleLayer } from '@/shared/ui/useDismissibleLayer';
 
 interface AppMenuDrawerProps {
   open: boolean;
@@ -40,7 +41,7 @@ function isDarkNow(): boolean {
   );
 }
 
-const AppMenuDrawer: React.FC<AppMenuDrawerProps> = ({
+const AppMenuDrawerBody: React.FC<AppMenuDrawerProps> = ({
   open, username, avatarPath, online, statusPreset, statusCustom, customEmoji = {}, favoritesAvailable,
   onClose, onOpenProfile, onOpenStatus, onOpenChats, onOpenTasks, onCreateGroup, onOpenContacts,
   onOpenFavorites, onOpenSettings,
@@ -59,16 +60,10 @@ const AppMenuDrawer: React.FC<AppMenuDrawerProps> = ({
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
+  // Шторка — не карточка `Modal`, но закрывается она так же: Escape,
+  // аппаратный «Назад» и штатный режим клавиатуры Android живут в общей
+  // обвязке, а не переписываются здесь заново.
+  useDismissibleLayer(onClose);
 
   const run = (action: () => void) => {
     onClose();
@@ -191,5 +186,17 @@ const AppMenuDrawer: React.FC<AppMenuDrawerProps> = ({
     </div>
   );
 };
+
+/**
+ * Открытая шторка — отдельный узел дерева, а не «та же, но с `open: false`».
+ *
+ * Обвязка закрытия ставит перехватчик аппаратного «Назад» на всё время жизни
+ * узла: закрытая шторка, живущая в дереве постоянно, съедала бы этот «Назад» у
+ * экрана под собой. Ровно так же устроено окно — оно и рисуется только когда
+ * открыто.
+ */
+const AppMenuDrawer: React.FC<AppMenuDrawerProps> = (props) => (
+  props.open ? <AppMenuDrawerBody {...props} /> : null
+);
 
 export default AppMenuDrawer;

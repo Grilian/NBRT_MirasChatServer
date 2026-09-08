@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { fetchApkDownloadInfo } from '@/shared/platform/mobileUpdate';
+import Modal, { ModalHead } from '@/shared/ui/Modal';
 
 interface AndroidQrModalProps {
   onClose: () => void;
@@ -40,14 +41,8 @@ const AndroidQrModal: React.FC<AndroidQrModalProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card qr-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="conv-head">
-          <div className="conv-title"><div className="settings-title">Android-приложение</div></div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
-        </div>
+    <Modal onClose={onClose} className="qr-modal">
+        <ModalHead title="Android-приложение" onClose={onClose} />
 
         <div className="qr-modal-body">
           {info === undefined && <div className="roster-empty">Загрузка…</div>}
@@ -66,8 +61,7 @@ const AndroidQrModal: React.FC<AndroidQrModalProps> = ({ onClose }) => {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

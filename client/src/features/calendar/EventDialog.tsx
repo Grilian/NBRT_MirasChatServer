@@ -10,6 +10,7 @@ import {
 } from './types';
 import { colorOfLayer } from './layers';
 import { AUTOFOCUS_ON_OPEN } from '@/shared/hooks/autoFocus';
+import Modal from '@/shared/ui/Modal';
 
 interface Person {
   id: number;
@@ -270,9 +271,9 @@ const EventDialog: React.FC<EventDialogProps> = ({
     }
   };
 
+  // persistent: закрытие по промаху стёрло бы заполненное событие.
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card cal-dialog" onClick={(event) => event.stopPropagation()}>
+    <Modal onClose={onClose} className="cal-dialog" persistent>
         <div className="conv-head">
           <div className="cal-dialog-heading">{editing ? 'Событие' : 'Новое событие'}</div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть">
@@ -593,8 +594,7 @@ const EventDialog: React.FC<EventDialogProps> = ({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 };
 
