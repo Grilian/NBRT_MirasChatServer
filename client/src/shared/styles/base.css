@@ -78,3 +78,20 @@
 .login-error { color: var(--unread); text-align: center; margin: 0 0 12px; font-size: 13px; font-weight: 500; }
 .login-foot { text-align: center; margin-top: 16px; font-size: 12.5px; color: var(--ink-muted); }
 .login-foot button { background: none; border: none; padding: 0; color: var(--accent); font-weight: 600; cursor: pointer; font-size: inherit; }
+
+/* ===== Раздел не загрузился =====
+   Экран вместо пустоты, когда файл раздела не доехал (обычно — выкладка,
+   случившаяся при открытой вкладке). См. app/ChunkBoundary.tsx. */
+.chunk-failure {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-3); height: 100%; min-height: 60vh; padding: var(--space-6);
+  text-align: center; background: var(--paper); color: var(--ink);
+}
+.chunk-failure-title {
+  margin: 0; font: 650 var(--text-xl)/var(--leading-xl) var(--font-display);
+}
+.chunk-failure-note {
+  margin: 0; max-width: 46ch; color: var(--ink-muted);
+  font: 400 var(--text-md)/var(--leading-md) var(--font-ui);
+}
+.chunk-failure .btn-primary { width: auto; padding: 10px 24px; margin-top: var(--space-2); }

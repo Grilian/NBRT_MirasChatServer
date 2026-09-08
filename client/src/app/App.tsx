@@ -5,6 +5,7 @@ import Chat from '@/features/chats/Chat';
 import TitleBar from './TitleBar';
 import { isNativeMobile } from '@/shared/platform/mobileNotify';
 import { reportAppVersion } from '@/shared/platform/reportVersion';
+import ChunkBoundary from './ChunkBoundary';
 
 // Панель управления открывается ОДНИМ человеком и только по #superadmin, а
 // весит она вместе с правкой смайликов и стикеров заметную часть бандла.
@@ -76,9 +77,11 @@ function App() {
 
   if (isSuperAdminRoute) {
     return (
-      <Suspense fallback={<div className="sa-boot">Загрузка панели управления…</div>}>
-        <SuperAdminApp />
-      </Suspense>
+      <ChunkBoundary>
+        <Suspense fallback={<div className="sa-boot">Загрузка панели управления…</div>}>
+          <SuperAdminApp />
+        </Suspense>
+      </ChunkBoundary>
     );
   }
 
@@ -86,7 +89,9 @@ function App() {
     <div className={isElectron ? 'electron-frame' : undefined}>
       {isElectron && <TitleBar />}
       <div className="app-shell">
-        {user ? <Chat /> : <Login onLogin={handleLogin} />}
+        <ChunkBoundary>
+          {user ? <Chat /> : <Login onLogin={handleLogin} />}
+        </ChunkBoundary>
       </div>
     </div>
   );
