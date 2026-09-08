@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Avatar from '@/shared/ui/Avatar';
+import { plural } from '@/shared/lib/plural';
 
 // Всплывающие уведомления внутри приложения — то, что человек видит, когда
 // окно открыто, но он смотрит в другой чат или просто отошёл. Системного
@@ -159,11 +160,7 @@ const ToastCard: React.FC<ToastCardProps> = ({ toast, durationMs, onOpen, onDism
 };
 
 function pluralMessages(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'новое сообщение';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'новых сообщения';
-  return 'новых сообщений';
+  return plural(count, 'новое сообщение', 'новых сообщения', 'новых сообщений');
 }
 
 const NotificationStack: React.FC<NotificationStackProps> = ({ toasts, durationMs, onOpen, onDismiss }) => {

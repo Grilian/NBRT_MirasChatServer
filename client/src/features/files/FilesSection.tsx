@@ -6,6 +6,7 @@ import { formatChatListTime } from '@/shared/lib/time';
 import { fileGlyph, formatFileSize } from '@/shared/lib/fileLimits';
 import { downloadFile } from '@/shared/platform/downloadFile';
 import ImageLightbox from '@/shared/ui/ImageLightbox';
+import { plural } from '@/shared/lib/plural';
 
 // Раздел «Файлы» — личное хранилище: всё, что человек отправил сам, из всех
 // переписок сразу.
@@ -75,15 +76,6 @@ const CATEGORY_COLOR: Record<FileCategory, string> = {
 };
 
 /** «1 файл / 2 файла / 5 файлов» — иначе подпись раздела читается коряво. */
-function plural(count: number, one: string, few: string, many: string): string {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return many;
-  if (mod10 === 1) return one;
-  if (mod10 >= 2 && mod10 <= 4) return few;
-  return many;
-}
-
 const icon = (...paths: string[]) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {paths.map((d, i) => <path key={i} d={d} />)}

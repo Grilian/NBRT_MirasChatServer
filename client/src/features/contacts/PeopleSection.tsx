@@ -5,6 +5,7 @@ import { nameFor } from '@/shared/lib/user';
 import { formatDate } from '@/shared/lib/time';
 import { describeStatus } from '@/features/status/statusMeta';
 import { CustomEmojiMap, renderTextWithEmoji } from '@/features/emoji/customEmoji';
+import { plural } from '@/shared/lib/plural';
 
 export interface DirectoryUser {
   id: number;
@@ -41,11 +42,7 @@ function registeredLabel(createdAt: string | null | undefined): string | null {
 const NO_GROUP = 'Без подразделения';
 
 function pluralPeople(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} сотрудник`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} сотрудника`;
-  return `${n} сотрудников`;
+  return `${n} ${plural(n, 'сотрудник', 'сотрудника', 'сотрудников')}`;
 }
 
 // Раздел «Люди» — тот же справочник, что и в модальном окне «+», но во весь
