@@ -214,7 +214,12 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
         </button>
       </div>
 
-      <div className="settings-body">
+      {/* СВОЙ класс на теле, а не только общий `settings-body`: в редизайне
+          настройки стали двухколоночной сеткой (оглавление слева, раздел
+          справа), и профиль, который тем же классом пользуется, разложило по
+          её колонкам — аватар в одной, «Статус» в другой, форма обратно в
+          первой. Профиль — один столбец, и это надо сказать явно. */}
+      <div className="settings-body profile-edit-body">
         <div className={'profile-avatar-section' + (avatarPath ? ' has-photo' : '')}>
           {avatarPath && (
             <button
