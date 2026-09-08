@@ -227,7 +227,6 @@ export default function StickerPacksPanel() {
   if (!openPack) {
     return (
       <div className="sa-card">
-        <h2>Стикерпаки</h2>
         <p className="sa-hint">
           Каждый набор — отдельная вкладка с обложкой в панели стикеров.
           Порядок вкладок меняется перетаскиванием за ручку слева.

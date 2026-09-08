@@ -266,7 +266,7 @@ const EmojiCatalogPanel: React.FC = () => {
   const more = allRows.length - rows.length;
 
   return (
-    <div className="sa-emoji">
+    <div className="sa-emoji sa-card">
       {error && <div className="sa-error">{error}</div>}
       {notice && <div className="sa-notice">{notice}</div>}
 

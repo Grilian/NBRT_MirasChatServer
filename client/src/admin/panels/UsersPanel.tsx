@@ -149,7 +149,6 @@ export default function UsersPanel({ users, groups, departments, onChanged, newU
   return (
     <div className={embedded ? '' : 'sa-card'}>
       <div className="sa-card-head">
-        {!embedded && <h2>Пользователи <span className="sa-count">{filtered.length}</span></h2>}
         <input
           type="text"
           className="sa-search"

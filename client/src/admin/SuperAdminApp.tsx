@@ -160,6 +160,12 @@ export default function SuperAdminApp() {
             {TAB_LABELS[tab]}
           </button>
 
+          {/* Название раздела рисует ОБОЛОЧКА, а не каждая панель. Раньше
+              каждая писала его сама, и они разошлись с оглавлением:
+              «Сотрудники» против «Пользователи», «Стикеры» против
+              «Стикерпаки». Один источник — разойтись больше нечему. */}
+          <h1 className="sa-main-title">{TAB_LABELS[tab]}</h1>
+
           {loadError && <p className="form-error">{loadError}</p>}
           {tab === 'users' && <UsersPanel users={users} groups={groups} departments={departments} onChanged={load} />}
           {tab === 'internet' && <InternetUsersPanel users={users} groups={groups} departments={departments} onChanged={load} />}

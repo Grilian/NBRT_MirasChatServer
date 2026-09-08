@@ -58,6 +58,13 @@
   display: flex; flex-direction: column; gap: 20px;
 }
 .sa-main-back { display: none; }
+/* Название раздела — одно на всю панель, из того же справочника, что и
+   оглавление. На узком экране его роль играет кнопка возврата, и второй
+   заголовок под ней был бы тем же словом дважды подряд. */
+.sa-main-title {
+  margin: 0; font: 650 var(--text-xl)/1.2 var(--font-display); color: var(--ink);
+  letter-spacing: -.01em;
+}
 
 @media (max-width: 900px) {
   /* Узкий экран: два УРОВНЯ, а не две колонки. Двухколоночная раскладка
@@ -70,6 +77,7 @@
   .sa-body.is-section-open .sa-nav { display: none; }
   .sa-body:not(.is-section-open) .sa-main { display: none; }
   .sa-main { padding: var(--space-3) var(--space-4) var(--space-8); }
+  .sa-main-title { display: none; }
   .sa-main-back {
     display: flex; align-items: center; gap: var(--space-2); align-self: flex-start;
     padding: var(--space-2) var(--space-1); border: none; background: none; cursor: pointer;

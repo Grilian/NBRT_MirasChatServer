@@ -45,7 +45,6 @@ export default function DepartmentsPanel({ departments, onChanged }: { departmen
 
   return (
     <div className="sa-card sa-card--compact">
-      <h2>Отделы</h2>
       <p className="sa-hint">
         Из этого списка выбирают отдел в профиле; по нему же приглашают на события целыми отделами.
       </p>

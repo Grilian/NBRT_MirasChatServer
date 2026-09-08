@@ -51,7 +51,6 @@ export default function UpdateSchedulePanel() {
 
   return (
     <div className="sa-card sa-card--compact">
-      <h2>Обновления</h2>
       {error && <p className="form-error">{error}</p>}
 
       <p className="sa-hint">

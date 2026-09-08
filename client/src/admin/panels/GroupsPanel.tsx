@@ -47,7 +47,6 @@ export default function GroupsPanel({ groups, onChanged }: { groups: Group[]; on
 
   return (
     <div className="sa-card sa-card--compact">
-      <h2>Группы</h2>
       {error && <p className="form-error">{error}</p>}
       <table className="sa-table">
         <thead>

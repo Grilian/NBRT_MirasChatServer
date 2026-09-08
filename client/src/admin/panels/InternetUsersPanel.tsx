@@ -42,7 +42,6 @@ export default function InternetUsersPanel({
 
   return (
     <div className="sa-card">
-      <h2>Интернет — {internetUsers.length}</h2>
       <p className="sa-hint">
         Регистрации с улицы. Они видят только других «Интернет» и группу «Админы»,
         пока их не подтвердят: смените тип на «Сотрудник» в колонке «Тип».

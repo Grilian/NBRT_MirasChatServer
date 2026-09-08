@@ -83,7 +83,6 @@ export default function ReactionsPanel() {
 
   return (
     <div className="sa-card sa-card--compact">
-      <h2>Реакции</h2>
       {error && <p className="form-error">{error}</p>}
 
       <p className="sa-hint">
