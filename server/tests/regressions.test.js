@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -28,6 +29,7 @@ const superadminRoutes = require('../routes/superadmin');
 const unreadRoutes = require('../routes/unread');
 const notificationSettingsRoutes = require('../routes/notificationSettings');
 const emojiRoutes = require('../routes/emoji');
+const stickerRoutes = require('../routes/stickers');
 const { isValidBirthDate } = require('../utils/validators');
 const { markRead } = require('../services/readReceipts');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
@@ -52,6 +54,7 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/unread', unreadRoutes);
 app.use('/api/notification-settings', notificationSettingsRoutes);
 app.use('/api/emoji', emojiRoutes);
+app.use('/api/stickers', stickerRoutes);
 
 let server;
 let baseUrl;
@@ -69,6 +72,31 @@ function tokenFor(id) {
 }
 
 const superAdminToken = () => jwt.sign({ id: 1, role: 'superadmin' }, process.env.JWT_SECRET);
+
+/**
+ * GET с `If-None-Match` без самодеятельности fetch.
+ *
+ * Node-овский fetch подмешивает в запрос `Cache-Control: no-cache`, из-за чего
+ * сервер обязан ответить полным телом, — проверить условный запрос им нельзя.
+ */
+function conditionalGet(route, token, etag) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(baseUrl + route);
+    const req = http.request({
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname + url.search,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag },
+    }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 async function request(route, { token, method = 'GET', body, headers: extraHeaders = {} } = {}) {
   const headers = { ...extraHeaders };
@@ -241,6 +269,37 @@ test('invalid group policy does not partially save other fields', async () => {
   assert.equal(updated.response.status, 400);
   const row = db.prepare('SELECT name, announcements_only FROM chat_groups WHERE id = ?').get(created.data.id);
   assert.deepEqual(row, { name: 'Original', announcements_only: 0 });
+});
+
+test('catalogs are revalidatable: ETag plus Cache-Control', async () => {
+  // Каталог смайликов — 1,19 МБ без сжатия, и он перечитывается всеми
+  // клиентами при каждой правке в панели. ETag Express выдаёт сам, но БЕЗ
+  // Cache-Control ответ не считается кэшируемым: браузер вправе не оставить
+  // копию вовсе, а тогда и переспрашивать нечем — приезжает весь каталог.
+  //
+  // Именно 'no-cache' («храни, но каждый раз переспрашивай»), а НЕ 'no-store':
+  // no-store запрещает хранить, то есть сделал бы ровно то, от чего уходим.
+  const userId = createUser('catalog_reader');
+  const token = tokenFor(userId);
+
+  for (const route of ['/api/emoji/catalog', '/api/stickers/catalog']) {
+    const first = await request(route, { token });
+    assert.equal(first.response.status, 200);
+    assert.equal(first.response.headers.get('cache-control'), 'no-cache', route);
+
+    const etag = first.response.headers.get('etag');
+    assert.ok(etag, `нет ETag у ${route}`);
+
+    // Условный запрос идёт через node:http, а НЕ через fetch. Node-овский
+    // fetch (undici) добавляет к запросу свои `Cache-Control: no-cache` и
+    // `Pragma: no-cache`, а это по стандарту значит «не переиспользуй кэш» —
+    // Express честно отвечает 200 с полным телом. Тест на fetch «доказывал»
+    // бы, что условные запросы не работают, хотя curl на том же сервере
+    // получает 304. Ловушка среды, не поведение приложения.
+    const second = await conditionalGet(route, token, etag);
+    assert.equal(second.status, 304, route);
+    assert.equal(second.body.length, 0, `${route} отдал тело вместе с 304`);
+  }
 });
 
 test('group name has a length limit — otherwise "do not truncate" is unenforceable', async () => {

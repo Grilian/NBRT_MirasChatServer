@@ -398,6 +398,18 @@ router.get('/', verifyToken, (req, res) => {
 // какую конкретно картинку выбрал отправитель.
 router.get('/catalog', verifyToken, (req, res) => {
   try {
+    // Cache-Control: no-cache — «храни копию, но каждый раз переспрашивай».
+    //
+    // ETag Express выдаёт сам, и условный запрос уже отдаёт 304 с пустым телом
+    // (проверено curl'ом). Но БЕЗ Cache-Control и Last-Modified ответ не
+    // считается кэшируемым: браузер вправе не оставить копию вовсе, а тогда и
+    // переспрашивать нечем — каждый раз приезжает весь каталог, а это 1,19 МБ
+    // без сжатия. Заголовок закрывает именно этот разрыв.
+    //
+    // Именно no-cache, а НЕ no-store: no-store запрещает хранить, то есть
+    // сделал бы ровно то, от чего мы уходим. И не max-age: каталог меняется
+    // правкой в панели, и показать старый состав нельзя ни на секунду.
+    res.set('Cache-Control', 'no-cache');
     const items = db.prepare(`
       SELECT id, name, file_path, animated_path, fallback_emoji AS fallback,
              unicode_key, label, keywords
