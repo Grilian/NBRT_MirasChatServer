@@ -238,6 +238,13 @@ button.home-tab:hover { color: var(--ink); }
   flex: 1; min-width: 0; color: var(--ink);
   font: 400 var(--text-sm)/var(--leading-sm) var(--font-ui);
 }
+/* Конец мероприятия — справочная строка под началом: отвечает на «когда
+   освобожусь», но спрашивают об этом реже, поэтому тише и мельче. */
+.home-event-until {
+  color: var(--ink-faint);
+  font: 400 var(--text-xs)/1.3 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Идущее сейчас — единственное выделение в списке: полоса слева, подложка и
    слово «сейчас». Полосу видно боковым зрением, слово отвечает на вопрос

@@ -202,7 +202,10 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
 
   const renderCard = (task: TaskItem) => {
     const due = dueLabel(task);
-    const nextStatus = STATUS_ORDER[(STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length];
+    // БЕЗ закольцовки: у «Готово» следующего статуса нет. Раньше индекс брался
+    // по кругу, и на завершённой карточке висела кнопка «→ Не начата» —
+    // предложение начать заново там, где работа закончена.
+    const nextStatus = STATUS_ORDER[STATUS_ORDER.indexOf(task.status) + 1];
     return (
       <article key={task.id} className={'task-card' + (task.status === 'done' ? ' is-done' : '')}>
         <div className="task-card-source">{sourceLabel(task)}</div>
@@ -233,7 +236,7 @@ const TasksPanel: React.FC<TasksPanelProps> = ({
             <span className="task-card-free">Не поручена</span>
           )}
         </div>
-        {tab !== 'archive' && (
+        {tab !== 'archive' && nextStatus && (
           <button
             type="button"
             className="task-card-move"

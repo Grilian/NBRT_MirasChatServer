@@ -69,7 +69,9 @@ interface ThreadPanelProps {
   onClose: () => void;
   onSummary: (rootId: number, summary: ThreadSummary) => void;
   onRead?: () => void;
-  onRequestDelete: (message: { id: number; sender_id: number }) => void;
+  /** Чат передаём вместе с сообщением: ветку открывают и из раздела «Ветки»,
+   *  где активной переписки нет, а права на удаление считаются по чату. */
+  onRequestDelete: (message: { id: number; sender_id: number; chat_id: string }) => void;
   onRemoveReaction?: (messageId: number, userId: number) => void;
 }
 
@@ -374,7 +376,7 @@ const ThreadPanel: React.FC<ThreadPanelProps> = ({
               editingId={editing?.id ?? null}
               onDeleteMessage={(id) => {
                 const message = visibleReplies.find((item) => item.id === id);
-                if (message) onRequestDelete({ id, sender_id: message.sender_id });
+                if (message) onRequestDelete({ id, sender_id: message.sender_id, chat_id: message.chat_id });
               }}
               onStartReply={setReplying}
               reactionEmoji={reactionEmoji}

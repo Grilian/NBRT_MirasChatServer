@@ -41,6 +41,8 @@ interface DayEvent {
   id: string;
   title: string;
   time: string;
+  /** «до 10:00» — или null у события на весь день и у события без длительности. */
+  until: string | null;
   startAt: number;
   endAt: number;
   allDay: boolean;
@@ -186,6 +188,9 @@ const HomeSection: React.FC<Props> = ({
             title: item.title || 'Без названия',
             // Событие на весь день времени не имеет — так и показываем.
             time: item.all_day ? 'весь день' : formatClock(startAt),
+            // Конец — второстепенной строкой: он отвечает на «когда
+            // освобожусь», но спрашивают об этом реже, чем «когда начало».
+            until: item.all_day || !endAt || endAt <= startAt ? null : formatClock(endAt),
             startAt,
             endAt,
             allDay: !!item.all_day,
@@ -353,6 +358,7 @@ const HomeSection: React.FC<Props> = ({
                   >
                     <span className="home-event-time">
                       {event.time}
+                      {event.until && <span className="home-event-until">до {event.until}</span>}
                       {/* «Сейчас» — то, ради чего в расписание заглядывают
                           посреди дня: не «что было», а «где я должен быть». */}
                       {isRunningAt(event.startAt, event.endAt, event.allDay, now)

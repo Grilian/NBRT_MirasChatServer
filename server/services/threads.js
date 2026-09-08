@@ -49,11 +49,40 @@ function sanitizeMessage(message) {
   return message;
 }
 
+/**
+ * Причастен ли человек к ветке: он написал корень либо отвечал в ней.
+ *
+ * Ровно тот же набор, которому уходит `thread_notification` (см.
+ * socket/handlers/threads.js). Одно правило на оба места: сигнал «есть
+ * непрочитанное» и всплывающее уведомление — про одно и то же, и расходиться
+ * им нельзя.
+ */
+function isThreadParticipant(rootId, userId) {
+  return !!db.prepare(`
+    SELECT 1 FROM messages
+    WHERE (id = ? AND sender_id = ?)
+       OR (thread_root_id = ? AND sender_id = ?)
+    LIMIT 1
+  `).get(Number(rootId), Number(userId), Number(rootId), Number(userId));
+}
+
 function threadSummary(rootId, userId) {
   const hidden = db.prepare(
     'SELECT 1 FROM thread_hidden WHERE root_message_id = ? AND user_id = ?'
   ).get(Number(rootId), Number(userId));
   if (hidden) return { reply_count: 0, unread_count: 0, last_reply_at: null, recent_authors: [] };
+
+  /**
+   * Непрочитанное считается ТОЛЬКО причастным к ветке.
+   *
+   * Ответ в ветке виден всем участникам чата — это доступ к данным, и его мы
+   * не трогаем. А «непрочитанное» — отвлекающий сигнал: у человека, который в
+   * обсуждение не заходил, оно горело на каждый чужой ответ. Жалоба
+   * пользователя 08.09.2026: «в ветках уведомления отображаются для всех».
+   * Сами ответы и их число остаются видны — исчезает только требование
+   * внимания.
+   */
+  const subscribed = isThreadParticipant(rootId, userId);
 
   const replies = db.prepare(`
     SELECT m.id, m.sender_id, m.created_at, u.username, u.display_name, u.avatar_path,
@@ -89,7 +118,9 @@ function threadSummary(rootId, userId) {
 
   return {
     reply_count: replies.length,
-    unread_count: replies.reduce((sum, reply) => sum + (reply.unread ? 1 : 0), 0),
+    unread_count: subscribed
+      ? replies.reduce((sum, reply) => sum + (reply.unread ? 1 : 0), 0)
+      : 0,
     last_reply_at: replies.length ? replies[0].created_at : null,
     recent_authors: recentAuthors,
   };
@@ -280,6 +311,7 @@ function softDeleteThread(rootId, deletedBy) {
 
 module.exports = {
   ThreadError,
+  isThreadParticipant,
   rootForUser,
   threadSummary,
   attachThreadSummaries,

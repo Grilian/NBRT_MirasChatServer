@@ -67,9 +67,16 @@
   background: var(--paper-raised); border-radius: var(--radius-pill);
   box-shadow: var(--shadow-lg);
 }
-/* Развёрнутый вид — сетка в несколько рядов, поэтому уже не пилюля. */
+/* Развёрнутый вид — сетка в несколько рядов, поэтому уже не пилюля.
+   Ширина подобрана ТОЧНО под семь столбцов (7 × 42 + 6 × 2 + 2 × 8 = 322), а не
+   «примерно 360»: при свободной ширине справа оставалась пустая полоса в целый
+   столбец — место есть, а поставить туда нечего. Семь — потому же, почему их
+   семь в свёрнутом виде: шесть реакций плюс стрелка. */
 .msg-menu-reactions.is-expanded {
-  flex-wrap: wrap; border-radius: var(--radius-lg); max-width: min(360px, calc(100vw - 24px));
+  display: grid; grid-template-columns: repeat(auto-fill, 42px);
+  justify-content: center; align-items: center;
+  width: min(322px, calc(100vw - 24px));
+  border-radius: var(--radius-lg);
 }
 .msg-menu-reaction-more { color: var(--ink-muted); }
 .msg-menu-reaction-more.is-open svg { transform: rotate(180deg); }

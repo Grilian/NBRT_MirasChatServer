@@ -384,6 +384,16 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
             {assigneePicker}
             {statusPicker}
             {archiveButton}
+            {/* Удалить вправе ЛЮБОЙ причастный — решение от 07.09.2026. Кнопка
+                же стояла только в форме, а форма открыта одному постановщику:
+                у остальных причастных удаления не было вовсе, хотя право
+                есть. Ровно та подмена «править» и «удалить», от которой
+                предостерегает соседний комментарий. */}
+            {onDelete && (
+              <div className="task-modal-actions">
+                <button type="button" className="task-modal-delete" onClick={onDelete}>Удалить</button>
+              </div>
+            )}
           </div>
         ) : (
         <form onSubmit={handleSave} className="task-dialog-body">

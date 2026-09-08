@@ -577,6 +577,8 @@ const Chat: React.FC = () => {
     // Каталог смайликов нужен обработчику входящих, а он живёт с рендера,
     // на котором подписался, — читаем актуальный через ref, как и остальное.
     customEmoji: {} as CustomEmojiMap,
+    /** Корни веток, к которым человек причастен: только их непрочитанное его касается. */
+    myThreadRootIds: new Set<number>(),
   });
 
   // id сообщений, уже учтённых в счётчике непрочитанного — защита от повторного
@@ -1629,13 +1631,20 @@ const Chat: React.FC = () => {
           display_name: message.display_name,
           avatar_path: message.avatar_path,
         };
+        // Непрочитанное — только причастным к ветке: автору корня и тем, кто
+        // в ней отвечал. Ответ виден всем участникам чата (это доступ к
+        // данным), но требовать внимания от непричастных незачем — жалоба
+        // пользователя 08.09.2026. Тот же отбор делает сервер в threadSummary;
+        // здесь он нужен, чтобы бейдж не вспыхивал до первого перечитывания.
+        const mine = root.sender_id === currentUserId
+          || liveRef.current.myThreadRootIds.has(rootId);
         return {
           ...root,
           thread: {
             ...old,
             reply_count: old.reply_count + 1,
             unread_count: old.unread_count + (
-              message.sender_id !== currentUserId && activeThread?.rootId !== rootId ? 1 : 0
+              mine && message.sender_id !== currentUserId && activeThread?.rootId !== rootId ? 1 : 0
             ),
             last_reply_at: message.created_at,
             recent_authors: [author, ...old.recent_authors.filter((item) => item.id !== author.id)].slice(0, 2),
@@ -2019,6 +2028,7 @@ const Chat: React.FC = () => {
     prefs: notificationPrefs,
     mutedChatIds,
     customEmoji,
+    myThreadRootIds: new Set(threadInboxItems.map((item) => item.root_id)),
   };
 
   const handleSelectChat = (chatId: string) => {
@@ -2506,8 +2516,21 @@ const Chat: React.FC = () => {
   // Удаление всегда идёт через диалог: у него есть область действия («только у
   // меня» / «у всех»), и выбрать её надо до отправки. Само удаление — в
   // performDelete, а тут только собираем запрос и решаем, что предложить.
-  const requestDelete = (ids: number[], externalMessages: Array<Pick<Message, 'id' | 'sender_id'>> = []) => {
-    if (!ids.length || !activeChatMeta) return;
+  /**
+   * Спросить об удалении.
+   *
+   * `chatId` берётся ИЗ САМОГО СООБЩЕНИЯ, а не из открытой переписки: ветку
+   * открывают и из раздела «Ветки», где активного чата нет вовсе. Раньше в
+   * этом случае функция молча выходила по `!activeChatMeta` — нажатие
+   * «Удалить» в ветке не делало ровно ничего. Жалоба пользователя 08.09.2026.
+   */
+  const requestDelete = (
+    ids: number[],
+    externalMessages: Array<Pick<Message, 'id' | 'sender_id' | 'chat_id'>> = [],
+  ) => {
+    if (!ids.length) return;
+    const meta = metaForChat(externalMessages[0]?.chat_id || activeChat);
+    if (!meta) return;
 
     const mineOnly = ids.every((id) => {
       const msg = messages.find((m) => m.id === id) || externalMessages.find((m) => m.id === id);
@@ -2518,16 +2541,17 @@ const Chat: React.FC = () => {
     // собеседник один), а в группе и общем чате только владельцу группы или
     // администрации. Это зеркало серверной canDeleteForEveryone: клиент лишь
     // не предлагает того, что сервер всё равно отклонит.
-    const isShared = activeChatMeta.section === 'group' || activeChatMeta.section === 'general';
+    const isShared = meta.section === 'group' || meta.section === 'general';
     const isAdmin = currentUserRole === 'admin' || currentUserRole === 'moderator';
     const canDeleteForEveryone = mineOnly
-      || (isShared ? (!!activeChatMeta.isGroupOwner || isAdmin) : true);
+      || (isShared ? (!!meta.isGroupOwner || isAdmin) : true);
 
     setDeleteRequest({
       ids,
-      partnerName: activeChatMeta.section === 'staff' ? activeChatMeta.name : null,
+      partnerName: meta.section === 'staff' ? meta.name : null,
       canDeleteForEveryone,
       isGroup: isShared,
+      groupId: meta.chatGroupId ?? null,
     });
   };
 
@@ -2540,9 +2564,11 @@ const Chat: React.FC = () => {
     // REST-ручкой — сокет по одному сообщению за раз тут был бы десятком
     // круговых обходов. Всё остальное (в том числе «скрыть у себя») идёт
     // сокетом: там область действия передаётся флагом.
-    const bulkInGroup = forEveryone && request.isGroup && activeChatMeta?.chatGroupId && request.ids.length > 1;
+    // Группа берётся из самого запроса: сообщение могло прийти из ветки,
+    // открытой не из этой переписки.
+    const bulkInGroup = forEveryone && request.isGroup && request.groupId && request.ids.length > 1;
     if (bulkInGroup) {
-      deleteGroupMessages(activeChatMeta!.chatGroupId!, request.ids).catch(console.error);
+      deleteGroupMessages(request.groupId!, request.ids).catch(console.error);
       return;
     }
 
@@ -2828,12 +2854,14 @@ const Chat: React.FC = () => {
     chatGroupId?: number; memberCount?: number; isGroupOwner?: boolean;
     announcementsOnly?: boolean; canPostHere?: boolean; writePolicy?: WritePolicy;
     status?: { emoji: string; label: string } | null;
-  } | null = (() => {
-    if (!activeChat) return null;
-    if (activeChat === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
-    if (selfChatId && activeChat === selfChatId) return { name: selfChatName, section: 'self' };
-    if (/^group_\d+$/.test(activeChat)) {
-      const group = chatGroups.find(g => g.chat_id === activeChat);
+  } | null = metaForChat(activeChat);
+
+  function metaForChat(chatId: string | null): typeof activeChatMeta {
+    if (!chatId) return null;
+    if (chatId === GENERAL_CHAT_ID) return { name: 'Общий чат', section: 'general' };
+    if (selfChatId && chatId === selfChatId) return { name: selfChatName, section: 'self' };
+    if (/^group_\d+$/.test(chatId)) {
+      const group = chatGroups.find(g => g.chat_id === chatId);
       return group
         ? {
             name: group.name, section: 'group', chatGroupId: group.id, memberCount: group.member_count,
@@ -2852,7 +2880,7 @@ const Chat: React.FC = () => {
           }
         : null;
     }
-    const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === activeChat);
+    const user = allUsers.find(u => u.source === 'local' && getChatId(u.id) === chatId);
     return user
       ? {
           name: nameFor(user), section: 'staff', online: onlineUsers.includes(user.id),
@@ -2860,7 +2888,7 @@ const Chat: React.FC = () => {
           status: describeStatus(user.statusPreset, user.statusCustom, customEmoji),
         }
       : null;
-  })();
+  }
 
   const serverClientIds = new Set(messages.map((message) => message.client_message_id).filter(Boolean));
   const optimisticMessages: Message[] = outgoingQueue

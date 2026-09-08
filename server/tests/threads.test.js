@@ -16,6 +16,7 @@ const db = require('../db');
 const {
   ThreadError,
   attachThreadSummaries,
+  threadSummary,
   getThread,
   hideThread,
   listThreadsForUser,
@@ -131,4 +132,29 @@ test('thread inbox contains only accessible discussions the user participated in
   }
   assert.ok(listThreadsForUser(alice).length > 100);
   assert.equal(listThreadsForUser(alice, 25).length, 25);
+});
+
+test('непрочитанное в ветке считается только причастным к ней', () => {
+  // Жалоба пользователя 08.09.2026: «в ветках уведомления отображаются для
+  // всех». Ответ в ветке виден каждому участнику чата — это доступ, и его мы
+  // не трогаем. Но требование внимания должно доставаться тем же, кому уходит
+  // thread_notification: автору корня и уже отвечавшим.
+  const alice = createUser('unread_alice');
+  const bob = createUser('unread_bob');
+  const carol = createUser('unread_carol');
+  const chatId = 'general';
+
+  const root = insertMessage(chatId, alice, 'Корень', null);
+  insertMessage(chatId, bob, 'Ответ Бориса', root);
+
+  // Алиса — автор корня: непрочитанное её касается.
+  assert.equal(threadSummary(root, alice).unread_count, 1);
+  // Кэрол в обсуждение не заходила: ответы видит, а сигнала «прочти» нет.
+  assert.equal(threadSummary(root, carol).unread_count, 0);
+  // При этом сами ответы от неё не спрятаны — это не ограничение доступа.
+  assert.equal(threadSummary(root, carol).reply_count, 1);
+
+  // Стоит ответить — и ветка становится своей вместе с непрочитанным.
+  insertMessage(chatId, carol, 'Ответ Кэрол', root);
+  assert.equal(threadSummary(root, carol).unread_count, 1);
 });

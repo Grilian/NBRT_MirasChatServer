@@ -9,6 +9,12 @@ export interface DeleteRequest {
   canDeleteForEveryone: boolean;
   /** Групповой чат — предупреждаем, что удаление затронет всех участников. */
   isGroup: boolean;
+  /**
+   * Группа, к которой относятся сообщения. Берётся из самих сообщений, а не из
+   * открытой переписки: ветку открывают и из раздела «Ветки», где активного
+   * чата нет. `null` — не группа либо группа неизвестна.
+   */
+  groupId: number | null;
 }
 
 interface DeleteMessagesModalProps {
