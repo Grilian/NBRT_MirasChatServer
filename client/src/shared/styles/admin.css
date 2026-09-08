@@ -3,23 +3,79 @@
 /* ===== Панель супер-админа ===== */
 .sa-shell { width: 100%; height: 100%; overflow-y: auto; background: var(--paper-sunken); color: var(--ink); }
 .sa-header { display: flex; align-items: center; justify-content: space-between; padding: 15px 24px; background: var(--sidebar); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 3; }
-.sa-tabs {
-  display: flex; gap: 4px; padding: 10px 24px 0; background: var(--sidebar); border-bottom: 1px solid var(--line);
-  position: sticky; top: 57px; z-index: 3; overflow-x: auto;
+/* Оглавление слева, раздел справа — та же раскладка, что у настроек
+   приложения. Раньше здесь был ряд из десяти вкладок во всю ширину: чтобы
+   найти нужную, приходилось перечитать весь ряд, а «Отделы» и «Реакции»
+   стояли рядом, не имея друг к другу отношения.
+
+   Два разных способа устроить одно и то же в одном продукте — лишняя вещь,
+   которую человеку приходится запоминать. */
+.sa-body {
+  display: grid; grid-template-columns: 236px minmax(0, 1fr); align-items: start;
+  min-height: calc(100% - 57px);
 }
-.sa-tab {
-  border: none; background: none; cursor: pointer; padding: 10px 16px; font-size: 13.5px; font-weight: 600;
-  color: var(--ink-muted); border-radius: var(--radius-sm) var(--radius-sm) 0 0; display: flex; align-items: center; gap: 7px;
-  white-space: nowrap; transition: color var(--ease), background var(--ease);
+.sa-nav {
+  position: sticky; top: 57px; align-self: stretch;
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-5) var(--space-3) var(--space-6) var(--space-5);
+  background: var(--sidebar); border-right: 1px solid var(--line);
 }
-.sa-tab:hover { color: var(--ink); background: var(--row-hover); }
-.sa-tab.is-active { color: var(--accent); background: var(--paper-sunken); box-shadow: inset 0 -2px 0 var(--accent); }
-.sa-tab-count {
-  font-size: 11px; font-weight: 700; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
-  border-radius: var(--radius-pill); padding: 1px 7px;
+.sa-nav-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: var(--space-4); }
+.sa-nav-title {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  font: 600 var(--text-xs)/var(--leading-xs) var(--font-ui);
+  letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint);
 }
-.sa-tab.is-active .sa-tab-count { background: var(--accent); color: var(--accent-ink); }
-.sa-main { max-width: 1120px; margin: 0 auto; padding: 22px 24px 40px; display: flex; flex-direction: column; gap: 20px; }
+.sa-nav-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); cursor: pointer; text-align: left;
+  border: none; border-radius: var(--radius-md); background: none; color: var(--ink);
+  font: 500 var(--text-sm)/var(--leading-sm) var(--font-ui);
+}
+.sa-nav-item:hover { background: var(--row-hover); }
+.sa-nav-item.is-active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+/* Названия разделов не обрезаются: «Google Календарь» — самое длинное, и 236px
+   подобраны под него. */
+.sa-nav-name { flex: 1; min-width: 0; }
+.sa-nav-count {
+  flex: none; font: 700 var(--text-xs)/1.6 var(--font-ui); padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+}
+.sa-nav-item.is-active .sa-nav-count { background: var(--accent); color: var(--accent-ink); }
+/* Стрелка — признак «уйдём на следующий уровень»; на широком экране, где
+   ничего никуда не уходит, она лишняя. */
+.sa-nav .chevron { display: none; flex: none; color: var(--ink-faint); }
+
+/* width: 100% обязателен и не для красоты. .sa-main стал элементом ГРИДА, а у
+   элемента грида «margin: 0 auto» перебивает растягивание и сжимает его по
+   содержимому: панель схлопывалась до ширины карточки и уезжала к середине
+   колонки, оставляя слева четыреста пикселей пустоты. В прежней блочной
+   раскладке те же авто-поля означали ровно противоположное — «во всю ширину и
+   по центру». Поймано измерением живого экрана. */
+.sa-main {
+  width: 100%; max-width: 1120px; margin: 0 auto; padding: 22px 24px 40px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.sa-main-back { display: none; }
+
+@media (max-width: 900px) {
+  /* Узкий экран: два УРОВНЯ, а не две колонки. Двухколоночная раскладка
+     оставила бы разделу меньше половины экрана, а в панели управления живут
+     таблицы — им нужна вся ширина. */
+  .sa-body { grid-template-columns: minmax(0, 1fr); }
+  .sa-nav { position: static; border-right: none; padding: var(--space-4); }
+  .sa-nav .chevron { display: block; }
+  .sa-nav-item { padding: var(--space-3); }
+  .sa-body.is-section-open .sa-nav { display: none; }
+  .sa-body:not(.is-section-open) .sa-main { display: none; }
+  .sa-main { padding: var(--space-3) var(--space-4) var(--space-8); }
+  .sa-main-back {
+    display: flex; align-items: center; gap: var(--space-2); align-self: flex-start;
+    padding: var(--space-2) var(--space-1); border: none; background: none; cursor: pointer;
+    color: var(--ink); font: 600 var(--text-md)/var(--leading-md) var(--font-display);
+  }
+}
 .sa-card { background: var(--paper-raised); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); }
 /* Группы/Отделы/Обновления — короткие списки и формы, растягивать их на всю
    ширину карточки пользователей незачем: выглядит пусто и расшатывает ритм
