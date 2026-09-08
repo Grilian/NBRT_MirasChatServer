@@ -92,7 +92,10 @@ export function splitStatusIcon(value: string): { emoji: string; text: string } 
   const trimmed = value.trim();
   if (!trimmed) return { emoji: '', text: '' };
 
-  const shortcode = /^(:[a-z0-9_]{2,32}:)(?:\s+|$)/.exec(trimmed);
+  // Код смайлика в его нынешнем виде — `:e~<ключ>~<пак>:`. Прежний `:name:`
+  // и совсем старый `:u_…:` тоже ловим: статусы, поставленные до перехода,
+  // обязаны хотя бы правильно делиться на значок и подпись.
+  const shortcode = /^(:[a-z0-9_~-]{2,126}:)(?:\s+|$)/.exec(trimmed);
   if (shortcode) return { emoji: shortcode[1], text: trimmed.slice(shortcode[0].length).trim() };
 
   if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {

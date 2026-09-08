@@ -180,8 +180,15 @@
 
   --online: var(--_online-light);
   --unread: #C0392B;
-  /* Цифры в бейдже белые и мелкие — тоже «сильный» акцент. */
-  --unread-badge: var(--_accent-strong-light);
+  /* Цвет метки непрочитанного человек выбирает сам (Настройки → Оформление);
+     выбор кладёт `--unread-badge-light`/`--unread-badge-dark` на корень
+     документа, а какой из них взять — решает тема, здесь и ниже. Умолчание
+     красное: прежний акцентный синий совпадал с цветом выделенной строки, и
+     метка на ней пропадала. Цифры в метке белые и мелкие, поэтому любой
+     вариант обязан быть «сильным». */
+  --unread-badge-light: #E13B32;
+  --unread-badge-dark: #FF5A4E;
+  --unread-badge: var(--unread-badge-light);
 
   --shadow: var(--_shadow-light);
   --shadow-sm: var(--_shadow-sm-light);
@@ -279,7 +286,7 @@
 
     --online: var(--_online-dark);
     --unread: #F2716B;
-    --unread-badge: var(--_accent-strong-dark);
+    --unread-badge: var(--unread-badge-dark);
 
     --shadow: var(--_shadow-dark);
     --shadow-sm: var(--_shadow-sm-dark);
@@ -336,7 +343,7 @@
 
   --online: var(--_online-dark);
   --unread: #F2716B;
-  --unread-badge: var(--_accent-strong-dark);
+  --unread-badge: var(--unread-badge-dark);
 
   --shadow: var(--_shadow-dark);
   --shadow-sm: var(--_shadow-sm-dark);

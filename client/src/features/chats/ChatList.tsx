@@ -531,7 +531,13 @@ const ChatList: React.FC<ChatListProps> = ({
                 tabIndex={0}
                 role="button"
                 aria-current={activeChat === chat.id}
-                className={'row' + (activeChat === chat.id ? ' is-active' : '')}
+                // `has-unread` — не только ради метки: строку с новыми
+                // сообщениями видно и боковым зрением, по насыщенности имени.
+                // Одной метки в углу человеку мало, если строк на экране
+                // двадцать («плохо видны новые сообщения», 08.09.2026).
+                className={'row'
+                  + (activeChat === chat.id ? ' is-active' : '')
+                  + (unreadCount > 0 ? ' has-unread' : '')}
                 onClick={() => {
                   // После удержания приходит синтетический click — он не должен
                   // открывать чат под уже открытым меню.

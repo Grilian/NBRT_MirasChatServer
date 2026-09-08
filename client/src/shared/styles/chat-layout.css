@@ -494,8 +494,17 @@
 .row-actions { flex: none; display: flex; align-items: center; gap: 3px; }
 .row-unread {
   flex: none; min-width: 21px; height: 21px; border-radius: var(--radius-pill);
-  background: var(--unread-badge); color: #fff; font: 600 12px/21px var(--font-ui); text-align: center; padding: 0 6px;
+  background: var(--unread-badge); color: #fff; font: 700 12px/21px var(--font-ui); text-align: center; padding: 0 6px;
+  /* Метка обязана читаться на любой подложке — и на обычной строке, и на
+     наведённой, и на выделенной. Тень отделяет её от фона надёжнее, чем
+     расчёт контраста под каждый случай. */
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--unread-badge) 55%, transparent);
 }
+
+/* Строка с непрочитанным. Метка в углу — точка, которую на списке из двадцати
+   строк глаз находит не сразу; насыщенное имя видно сразу и целиком. */
+.row.has-unread .row-name { font-weight: 700; }
+.row.has-unread .row-preview { color: var(--ink); }
 
 /* Кнопки-действия в строке появляются на наведении — иначе список выглядит
    как панель управления, а не как список чатов. */

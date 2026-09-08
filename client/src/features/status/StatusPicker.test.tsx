@@ -2,7 +2,7 @@ import type { Mock } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '@/shared/api/client';
 import StatusPicker from './StatusPicker';
-import { describeStatus, statusExpiryOn } from './statusMeta';
+import { describeStatus, splitStatusIcon, statusExpiryOn } from './statusMeta';
 import { invalidateEmojiPackCache } from '@/features/emoji/EmojiPicker';
 
 vi.mock('@/shared/api/client', () => ({
@@ -141,3 +141,52 @@ describe('срок статуса', () => {
   });
 });
 
+
+test('свой статус делится на значок и подпись во всех видах кода', () => {
+  // Сам символ — то, что кладёт выбор из каталога сейчас.
+  expect(splitStatusIcon('🎉 Праздник')).toEqual({ emoji: '🎉', text: 'Праздник' });
+  // Нынешний код оформления.
+  expect(splitStatusIcon(':e~1f389~apple: Праздник'))
+    .toEqual({ emoji: ':e~1f389~apple:', text: 'Праздник' });
+  // Совсем старый вид — статусы, поставленные до перехода на каталог.
+  expect(splitStatusIcon(':u_1f389: Праздник'))
+    .toEqual({ emoji: ':u_1f389:', text: 'Праздник' });
+});
+
+test('смайлик из каталога уходит в статус СИМВОЛОМ, а не кодом :name:', async () => {
+  // Живая находка 08.09.2026: «в статус не устанавливается смайлик». Здесь
+  // всегда писался `:name:` — вид кода, снятый в первой волне вместе с
+  // картиночными смайликами. Отрисовщик его больше не понимает, и вместо
+  // значка в статусе оставался голый текст. На проде все 3770 смайликов
+  // каталога имеют unicode-ключ, то есть путь `:name:` там не встречается
+  // вовсе.
+  get.mockResolvedValue({
+    data: [{
+      id: 1,
+      name: 'Apple',
+      emoji: [],
+      custom: [{
+        id: 9,
+        name: 'party_popper',
+        file_path: '/uploads/emoji/party.webp',
+        fallback: '🎉',
+        unicode_key: '1f389',
+        unicode: '🎉',
+      }],
+    }],
+  });
+  put.mockResolvedValue({ data: { status_preset: null, status_custom: '🎉 праздную' } });
+
+  render(
+    <StatusPicker statusPreset={null} statusCustom={null} onStatusChanged={vi.fn()} />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Выбрать эмодзи' }));
+  fireEvent.click(await screen.findByTitle(':party_popper:'));
+  fireEvent.change(screen.getByPlaceholderText('Свой статус…'), { target: { value: 'праздную' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Установить' }));
+
+  await waitFor(() => expect(put).toHaveBeenCalledWith('/users/me/status', expect.objectContaining({
+    status_custom: '🎉 праздную',
+  })));
+});

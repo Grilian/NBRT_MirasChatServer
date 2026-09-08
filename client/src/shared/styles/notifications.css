@@ -276,3 +276,32 @@
     font: 600 var(--text-md)/var(--leading-md) var(--font-display);
   }
 }
+
+/* ===== Выбор цвета метки непрочитанного =====
+   Кружки-образцы показывают ровно тот цвет, которым метка станет: светлый
+   вариант в светлой теме, тёмный в тёмной. Иначе выбирать пришлось бы
+   вслепую — образец одного цвета, метка другого. */
+.unread-badge-swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.unread-badge-swatch {
+  width: 26px; height: 26px; padding: 0; cursor: pointer;
+  border: 2px solid transparent; border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent) inset;
+  transition: transform .12s ease, border-color var(--ease);
+}
+.unread-badge-swatch:hover { transform: scale(1.08); }
+.unread-badge-swatch.is-active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--paper-raised) inset;
+}
+/* Образец метки в строке — тем же цветом, что выбран сейчас. */
+.unread-badge-sample {
+  display: inline-block; min-width: 21px; height: 21px; padding: 0 6px;
+  border-radius: var(--radius-pill); background: var(--unread-badge); color: #fff;
+  font: 600 12px/21px var(--font-ui); text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .unread-badge-swatch { background: var(--swatch-dark); }
+}
+:root[data-theme="dark"] .unread-badge-swatch { background: var(--swatch-dark); }

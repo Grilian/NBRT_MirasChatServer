@@ -6,6 +6,9 @@ import { applyChatWallpaper } from '@/features/chats/chatWallpaper';
 import { resolveUploadUrl } from '@/shared/lib/uploads';
 import { ThemePreference, applyThemePreference, getThemePreference } from '@/shared/lib/theme';
 import {
+  UNREAD_BADGE_COLORS, applyUnreadBadgeColor, getUnreadBadgeColor,
+} from '@/shared/lib/unreadBadge';
+import {
   DURATION_OPTIONS,
   NotificationPrefs,
   getNotificationPrefs,
@@ -116,6 +119,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, [openSection]);
 
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
+  const [badgeColor, setBadgeColor] = useState<string>(getUnreadBadgeColor);
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -187,6 +191,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleThemeChange = (value: ThemePreference) => {
     setTheme(value);
     applyThemePreference(value);
+  };
+
+  const handleBadgeColorChange = (id: string) => {
+    setBadgeColor(id);
+    applyUnreadBadgeColor(id);
   };
 
   // Сохраняем сразу при изменении — отдельной кнопки «Применить» тут нет,
@@ -399,6 +408,39 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Цвет метки непрочитанного. Прежний акцентный синий совпадал с
+              цветом выделенной строки, и на ней метка пропадала — «плохо
+              видны новые сообщения в чатах». Цвет выбирается человеком:
+              красный виден лучше всех, но кому-то он читается как тревога. */}
+          <div className="settings-section-title">Метка непрочитанного</div>
+          <div className="settings-group">
+            <div className="settings-row static">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.9L3 20.5l1.6-4.9A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4Z" /></svg>
+              <span className="label">Цвет</span>
+              <span className="value">
+                <span className="unread-badge-sample">7</span>
+              </span>
+            </div>
+            <div className="settings-inline-control">
+              <div className="unread-badge-swatches" role="radiogroup" aria-label="Цвет метки непрочитанного">
+                {UNREAD_BADGE_COLORS.map((color) => (
+                  <button
+                    key={color.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={badgeColor === color.id}
+                    aria-label={color.label}
+                    title={color.label}
+                    className={'unread-badge-swatch' + (badgeColor === color.id ? ' is-active' : '')}
+                    style={{ '--swatch': color.light, '--swatch-dark': color.dark } as React.CSSProperties}
+                    onClick={() => handleBadgeColorChange(color.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="settings-section-title">Фон переписки</div>
           <div className="settings-group">
             <div className="settings-row static settings-wallpaper">
