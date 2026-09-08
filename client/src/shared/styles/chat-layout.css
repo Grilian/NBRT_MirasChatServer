@@ -569,6 +569,44 @@
 .conv-title .status.is-offline { color: var(--ink-muted); }
 .conv-title .status.is-broadcast { color: var(--ink-muted); }
 .conv-title .status.is-typing { color: var(--accent); }
+/* ===== Полоса состояния связи =====
+   Над ВСЕМ приложением, а не над одной перепиской: разделы без связи просто
+   переставали отвечать, и человек вне чата не видел ни слова. Полоса —
+   накладка (position: fixed), а не строка раскладки: она появляется редко и
+   не должна двигать содержимое, когда появляется. */
+.connection-strip {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 5px 14px; text-align: center;
+  font: 500 12.5px/1.35 var(--font-ui);
+  color: #fff; background: var(--ink-muted);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .18);
+}
+.connection-strip.is-connecting { background: var(--accent); }
+.connection-strip.is-offline,
+.connection-strip.is-server-unavailable,
+.connection-strip.is-session-invalid { background: var(--unread); }
+.connection-strip-dot {
+  width: 7px; height: 7px; flex: none; border-radius: 50%;
+  background: currentColor; opacity: .9;
+  animation: connection-pulse 1.4s ease-in-out infinite;
+}
+/* У состояний, которые сами не пройдут, точка не мигает: мигание обещает,
+   что сейчас всё наладится. */
+.connection-strip.is-offline .connection-strip-dot,
+.connection-strip.is-session-invalid .connection-strip-dot { animation: none; }
+.connection-strip-text { min-width: 0; }
+.connection-strip-action {
+  flex: none; padding: 1px 9px; cursor: pointer;
+  border: 1px solid currentColor; border-radius: var(--radius-pill);
+  background: none; color: inherit; font: 600 12px/1.5 var(--font-ui);
+}
+.connection-strip-action:hover { background: rgba(255, 255, 255, .18); }
+@keyframes connection-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .connection-strip-dot { animation: none; }
+}
+
 .connection-banner {
   flex: none; padding: 4px 12px; text-align: center; font-size: 12.5px; font-weight: 500;
   color: var(--ink-muted); background: color-mix(in srgb, var(--accent) 10%, var(--sidebar));

@@ -32,6 +32,8 @@ import Avatar from '@/shared/ui/Avatar';
 import NavRail, { SectionId, isSectionAllowedFor, mobileOverflowFor, mobileSectionsFor, sectionById } from '@/app/NavRail';
 import Sheet from '@/shared/ui/Sheet';
 import AppMenuDrawer from '@/app/AppMenuDrawer';
+import ConnectionStrip from '@/app/ConnectionStrip';
+import SectionLoading from '@/app/SectionLoading';
 import SectionStub from '@/app/SectionStub';
 const FilesSection = React.lazy(() => import('@/features/files/FilesSection'));
 import HomeSection, { HomeCalendarTarget } from '@/features/home/HomeSection';
@@ -3129,6 +3131,11 @@ const Chat: React.FC = () => {
         onDismiss={dismissToast}
       />
 
+      {/* Состояние связи — над всем приложением, а не только над перепиской:
+          человек на «Главной» или в задачах раньше не видел ничего, разделы
+          просто переставали отвечать. */}
+      <ConnectionStrip state={connectionState} onRelogin={handleLogout} />
+
       {showTopBar && (
         <TopBar
           targets={searchScope}
@@ -3506,7 +3513,7 @@ const Chat: React.FC = () => {
 
       {section === 'documents' && (
         <main className="section-host">
-          <Suspense fallback={<div className="section-loading">Загрузка…</div>}>
+          <Suspense fallback={<SectionLoading />}>
             <FilesSection onOpenMessage={handleOpenMessage} />
           </Suspense>
         </main>
@@ -3594,26 +3601,9 @@ const Chat: React.FC = () => {
             </div>
           )}
 
-          {connectionState !== 'connected' && (
-            <div className={`connection-banner is-${connectionState}`} role="status" aria-live="polite">
-              {connectionState === 'offline'
-                ? 'Нет интернета. Сообщения останутся в очереди.'
-                : connectionState === 'session-invalid'
-                  ? (
-                    <>
-                      Сеанс больше не действителен — войдите заново.
-                      {/* Выход не делаем сами: localStorage.clear() унесёт и
-                          очередь неотправленных сообщений. Решает человек. */}
-                      <button type="button" className="connection-banner-action" onClick={handleLogout}>
-                        Войти заново
-                      </button>
-                    </>
-                  )
-                  : connectionState === 'server-unavailable'
-                    ? 'Сервер недоступен. Повторное подключение…'
-                    : 'Соединение…'}
-            </div>
-          )}
+          {/* Состояние связи рисует общая полоса над приложением
+              (app/ConnectionStrip): в шапке переписки её видел только тот, кто
+              сидит в чате, а остальные разделы молча переставали отвечать. */}
 
           <ChatWindow
             chatId={activeChat}

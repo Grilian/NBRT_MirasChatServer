@@ -278,13 +278,13 @@ test('недействительный сеанс отличается от не
   await act(async () => { socket.ack(null, { ok: false, error: 'invalid_token' }); });
 
   await waitFor(() => {
-    expect(document.querySelector('.connection-banner')!.textContent)
+    expect(document.querySelector('.connection-strip')!.textContent)
       .toContain('Сеанс больше не действителен');
   });
   expect(document.body.textContent).not.toContain('Сервер недоступен');
   // Выход не делается сам: localStorage.clear() унёс бы и очередь
   // неотправленных сообщений — решает человек.
-  expect(document.querySelector('.connection-banner-action')).toBeTruthy();
+  expect(document.querySelector('.connection-strip-action')).toBeTruthy();
 });
 
 test('обычный отказ подтверждения по-прежнему читается как недоступный сервер', async () => {
@@ -294,7 +294,7 @@ test('обычный отказ подтверждения по-прежнему
   await act(async () => { socket.ack(null, { ok: false }); });
 
   await waitFor(() => {
-    expect(document.querySelector('.connection-banner')!.textContent)
+    expect(document.querySelector('.connection-strip')!.textContent)
       .toContain('Сервер недоступен');
   });
 });
