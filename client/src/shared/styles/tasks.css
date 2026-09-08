@@ -96,6 +96,9 @@
   border: none; background: none; cursor: pointer; padding: 8px 12px; font-size: 13.5px; color: var(--ink);
 }
 .task-suggest-row:hover { background: var(--row-hover); }
+/* Логин рядом с именем: две Галины различаются только им. Свой класс, а не
+   `cal-suggest-count` из календаря, — по той же причине, что и ряд действий. */
+.task-suggest-login { color: var(--ink-faint); font-size: 12.5px; }
 
 /* ===== Статус профиля ===== */
 .status-presets { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 6px; }
@@ -288,6 +291,29 @@
 }
 
 /* ===== Окно удаления с причиной ===== */
+/* Ошибка в шапке окна задачи: тело формы прокручивается, и сообщение,
+   показанное внутри него, оставалось выше экрана — человек жал «Сохранить» и
+   не понимал, почему ничего не происходит. Шапка на месте всегда. */
+.task-head-error { color: var(--danger); }
+
+/* Ряд действий в окнах задач.
+   Раньше здесь стояли классы `cal-dialog-*` из calendar.css. С разделением
+   стилей по маршрутам (волна 9) этот файл грузится только вместе с
+   календарём — и в разделе задач кнопки оказывались без оформления: столбиком
+   и без отступов. Поймано глазами на живой сборке. Свои классы в общем листе
+   от такого не зависят. */
+.task-modal-actions {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 10px; margin-top: 18px;
+}
+.task-modal-actions .btn-primary { width: auto; padding: 9px 22px; margin-top: 0; }
+.task-modal-delete {
+  border: none; background: transparent; color: var(--unread); cursor: pointer;
+  font-size: 13.5px; padding: 9px 12px; border-radius: var(--radius-sm); margin-right: auto;
+}
+.task-modal-delete:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
+
+.task-confirm-close { width: min(400px, calc(100vw - 32px)); }
 .task-delete-modal { width: min(440px, calc(100vw - 32px)); }
 .task-delete-body { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); }
 .task-delete-label { font: 500 var(--text-sm)/var(--leading-sm) var(--font-ui); color: var(--ink); }

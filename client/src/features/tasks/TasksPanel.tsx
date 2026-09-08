@@ -30,6 +30,13 @@ interface TasksPanelProps {
    */
   draftDescription?: string | null;
   onDraftConsumed?: () => void;
+  /**
+   * С какой вкладки открыть. Приходит с «Главной»: если просроченное лежит в
+   * поставленных, число оттуда обязано привести именно туда, а не на пустую
+   * «Мою работу». Раздел при уходе размонтируется, поэтому значение нужно
+   * только на старте.
+   */
+  initialTab?: 'work' | 'authored';
   /** В компактном десктопном окне задачи закрываются крестиком. */
   onClose?: () => void;
 }
@@ -78,14 +85,14 @@ function whenLabel(ms: number): string {
 }
 
 const TasksPanel: React.FC<TasksPanelProps> = ({
-  currentUserId, changeToken = 0, draftDescription = null, onDraftConsumed, onClose
+  currentUserId, changeToken = 0, draftDescription = null, onDraftConsumed, initialTab, onClose
 }) => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<TaskItem[]>([]);
   const [journal, setJournal] = useState<TaskJournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [tab, setTab] = useState<Tab>('work');
+  const [tab, setTab] = useState<Tab>(initialTab || 'work');
   /**
    * «Мои» или «Все, к чему причастен».
    *

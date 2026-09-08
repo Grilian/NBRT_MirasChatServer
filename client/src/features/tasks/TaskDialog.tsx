@@ -5,6 +5,7 @@ import { nameFor } from '@/shared/lib/user';
 import Modal, { ModalHead } from '@/shared/ui/Modal';
 import { TASK_STATUS_LABELS, TASK_STATUS_ORDER, TaskDraft, TaskItem, TaskPerson, TaskStatus } from './types';
 import { AUTOFOCUS_ON_OPEN } from '@/shared/hooks/autoFocus';
+import { describeTaskError } from './errors';
 
 interface DirectoryEntry {
   id: number;
@@ -74,6 +75,8 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
   const [changingStatus, setChangingStatus] = useState(false);
   const [archived, setArchived] = useState(task?.archived || false);
   const [archiving, setArchiving] = useState(false);
+  /** Спрашиваем перед закрытием, только когда есть что терять (см. `dirty`). */
+  const [confirmClose, setConfirmClose] = useState(false);
 
   useEffect(() => {
     api.get('/users').then(({ data }) => setPeople(data)).catch(() => {});
@@ -115,14 +118,18 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
   /**
    * Кому поручена задача.
    *
-   * У СУЩЕСТВУЮЩЕЙ задачи передача уходит на сервер сразу, отдельной ручкой:
-   * это не правка текста, и права у неё свои — передать вправе и текущий
-   * исполнитель, которому форма целиком недоступна. У НОВОЙ задачи выбор
-   * просто копится в состоянии и уезжает вместе с созданием.
+   * В ФОРМЕ выбор копится наравне с остальными полями и уезжает по
+   * «Сохранить»: на личном тестировании оказалось, что мгновенная передача
+   * посреди правки читается как поломка — человек ещё ничего не сохранял, а на
+   * доске позади уже сменился исполнитель, и отменить это нечем.
+   *
+   * В ПРОСМОТРЕ (форма недоступна, но передать вправе — например текущий
+   * исполнитель сдаёт работу) кнопки «Сохранить» нет вовсе, поэтому там выбор
+   * по-прежнему уходит на сервер сразу, отдельной ручкой со своими правами.
    */
   const chooseAssignee = async (person: TaskPerson | null) => {
     if (assigning) return;
-    if (!task || !onAssigneeChange) { setAssignee(person); return; }
+    if (!readOnly || !task || !onAssigneeChange) { setAssignee(person); return; }
     setAssigning(true);
     setError('');
     try {
@@ -133,7 +140,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
       // затрёт его обратно.
       setParticipants(saved.participants);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Не удалось передать задачу');
+      setError(describeTaskError(err, 'Не удалось передать задачу'));
     } finally {
       setAssigning(false);
     }
@@ -231,15 +238,23 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
   }, [people, query, participants, currentUserId]);
 
   const addParticipant = (person: DirectoryEntry) => {
-    setParticipants((prev) => [...prev, {
+    const added: TaskPerson = {
       id: person.id, username: person.username,
       display_name: person.display_name || person.username, avatar_path: null,
-    }]);
+    };
+    setParticipants((prev) => [...prev, added]);
+    // Первый причастный сразу становится исполнителем: задача без исполнителя —
+    // задача, с которой никого не спросят, и заводить её так по недосмотру
+    // проще всего. Выбор не окончательный — ряд имён рядом, и снять тоже можно.
+    setAssignee((prev) => prev || added);
     setQuery('');
   };
 
   const removeParticipant = (id: number) => {
     setParticipants((prev) => prev.filter((p) => p.id !== id));
+    // Исполнитель обязан быть среди причастных — сервер иначе не примет
+    // сохранение, а человек не поймёт, за что ему отказали.
+    setAssignee((prev) => (prev && prev.id === id ? null : prev));
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -257,9 +272,17 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
         participant_ids: participants.map((p) => p.id),
         assignee_id: assignee ? assignee.id : null,
       });
+      // Правка задачи исполнителя НЕ меняет: у передачи своя ручка и свои
+      // права (её вправе сделать ещё и текущий исполнитель, которому правка
+      // недоступна). Поэтому у существующей задачи доводим передачу отдельным
+      // запросом — и только если выбор действительно изменился.
+      const assigneeChanged = (task?.assignee?.id ?? null) !== (assignee?.id ?? null);
+      if (task && onAssigneeChange && assigneeChanged) {
+        await onAssigneeChange(assignee ? assignee.id : null);
+      }
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Не удалось сохранить');
+      setError(describeTaskError(err));
     } finally {
       setSaving(false);
     }
@@ -277,10 +300,39 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
     node.scrollIntoView({ block: 'nearest' });
   }, [suggestions.length]);
 
-  // persistent: промах мимо карточки не должен стирать заполненную форму.
+  /**
+   * Что в форме изменено по сравнению с тем, что было при открытии.
+   *
+   * Нужно ровно для одного: закрытие промахом мимо карточки должно быть
+   * возможным (иначе окно ощущается запертым), но не должно молча уносить
+   * набранное. Пустая новая задача несохранённой не считается — закрывать её
+   * с переспросом было бы издевательством.
+   */
+  const dirty = !readOnly && (
+    title !== (task?.title || '')
+    || description !== (task?.description || initialDescription || '')
+    || dueDate !== (task?.due_at ? toDateInput(task.due_at) : '')
+    || participants.map((p) => p.id).join() !== (task?.participants || []).map((p) => p.id).join()
+    || (assignee?.id ?? null) !== (task?.assignee?.id ?? null)
+  );
+
+  const requestClose = () => {
+    if (dirty) { setConfirmClose(true); return; }
+    onClose();
+  };
+
   return (
-    <Modal onClose={onClose} className="task-dialog" persistent>
-      <ModalHead title={task ? 'Задача' : 'Новая задача'} onClose={onClose} />
+    <>
+    <Modal onClose={requestClose} className="task-dialog">
+      {/* Ошибка живёт В ШАПКЕ, а не в теле формы. Тело прокручивается, и
+          сообщение об отказе, показанное сверху, оставалось выше экрана:
+          человек жал «Сохранить», ничего не происходило, и понять почему было
+          неоткуда. Шапка на месте всегда. */}
+      <ModalHead
+        title={task ? 'Задача' : 'Новая задача'}
+        subtitle={error ? <span className="task-head-error">{error}</span> : undefined}
+        onClose={requestClose}
+      />
 
         {readOnly ? (
           <div className="task-dialog-body">
@@ -304,8 +356,6 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
           </div>
         ) : (
         <form onSubmit={handleSave} className="task-dialog-body">
-          {error && <p className="form-error">{error}</p>}
-
           {statusPicker}
           {archiveButton}
 
@@ -346,7 +396,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
                 <div className="task-suggest-list" ref={suggestRef}>
                   {suggestions.map((p) => (
                     <button type="button" key={p.id} className="task-suggest-row" onClick={() => addParticipant(p)}>
-                      {nameFor(p)} <span className="cal-suggest-count">@{p.username}</span>
+                      {nameFor(p)} <span className="task-suggest-login">@{p.username}</span>
                     </button>
                   ))}
                 </div>
@@ -363,7 +413,7 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
                 (решение пользователя от 07.09.2026). Прежнее условие
                 `can_edit` — это право ПРАВИТЬ, и оно осталось у автора. */}
             {onDelete && (
-              <button type="button" className="cal-dialog-delete" onClick={onDelete}>Удалить</button>
+              <button type="button" className="task-modal-delete" onClick={onDelete}>Удалить</button>
             )}
             <button type="submit" className="btn-primary" disabled={saving}>
               {saving ? 'Сохраняем…' : 'Сохранить'}
@@ -372,6 +422,31 @@ const TaskDialog: React.FC<TaskDialogProps> = ({
         </form>
         )}
     </Modal>
+
+    {/* Промах мимо карточки закрывает окно — но не молча, когда в форме есть
+        несохранённое. Вопрос задаём прямо: что именно потеряется. */}
+    {confirmClose && (
+      <Modal
+        onClose={() => setConfirmClose(false)}
+        className="task-confirm-close"
+        nested
+        label="Закрыть без сохранения"
+      >
+        <ModalHead title="Закрыть без сохранения?" onClose={() => setConfirmClose(false)} />
+        <div className="task-delete-body">
+          <p className="task-delete-note">
+            {task ? 'Правки этой задачи не сохранятся.' : 'Заполненная задача не будет создана.'}
+          </p>
+          <div className="task-modal-actions">
+            <button type="button" className="sa-btn-ghost" onClick={onClose}>Закрыть без сохранения</button>
+            <button type="button" className="btn-primary" onClick={() => setConfirmClose(false)}>
+              Вернуться к правке
+            </button>
+          </div>
+        </div>
+      </Modal>
+    )}
+    </>
   );
 };
 

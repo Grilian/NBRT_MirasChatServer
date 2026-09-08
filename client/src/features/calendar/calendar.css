@@ -354,12 +354,7 @@
 }
 .cal-swatch.is-active { border-color: var(--ink); box-shadow: 0 0 0 2px var(--paper-raised) inset; }
 .cal-guests-toolbar { display: flex; gap: 8px; margin-bottom: 6px; }
-.cal-guests-toolbar-btn {
-  border: none; background: none; color: var(--accent); cursor: pointer;
-  font-size: 12px; font-weight: 600; padding: 0;
-}
-.cal-guests-toolbar-btn:hover { text-decoration: underline; }
-.cal-guests-toolbar-btn:disabled { color: var(--ink-faint); cursor: default; text-decoration: none; }
+/* .cal-guests-toolbar-btn переехал туда же — им пользуется общий MemberPicker. */
 .cal-dialog-guests { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
 .cal-guest-chip {
   display: inline-flex; align-items: center; gap: 5px; border: none; cursor: pointer;
@@ -380,10 +375,8 @@
 .cal-suggest-row.is-department { font-weight: 500; }
 .cal-suggest-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-suggest-count { flex: none; font-size: 11.5px; color: var(--ink-faint); font-weight: 400; }
-.cal-dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; }
-.cal-dialog-actions .btn-primary { width: auto; padding: 9px 22px; }
-.cal-dialog-delete { border: none; background: transparent; color: var(--unread); cursor: pointer; font-size: 13.5px; padding: 9px 12px; border-radius: var(--radius-sm); margin-right: auto; }
-.cal-dialog-delete:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
+/* .cal-dialog-actions / .cal-dialog-delete переехали в shared/styles/modals.css:
+   ими пользуются окна групп, а этот файл грузится только с календарём. */
 
 /* ---- Карточка просмотра ---- */
 .cal-details { max-width: 400px; }

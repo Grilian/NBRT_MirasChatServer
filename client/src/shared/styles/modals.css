@@ -202,3 +202,23 @@
    единственным входом в меню остаётся удержание, о котором не догадаться. */
 @media (hover: none) { .row-menu-btn { opacity: 1; } }
 .row-menu { min-width: 210px; }
+
+/* ===== Ряд действий в окне =====
+   Классы с приставкой `cal-` по историческим причинам: заведены для окна
+   события, а пользуются ими ещё окна групп и общий подборщик участников.
+   Живут здесь, а НЕ в calendar.css: с разделением стилей по маршрутам
+   (волна 9) тот файл приезжает только вместе с календарём, и в других
+   разделах кнопки оставались без оформления — столбиком и без отступов.
+   Поймано глазами на живой сборке 08.09.2026. Имена не переименованы, чтобы
+   не смешивать переезд стиля с правкой разметки. */
+.cal-dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.cal-dialog-actions .btn-primary { width: auto; padding: 9px 22px; }
+.cal-dialog-delete { border: none; background: transparent; color: var(--unread); cursor: pointer; font-size: 13.5px; padding: 9px 12px; border-radius: var(--radius-sm); margin-right: auto; }
+.cal-dialog-delete:hover { background: color-mix(in srgb, var(--unread) 12%, transparent); }
+
+.cal-guests-toolbar-btn {
+  border: none; background: none; color: var(--accent); cursor: pointer;
+  font-size: 12px; font-weight: 600; padding: 0;
+}
+.cal-guests-toolbar-btn:hover { text-decoration: underline; }
+.cal-guests-toolbar-btn:disabled { color: var(--ink-faint); cursor: default; text-decoration: none; }

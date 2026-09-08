@@ -61,7 +61,11 @@ interface Props {
   customEmoji?: CustomEmojiMap;
   onOpenStatus: () => void;
   onOpenChats: () => void;
-  onOpenTasks: () => void;
+  /**
+   * Открыть задачи. Вкладку называем, когда знаем, где лежит то, ради чего
+   * человек нажал: «2 просрочено» не должно приводить на пустую доску.
+   */
+  onOpenTasks: (tab?: 'work' | 'authored') => void;
   onOpenCalendar: () => void;
   onOpenCalendarEvent: (target: HomeCalendarTarget) => void;
   /**
@@ -126,7 +130,16 @@ const HomeSection: React.FC<Props> = ({
   onOpenChats, onOpenTasks, onOpenCalendar, onOpenCalendarEvent, onOpenFiles,
 }) => {
   const [tasksCount, setTasksCount] = useState<number | null>(null);
-  const [overdueCount, setOverdueCount] = useState(0);
+  /**
+   * Просроченное считается ПО ВСЕМУ, к чему человек причастен, а не только по
+   * своей работе. Задача, которую он поставил другому и которая горит, — это
+   * ровно то, что «не потерять»; при счёте по своей работе «Главная» писала
+   * «Просроченного нет» одновременно с двумя просроченными в разделе.
+   *
+   * `mine` нужен, чтобы открыть ту вкладку, где эти задачи лежат: число,
+   * ведущее на пустую доску, — та же ложь, только с другой стороны.
+   */
+  const [overdue, setOverdue] = useState({ total: 0, mine: 0 });
   // Расписание дня показывается СПИСКОМ, а не числом: «3 мероприятия» ничего не
   // говорит о том, к чему готовиться, — а именно за этим на «Главную» и
   // заходят утром.
@@ -145,14 +158,16 @@ const HomeSection: React.FC<Props> = ({
         // ещё не сделанную. Завершённые в сводке не нужны — это список дел, а
         // не отчёт. Правило «моей работы» общее с самим разделом (scope.ts):
         // разойтись в числах им больше нечем.
-        const open = (data || []).filter(
-          (task: any) => task.status !== 'done' && isMyWork(task, currentUserId),
-        );
-        setTasksCount(open.length);
+        const open = (data || []).filter((task: any) => task.status !== 'done');
+        setTasksCount(open.filter((task: any) => isMyWork(task, currentUserId)).length);
         const now = Date.now();
-        setOverdueCount(open.filter((task: any) => task.due_at && task.due_at < now).length);
+        const late = open.filter((task: any) => task.due_at && task.due_at < now);
+        setOverdue({
+          total: late.length,
+          mine: late.filter((task: any) => isMyWork(task, currentUserId)).length,
+        });
       })
-      .catch(() => { if (alive) { setTasksCount(0); setOverdueCount(0); } });
+      .catch(() => { if (alive) { setTasksCount(0); setOverdue({ total: 0, mine: 0 }); } });
 
     // Через общий fetchRange, а не своим запросом: правила видимости календаря
     // (общий/личный, слои, дни рождения) живут там, и вторая их копия здесь
@@ -270,6 +285,28 @@ const HomeSection: React.FC<Props> = ({
         </button>
       </header>
 
+      {/* Входы в Календарь и Файлы — вверху, как в макете (решение
+          пользователя от 08.09.2026; прежде они стояли отдельным блоком внизу).
+          «Обзор» — сам этот экран, поэтому он не кнопка, а отметка «вы здесь».
+          Соседи ведут в самостоятельные разделы, и это честнее показать
+          стрелкой, чем притвориться, что все трое — срезы одного экрана. */}
+      <nav className="home-tabs" aria-label="Разделы">
+        <span className="home-tab is-active" aria-current="page">
+          <svg {...stroke}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
+          Обзор
+        </span>
+        <button type="button" className="home-tab" onClick={onOpenCalendar}>
+          <svg {...stroke}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M8 3v4M16 3v4M3 11h18" /></svg>
+          Календарь
+          <svg className="home-tab-go" {...stroke}><path d="M7 17 17 7M9 7h8v8" /></svg>
+        </button>
+        <button type="button" className="home-tab" onClick={onOpenFiles}>
+          <svg {...stroke}><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17.5Z" /></svg>
+          Файлы
+          <svg className="home-tab-go" {...stroke}><path d="M7 17 17 7M9 7h8v8" /></svg>
+        </button>
+      </nav>
+
       <div className="home-stats">
         {tiles.map((tile) => (
           <button key={tile.id} type="button" className={'home-stat home-stat-' + tile.tone} onClick={tile.onOpen}>
@@ -340,16 +377,24 @@ const HomeSection: React.FC<Props> = ({
                 <h2>Требует внимания</h2>
               </div>
             </div>
-            {overdueCount > 0 ? (
-              <button type="button" className="home-attention" onClick={onOpenTasks}>
+            {overdue.total > 0 ? (
+              <button
+                type="button"
+                className="home-attention"
+                onClick={() => onOpenTasks(overdue.mine > 0 ? 'work' : 'authored')}
+              >
                 <span className="home-attention-icon" aria-hidden="true">
                   <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5l3 1.8" /></svg>
                 </span>
                 <span className="home-attention-body">
                   <span className="home-attention-title">
-                    {overdueCount} {plural(overdueCount, 'задача просрочена', 'задачи просрочено', 'задач просрочено')}
+                    {overdue.total} {plural(overdue.total, 'задача просрочена', 'задачи просрочено', 'задач просрочено')}
                   </span>
-                  <span className="home-attention-hint">Срок прошёл, статус не менялся</span>
+                  <span className="home-attention-hint">
+                    {overdue.mine === 0
+                      ? 'Из поставленных вами — срок прошёл'
+                      : 'Срок прошёл, статус не менялся'}
+                  </span>
                 </span>
                 <ChevronRight />
               </button>
@@ -392,14 +437,6 @@ const HomeSection: React.FC<Props> = ({
               </div>
             </section>
           )}
-
-          <section className="home-panel home-shortcuts">
-            <div className="home-panel-head"><div><h2>Разделы</h2></div></div>
-            <div className="home-links">
-              <button type="button" className="home-link" onClick={onOpenCalendar}>Календарь</button>
-              <button type="button" className="home-link" onClick={onOpenFiles}>Файлы</button>
-            </div>
-          </section>
         </div>
       </div>
     </div>

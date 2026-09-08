@@ -57,7 +57,7 @@ const TaskDeleteDialog: React.FC<{
           и её можно будет вернуть.
         </p>
         {error && <p className="form-error">{error}</p>}
-        <div className="cal-dialog-actions">
+        <div className="task-modal-actions">
           <button type="button" className="sa-btn-ghost" onClick={onCancel} disabled={busy}>Отмена</button>
           <button type="button" className="sa-btn-danger" onClick={submit} disabled={busy || !trimmed}>
             Удалить

@@ -323,6 +323,11 @@ const Chat: React.FC = () => {
   // Текст сообщения, из которого заводят задачу («Создать задачу» в меню
   // сообщения) — уезжает в TasksPanel вместе с переходом в раздел.
   const [taskDraftText, setTaskDraftText] = useState<string | null>(null);
+  /**
+   * С какой вкладки открыть задачи. Задаёт «Главная»: просроченное бывает и в
+   * поставленных, и число оттуда обязано привести туда, где эти задачи лежат.
+   */
+  const [tasksInitialTab, setTasksInitialTab] = useState<'work' | 'authored' | undefined>(undefined);
   // Сообщение, на которое отвечаем — панель над полем ввода, как при правке.
   const [replyingMessage, setReplyingMessage] = useState<ReplyingMessage | null>(null);
   // Сообщения, выбранные для пересылки — открывают выбор чата-получателя.
@@ -3444,6 +3449,7 @@ const Chat: React.FC = () => {
             changeToken={tasksChangeToken}
             draftDescription={taskDraftText}
             onDraftConsumed={() => setTaskDraftText(null)}
+            initialTab={tasksInitialTab}
           />
         </main>
       )}
@@ -3458,7 +3464,7 @@ const Chat: React.FC = () => {
             customEmoji={customEmoji}
             onOpenStatus={() => setStatusSheetOpen(true)}
             onOpenChats={() => goToSection('chats')}
-            onOpenTasks={() => goToSection('tasks')}
+            onOpenTasks={(tab) => { setTasksInitialTab(tab); goToSection('tasks'); }}
             onOpenCalendar={() => { setCalendarOpenTarget(null); goToSection('calendar'); }}
             onOpenCalendarEvent={(target) => { setCalendarOpenTarget(target); goToSection('calendar'); }}
             onOpenFiles={() => goToSection('documents')}
