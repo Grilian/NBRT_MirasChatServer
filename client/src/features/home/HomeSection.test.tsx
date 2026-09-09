@@ -3,7 +3,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import api from '@/shared/api/client';
 import HomeSection, { untilLabel } from './HomeSection';
-import { instantOf, todayKey } from '@/features/calendar/dates';
+import { formatClock, instantOf, todayKey } from '@/features/calendar/dates';
 
 vi.mock('@/shared/api/client', () => ({
   __esModule: true,
@@ -26,10 +26,23 @@ const TASKS = [
 // Europe/Moscow «9:00» превращалось бы в другой момент и другую подпись.
 const at = (hours: number, minutes = 0) => instantOf(todayKey(), hours * 60 + minutes);
 
+/**
+ * Мероприятия строятся ОТ ТЕКУЩЕГО ЧАСА, а не от фиксированных 9:00 и 10:30.
+ *
+ * Расписание показывает только то, что впереди (прошедшее свёрнуто за кнопку),
+ * и фикстура на фиксированный час превращала тесты в зависимые от времени
+ * прогона: после десяти утра оба события уезжали в свёрнутое и половина
+ * проверок падала. Ровно та же ловушка уже ловилась в этом файле раньше — с
+ * поиском названия по всей разметке.
+ */
+const HOUR = 3600_000;
+const soon = Date.now() + HOUR;
+const later = Date.now() + 2 * HOUR;
+
 const EVENTS = {
   events: [
-    { id: 2, event_id: 2, title: 'Планёрка', starts_at: at(10, 30), occurrence_start: at(10, 30) },
-    { id: 1, event_id: 1, title: 'Совещание', starts_at: at(9), occurrence_start: at(9) },
+    { id: 2, event_id: 2, title: 'Планёрка', starts_at: later, ends_at: later + HOUR, occurrence_start: later },
+    { id: 1, event_id: 1, title: 'Совещание', starts_at: soon, ends_at: soon + HOUR, occurrence_start: soon },
     { id: 3, event_id: 3, title: 'День открытых дверей', starts_at: at(0), occurrence_start: at(0), all_day: true },
   ],
   birthdays: [],
@@ -72,8 +85,10 @@ test('здоровается по имени и показывает распи�
   expect(titles).toEqual(['День открытых дверей', 'Совещание', 'Планёрка']);
   // Событие на весь день времени не имеет — так и подписано.
   expect(document.querySelectorAll('.home-event-time')[0].textContent).toBe('весь день');
-  expect(document.querySelectorAll('.home-event-time')[1].textContent).toBe('09:00');
-  expect(document.querySelectorAll('.home-event-time')[2].textContent).toBe('10:30');
+  // Время сверяем тем же форматированием, каким его печатает компонент:
+  // фикстуры привязаны к текущему часу, а не к постоянным 9:00 и 10:30.
+  expect(document.querySelectorAll('.home-event-time')[1].textContent).toContain(formatClock(soon));
+  expect(document.querySelectorAll('.home-event-time')[2].textContent).toContain(formatClock(later));
 });
 
 test('счётчики и расписание ведут в свои разделы', async () => {
