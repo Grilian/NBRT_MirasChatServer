@@ -2154,6 +2154,21 @@ const Chat: React.FC = () => {
     return { ok: true };
   }, [currentUserId, patchOutgoingQueue]);
 
+  // Прогресс не может пережить свою строку очереди: любой путь, которым она
+  // оттуда уходит — успех, отмена, отказ, — обязан гасить и кольцо. Точечных
+  // удалений в каждом из них мало: один пропущенный путь снова оставит круг
+  // висеть на отправленной картинке.
+  useEffect(() => {
+    setUploadProgress((previous) => {
+      const alive = new Set(outgoingQueue.map((item) => item.clientMessageId));
+      const next: Record<string, number> = {};
+      for (const [id, percent] of Object.entries(previous)) {
+        if (alive.has(id)) next[id] = percent;
+      }
+      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
+    });
+  }, [outgoingQueue]);
+
   const flushOutgoingQueue = useCallback(async () => {
     if (!socket || !socket.connected || !socketAuthenticated || processingOutgoingRef.current) return;
     const item = outgoingQueueRef.current.find((queued) => (
@@ -2184,6 +2199,15 @@ const Chat: React.FC = () => {
           )),
         });
         delete uploadAbortRef.current[item.clientMessageId];
+        // Загрузка кончилась — кольцо обязано исчезнуть. Раньше запись просто
+        // оставалась, а подтверждённое сервером сообщение приходит с ТЕМ ЖЕ
+        // clientMessageId и снова попадало под неё: круг висел на уже
+        // отправленной картинке (найдено на проде 09.09.2026).
+        setUploadProgress((previous) => {
+          const next = { ...previous };
+          delete next[item.clientMessageId];
+          return next;
+        });
         sendingItem = {
           ...item,
           attempts: attempt,

@@ -550,3 +550,41 @@ test('аппаратный «Назад» снимает выделение, а 
   expect(document.querySelectorAll('.msg-select-check').length).toBe(0);
   expect(screen.getByText('первое')).toBeInTheDocument();
 });
+
+describe('круг загрузки вложения', () => {
+  const sending = {
+    id: -1,
+    text: '',
+    file_path: '/uploads/sending.webp',
+    sender_id: 1,
+    username: 'me',
+    created_at: '2026-09-09T09:44:00.000Z',
+    client_message_id: 'c-1',
+  };
+
+  const renderWith = (status: string) => render(
+    <ChatWindow
+      chatId="test"
+      messages={[{ ...sending, status }] as any}
+      currentUserId={1}
+      onStartEdit={() => {}}
+      onDeleteMessage={() => {}}
+      uploadProgress={{ 'c-1': 40 }}
+    />,
+  );
+
+  test('пока картинка уходит — кольцо с процентами есть', () => {
+    renderWith('sending');
+    const ring = document.querySelector('.image-upload-progress');
+    expect(ring).toBeTruthy();
+    expect(ring!.getAttribute('aria-valuenow')).toBe('40');
+  });
+
+  test('у отправленной картинки кольца НЕТ, даже если запись о прогрессе осталась', () => {
+    // Живая находка на проде 09.09.2026: круг оставался на уже доставленной
+    // картинке. Подтверждённое сервером сообщение приходит с ТЕМ ЖЕ
+    // client_message_id и снова попадало под запись о прогрессе.
+    renderWith('sent');
+    expect(document.querySelector('.image-upload-progress')).toBeNull();
+  });
+});

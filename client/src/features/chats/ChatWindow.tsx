@@ -1085,7 +1085,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const selectable = !pendingDelivery;
           const imageUrl = msg.local_file_url || resolveUploadUrl(msg.file_path);
           // Доля ушедшего вложения приходит из очереди отправки (Chat.tsx).
-          const uploadPercent = msg.client_message_id ? uploadProgress?.[msg.client_message_id] : undefined;
+          // Только у того, что ЕЩЁ отправляется: подтверждённое сервером
+          // сообщение приходит с тем же clientMessageId, и без этой проверки
+          // круг оставался бы на уже доставленной картинке.
+          const uploadPercent = msg.status === 'sending' && msg.client_message_id
+            ? uploadProgress?.[msg.client_message_id]
+            : undefined;
 
           const isSelected = selectedIds.has(msg.id);
           // Картинка без подписи, у которой прозрачность реальная (не просто
