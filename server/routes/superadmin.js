@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
+const { revokeTokens } = require('../services/tokenEpoch');
 const verifySuperAdmin = require('../middleware/verifySuperAdmin');
 const { isValidLogin, isReservedLogin, PASSWORD_RESET_WINDOW_MS } = require('../utils/validators');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
@@ -286,6 +287,9 @@ router.put('/users/:id', verifySuperAdmin, (req, res) => {
 router.post('/users/:id/reset-password', verifySuperAdmin, (req, res) => {
   try {
     const id = Number(req.params.id);
+    // Сброс пароля администрацией обязан выгнать человека со всех устройств:
+    // иначе «сбросили пароль» ничего не значит для того, кто уже вошёл.
+    revokeTokens(id);
     const result = db.prepare("UPDATE users SET password = '', password_reset_requested_at = ? WHERE id = ?")
       .run(Date.now(), id);
     if (result.changes === 0) return res.status(404).json({ error: 'Пользователь не найден' });

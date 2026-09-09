@@ -185,7 +185,13 @@ const ProfileEdit: React.FC<ProfileEditProps> = ({
         position,
         birth_date: birthDate,
       });
-      setSuccess('Профиль обновлён');
+      // Смена пароля отзывает ВСЕ выданные токены, включая наш: иначе смена
+      // пароля не выгоняла бы того, кто его подсмотрел. Сервер выдаёт этому
+      // устройству новый — без него следующий же запрос отсюда получит 401.
+      if (data.token) localStorage.setItem('token', data.token);
+      setSuccess(newPassword
+        ? 'Профиль обновлён. На других устройствах придётся войти заново.'
+        : 'Профиль обновлён');
       setNewPassword('');
       setCurrentPassword('');
       onSaved({

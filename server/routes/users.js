@@ -1,5 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const { revokeTokens } = require('../services/tokenEpoch');
+const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
@@ -265,6 +267,18 @@ router.put('/me', verifyToken, (req, res) => {
       db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     }
 
+    // Сменили пароль — прежние устройства обязаны отвалиться, иначе смена
+    // пароля не защищает ни от чего. Себе выдаём свежий токен: выгонять
+    // человека с того устройства, где он только что менял пароль, незачем.
+    let token;
+    if (nextPassword) {
+      const epoch = revokeTokens(user.id);
+      token = jwt.sign(
+        { id: user.id, username: nextUsername || user.username, source: 'local', epoch },
+        process.env.JWT_SECRET || 'your_super_secret_key',
+      );
+    }
+
     const updated = db.prepare(`
       SELECT u.id, u.username, u.display_name, u.avatar_path, u.bio, u.phone,
              u.department_id, d.name AS department, u.position, u.birth_date
@@ -272,7 +286,7 @@ router.put('/me', verifyToken, (req, res) => {
       LEFT JOIN departments d ON d.id = u.department_id
       WHERE u.id = ?
     `).get(user.id);
-    res.json(updated);
+    res.json(token ? { ...updated, token } : updated);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -458,6 +472,31 @@ router.delete('/me', verifyToken, (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * Выйти на всех остальных устройствах.
+ *
+ * Токены бессрочны, и до этой ручки «выйти везде» не существовало вовсе:
+ * потерянный телефон или чужой компьютер оставались в аккаунте навсегда.
+ * Поднимаем эпоху — все выданные токены разом перестают подходить — и тут же
+ * выдаём новый тому, кто нажал: выгонять человека с устройства, на котором он
+ * стоит, было бы издевательством.
+ */
+router.post('/me/logout-others', verifyToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.userId);
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    const epoch = revokeTokens(user.id);
+    const token = jwt.sign(
+      { id: user.id, username: user.username, source: 'local', epoch },
+      process.env.JWT_SECRET || 'your_super_secret_key',
+    );
+    res.json({ token });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

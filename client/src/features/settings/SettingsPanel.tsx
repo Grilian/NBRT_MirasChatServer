@@ -120,6 +120,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference());
   const [badgeColor, setBadgeColor] = useState<string>(getUnreadBadgeColor);
+  const [logoutOthersState, setLogoutOthersState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -191,6 +192,20 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleThemeChange = (value: ThemePreference) => {
     setTheme(value);
     applyThemePreference(value);
+  };
+
+  const handleLogoutOthers = async () => {
+    if (logoutOthersState === 'busy') return;
+    setLogoutOthersState('busy');
+    try {
+      const { data } = await api.post('/users/me/logout-others');
+      // Сервер отозвал ВСЕ токены, включая наш, и выдал новый — сохраняем,
+      // иначе следующий же запрос с этого устройства получит 401.
+      if (data?.token) localStorage.setItem('token', data.token);
+      setLogoutOthersState('done');
+    } catch {
+      setLogoutOthersState('error');
+    }
   };
 
   const handleBadgeColorChange = (id: string) => {
@@ -906,11 +921,33 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
 
           <div className="settings-group">
+            {/* Выход на остальных устройствах. Токены бессрочны, и до этой
+                кнопки потерянный телефон или чужой компьютер оставались в
+                аккаунте навсегда. Себя не выгоняем: сервер тут же выдаёт этому
+                устройству новый токен. */}
+            <button
+              type="button"
+              className="settings-row"
+              onClick={handleLogoutOthers}
+              disabled={logoutOthersState === 'busy'}
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="14" height="11" rx="2" /><path d="M6 20h8M10 15v5" /><path d="m17 8 4 4-4 4" /></svg>
+              <span className="label">Выйти на других устройствах</span>
+              <span className="value">
+                {logoutOthersState === 'busy' ? 'Выходим…'
+                  : logoutOthersState === 'done' ? 'Готово'
+                    : logoutOthersState === 'error' ? 'Не вышло' : ''}
+              </span>
+            </button>
             <button type="button" className="settings-row" onClick={onLogout}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
               <span className="label">Выйти</span>
             </button>
           </div>
+          <p className="settings-hint">
+            Остальные устройства выйдут из аккаунта, это же происходит при смене
+            пароля. На текущем устройстве вы останетесь.
+          </p>
             </>
           )}
         </div>

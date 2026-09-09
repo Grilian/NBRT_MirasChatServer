@@ -21,6 +21,7 @@ for (const step of [
   require('./steps/07-seed'),
   require('./steps/08-normalize'),
   require('./steps/09-tasks'),
+  require('./steps/10-sessions'),
 ]) {
   step(db);
 }

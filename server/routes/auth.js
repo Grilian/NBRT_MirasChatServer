@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { currentEpoch, revokeTokens } = require('../services/tokenEpoch');
 const db = require('../db');
 const { isValidLogin, isReservedLogin, isValidPassword, isValidDisplayName, PASSWORD_RESET_WINDOW_MS } = require('../utils/validators');
 const router = express.Router();
@@ -8,7 +9,11 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key';
 
 function loginSuccessPayload(user) {
-  const token = jwt.sign({ id: user.id, username: user.username, source: 'local' }, JWT_SECRET);
+  // Эпоха в токене — то, чем его потом можно отозвать (services/tokenEpoch.js).
+  const token = jwt.sign(
+    { id: user.id, username: user.username, source: 'local', epoch: currentEpoch(user.id) },
+    JWT_SECRET,
+  );
   return {
     token,
     id: user.id,
@@ -145,6 +150,10 @@ router.post('/complete-reset', (req, res) => {
     }
 
     const hashedPassword = bcrypt.hashSync(newPassword, 10);
+    // Смена пароля обязана выгнать все прежние устройства: иначе тот, кто
+    // пароль подсмотрел, остаётся в аккаунте и после смены. Новый токен для
+    // этого устройства выдаётся ниже, уже с новой эпохой.
+    revokeTokens(user.id);
     db.prepare('UPDATE users SET password = ?, password_reset_requested_at = NULL WHERE id = ?')
       .run(hashedPassword, user.id);
 

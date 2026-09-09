@@ -5,6 +5,7 @@
 // не должен знать, как поднимается приложение.
 const { cancelPendingPush, forgetSocket, markSocketOffline, markSocketOnline, onlineUserIds, schedulePush, setBackgrounded } = require('../presence');
 const jwt = require('jsonwebtoken');
+const { epochValid } = require('../../services/tokenEpoch');
 
 function register(socket, ctx) {
   const { io, markPendingDelivered } = ctx;
@@ -12,6 +13,12 @@ function register(socket, ctx) {
   socket.on('user_online', (token, ack) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_super_secret_key');
+      // Отозванный токен обязан отваливаться и здесь: иначе устройство,
+      // выгнанное сменой пароля, теряет только HTTP, а сокет продолжает
+      // приносить ему чужую переписку.
+      if ((decoded.source || 'local') === 'local' && !epochValid(decoded)) {
+        throw new Error('token revoked');
+      }
       const userId = decoded.id;
       markSocketOnline(userId, socket.id);
       socket.userId = userId;
