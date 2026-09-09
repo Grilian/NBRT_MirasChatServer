@@ -509,6 +509,14 @@ const Chat: React.FC = () => {
 
   const currentUserId = Number(localStorage.getItem('userId'));
   const [outgoingQueue, setOutgoingQueue] = useState<OutgoingMessage[]>(() => loadOutgoingQueue(currentUserId));
+  /**
+   * Сколько процентов вложения уже ушло. Нужно ровно для одного: отличить
+   * «идёт медленно» от «повисло». Без этого на слабой связи отправка картинки
+   * выглядела как зависание, а потом падала в ошибку.
+   */
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  /** Живые загрузки — чтобы отмена действительно обрывала запрос, а не только чистила очередь. */
+  const uploadAbortRef = useRef<Record<string, AbortController>>({});
   const [outgoingAttachmentUrls, setOutgoingAttachmentUrls] = useState<Record<string, string>>({});
   const outgoingAttachmentUrlsRef = useRef(outgoingAttachmentUrls);
   outgoingAttachmentUrlsRef.current = outgoingAttachmentUrls;
@@ -2166,7 +2174,16 @@ const Chat: React.FC = () => {
         if (!stored) throw new Error('attachment_missing');
         const form = new FormData();
         form.append('image', stored.blob, stored.name);
-        const data = await uploadImage(form);
+        const controller = new AbortController();
+        uploadAbortRef.current[item.clientMessageId] = controller;
+        setUploadProgress((previous) => ({ ...previous, [item.clientMessageId]: 0 }));
+        const data = await uploadImage(form, {
+          signal: controller.signal,
+          onProgress: (percent) => setUploadProgress((previous) => (
+            { ...previous, [item.clientMessageId]: percent }
+          )),
+        });
+        delete uploadAbortRef.current[item.clientMessageId];
         sendingItem = {
           ...item,
           attempts: attempt,
@@ -2185,6 +2202,17 @@ const Chat: React.FC = () => {
         )));
       } catch (error) {
         processingOutgoingRef.current = false;
+        delete uploadAbortRef.current[item.clientMessageId];
+        setUploadProgress((previous) => {
+          const next = { ...previous };
+          delete next[item.clientMessageId];
+          return next;
+        });
+        // Отменил сам человек — это не ошибка отправки, и строка очереди уже
+        // убрана его же нажатием. Молчим, иначе поверх отменённого появится
+        // «не отправлено».
+        if ((error as { name?: string })?.name === 'CanceledError'
+          || (error as { code?: string })?.code === 'ERR_CANCELED') return;
         patchOutgoingQueue((previous) => previous.map((queued) => queued.clientMessageId === item.clientMessageId
           ? {
             ...queued,
@@ -2933,6 +2961,16 @@ const Chat: React.FC = () => {
   // застрявшей отправки (битый скриншот, пропавшая сеть) — раньше такое
   // сообщение висело в ленте вечно.
   const cancelOutgoing = useCallback((clientMessageId: string) => {
+    // Сначала обрываем сам запрос: без этого «отмена» убирала строку из
+    // очереди, а мегабайты продолжали уходить в сеть — на слабой связи это
+    // ровно то, от чего человек и пытался избавиться.
+    uploadAbortRef.current[clientMessageId]?.abort();
+    delete uploadAbortRef.current[clientMessageId];
+    setUploadProgress((previous) => {
+      const next = { ...previous };
+      delete next[clientMessageId];
+      return next;
+    });
     removeOutgoing(clientMessageId);
   }, [removeOutgoing]);
 
@@ -3643,6 +3681,7 @@ const Chat: React.FC = () => {
             onStopPoll={handleStopPoll}
             onRetryOutgoing={retryOutgoing}
             onCancelOutgoing={cancelOutgoing}
+            uploadProgress={uploadProgress}
             onOpenThread={(rootId, autoFocus) => {
               closeKeyboard();
               // Ветка и сведения используют одну правую колонку. Явный клик

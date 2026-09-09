@@ -200,6 +200,13 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Поиск эмодзи…"
           aria-label="Поиск эмодзи"
+          // Пока открыта панель смайликов, композер намеренно гасит IME: тап по
+          // смайлику не должен поднимать клавиатуру поверх панели. Но у самой
+          // панели есть поле ввода, и под то же правило оно попадало —
+          // клавиатура на Android открывалась и тут же закрывалась, набрать
+          // запрос было невозможно (жалоба с прода 09.09.2026). Признак ниже
+          // выводит поле из-под запрета; проверяет его MessageInput.
+          data-keyboard-allowed=""
         />
         {search && <button type="button" onClick={() => setSearch('')} aria-label="Очистить поиск">×</button>}
       </div>

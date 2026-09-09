@@ -282,7 +282,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
       // клавиатуру поля ветки или редактора опроса, расположенного поверх него.
       const active = document.activeElement;
       const ownsFocusedField = !!active && !!composerRef.current?.contains(active);
-      if (ownsFocusedField && mobileInputModeRef.current !== 'keyboard') hideMobileKeyboard();
+      // Поле, которое САМО просит клавиатуру (поиск в панели смайликов), из-под
+      // запрета выведено: иначе IME открывался и мгновенно закрывался, и
+      // набрать в нём было нечего.
+      const wantsKeyboard = !!(active as Element | null)?.closest?.('[data-keyboard-allowed]');
+      if (ownsFocusedField && !wantsKeyboard && mobileInputModeRef.current !== 'keyboard') {
+        hideMobileKeyboard();
+      }
     });
     const removeDidShow = onKeyboardShow((height) => {
       applyNativeHeight(height);

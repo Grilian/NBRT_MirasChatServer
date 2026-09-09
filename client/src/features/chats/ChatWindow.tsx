@@ -73,6 +73,8 @@ interface ChatWindowProps {
   onRetryOutgoing?: (clientMessageId: string) => void;
   /** Убрать сообщение из очереди отправки — оно ещё не ушло на сервер. */
   onCancelOutgoing?: (clientMessageId: string) => void;
+  /** Доля ушедшего вложения по clientMessageId — круг загрузки на картинке. */
+  uploadProgress?: Record<string, number>;
   onOpenThread?: (messageId: number, focusComposer: boolean) => void;
 }
 
@@ -200,6 +202,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, stickerCatalog = {}, onToggleReaction, onRemoveReaction,
   onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
+  uploadProgress,
   onOpenThread,
 }) => {
   // В группе можно создать новую ветку прямо из ленты. В личной переписке
@@ -1081,6 +1084,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const pendingDelivery = msg.status === 'sending' || msg.status === 'failed';
           const selectable = !pendingDelivery;
           const imageUrl = msg.local_file_url || resolveUploadUrl(msg.file_path);
+          // Доля ушедшего вложения приходит из очереди отправки (Chat.tsx).
+          const uploadPercent = msg.client_message_id ? uploadProgress?.[msg.client_message_id] : undefined;
 
           const isSelected = selectedIds.has(msg.id);
           // Картинка без подписи, у которой прозрачность реальная (не просто
@@ -1251,6 +1256,42 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         <img src={imageUrl} alt="" loading="lazy" decoding="async" onLoad={stickAfterMediaLoad} />
                         {msg.status === 'failed' && (
                           <span className="image-send-retry" aria-hidden="true">!</span>
+                        )}
+                        {/* Круг загрузки с крестиком: пока картинка уходит,
+                            человек видит, СКОЛЬКО ушло, и может передумать.
+                            Без этого на слабой связи отправка выглядела как
+                            зависание и через полминуты падала в ошибку. */}
+                        {uploadPercent !== undefined && (
+                          <span
+                            className="image-upload-progress"
+                            style={{ ['--percent' as string]: `${uploadPercent}` }}
+                            role="progressbar"
+                            aria-valuenow={uploadPercent}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label={`Отправка изображения, ${uploadPercent}%`}
+                          >
+                            <span
+                              className="image-upload-cancel"
+                              role="button"
+                              tabIndex={0}
+                              aria-label="Отменить отправку"
+                              title="Отменить отправку"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (msg.client_message_id) onCancelOutgoing?.(msg.client_message_id);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                event.stopPropagation();
+                                if (msg.client_message_id) onCancelOutgoing?.(msg.client_message_id);
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                                <path d="M18 6 6 18M6 6l12 12" />
+                              </svg>
+                            </span>
+                          </span>
                         )}
                       </button>
                     )}

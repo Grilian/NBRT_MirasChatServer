@@ -912,3 +912,32 @@
 .attach-menu-icon.image { background: linear-gradient(145deg, #55b7f5, #2f83db); }
 .attach-menu-icon.file { background: linear-gradient(145deg, #6f8ca5, #4a6178); }
 .attach-menu-icon.poll { background: linear-gradient(145deg, #2fc7d7, #1599c5); }
+
+/* ===== Круг загрузки на отправляемой картинке =====
+   Отправка картинки по слабой связи выглядела как зависание, а через полминуты
+   падала в ошибку — потому что упиралась в общий таймаут запроса. Теперь
+   таймаута у загрузки нет вовсе, а вместо него человек видит, сколько ушло, и
+   может передумать: крестик обрывает сам запрос, а не только строку очереди.
+
+   Дуга — коническим градиентом по переменной `--percent`: одна переменная,
+   никакого SVG и никакой перерисовки разметки на каждый процент. */
+.image-upload-progress {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .35); border-radius: inherit;
+}
+.image-upload-progress::before {
+  content: ''; position: absolute; width: 54px; height: 54px; border-radius: 50%;
+  background: conic-gradient(#fff calc(var(--percent, 0) * 1%), rgba(255, 255, 255, .28) 0);
+  /* Кольцо, а не диск: круг целиком закрыл бы крестик внутри. */
+  mask: radial-gradient(circle, transparent 20px, #000 21px);
+  -webkit-mask: radial-gradient(circle, transparent 20px, #000 21px);
+}
+.image-upload-cancel {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+  color: #fff; background: rgba(0, 0, 0, .35);
+}
+.image-upload-cancel:hover { background: rgba(0, 0, 0, .55); }
+@media (prefers-reduced-motion: reduce) {
+  .image-upload-progress::before { transition: none; }
+}

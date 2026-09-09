@@ -86,8 +86,39 @@ export interface UploadedImage {
   file_height: number;
 }
 
-export async function uploadImage(form: FormData): Promise<UploadedImage> {
-  const { data } = await api.post('/messages/upload-image', form);
+/**
+ * Загрузка вложения. Отдельные правила по сравнению с обычным запросом.
+ *
+ * `timeout: 0` — БЕЗ общего пятнадцатисекундного предела. Картинка на
+ * несколько мегабайт по слабой связи в него не укладывается, и отправка
+ * падала «как по таймеру» — потому что это и был таймер (жалоба с прода
+ * 09.09.2026). Медленная загрузка не равна зависшей: пока идут события
+ * прогресса, соединение живо, и обрывать его незачем.
+ *
+ * `onProgress` нужен не для красоты: без него человек не отличает «идёт
+ * медленно» от «повисло», а `signal` даёт возможность передумать — на плохой
+ * связи это единственный способ не ждать впустую.
+ */
+export interface UploadOptions {
+  onProgress?: (percent: number) => void;
+  signal?: AbortSignal;
+}
+
+function uploadConfig(options?: UploadOptions) {
+  return {
+    timeout: 0,
+    signal: options?.signal,
+    onUploadProgress: options?.onProgress
+      ? (event: { loaded: number; total?: number }) => {
+        if (!event.total) return;
+        options.onProgress!(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+      }
+      : undefined,
+  };
+}
+
+export async function uploadImage(form: FormData, options?: UploadOptions): Promise<UploadedImage> {
+  const { data } = await api.post('/messages/upload-image', form, uploadConfig(options));
   return data;
 }
 
@@ -99,8 +130,8 @@ export interface UploadedFile {
   mime: string;
 }
 
-export async function uploadFile(form: FormData): Promise<UploadedFile> {
-  const { data } = await api.post('/messages/upload-file', form);
+export async function uploadFile(form: FormData, options?: UploadOptions): Promise<UploadedFile> {
+  const { data } = await api.post('/messages/upload-file', form, uploadConfig(options));
   return data;
 }
 
