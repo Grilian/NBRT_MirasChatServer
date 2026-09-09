@@ -288,3 +288,37 @@ test('расписание показывает то, что впереди, а 
   fireEvent.click(screen.getByRole('button', { name: 'Показать прошедшие (1)' }));
   expect(screen.getByText('Уже прошло')).toBeInTheDocument();
 });
+
+test('начавшееся событие без времени окончания держится полчаса', async () => {
+  // Решение пользователя 09.09.2026. Прежнее правило считало такое событие
+  // прошедшим в ту же минуту, как оно началось: конец «не позже начала»
+  // формально уже позади, и мероприятие исчезало на глазах.
+  const minute = 60_000;
+  mockedApi.get.mockImplementation((url: string) => (url === '/tasks'
+    ? Promise.resolve({ data: [] })
+    : Promise.resolve({
+      data: {
+        events: [
+          {
+            id: 1, event_id: 1, title: 'Только началось',
+            starts_at: Date.now() - 5 * minute, ends_at: Date.now() - 5 * minute,
+            occurrence_start: Date.now() - 5 * minute,
+          },
+          {
+            id: 2, event_id: 2, title: 'Началось давно',
+            starts_at: Date.now() - 40 * minute, ends_at: Date.now() - 40 * minute,
+            occurrence_start: Date.now() - 40 * minute,
+          },
+        ],
+        birthdays: [],
+      },
+    })));
+
+  setup(0);
+
+  await waitFor(() => expect(screen.getByText('Только началось')).toBeInTheDocument());
+  expect(screen.queryByText('Началось давно')).toBeNull();
+  // И то, что ушло, не потеряно — оно за кнопкой.
+  fireEvent.click(screen.getByRole('button', { name: 'Показать прошедшие (1)' }));
+  expect(screen.getByText('Началось давно')).toBeInTheDocument();
+});

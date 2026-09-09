@@ -112,6 +112,14 @@ interface StatTile {
 /** Как часто пересчитывается «сейчас». Минута — цена ошибки подписи. */
 const NOW_TICK_MS = 30000;
 
+/**
+ * Сколько держать на виду начавшееся событие, у которого нет времени окончания.
+ *
+ * Спрятать его сразу нельзя — оно только что началось; держать до полуночи
+ * тоже: расписание тогда снова растёт. Полчаса — решение пользователя.
+ */
+const NO_END_VISIBLE_MS = 30 * 60 * 1000;
+
 const stroke = {
   viewBox: '0 0 24 24',
   fill: 'none',
@@ -265,7 +273,17 @@ const HomeSection: React.FC<Props> = ({
    * Идущее сейчас и события на весь день остаются наверху всегда: это и есть
    * ответ про «прямо сейчас».
    */
-  const isPast = (event: DayEvent) => !event.allDay && event.endAt <= now;
+  const isPast = (event: DayEvent) => {
+    if (event.allDay) return false;
+    // Конец известен — прячем ровно тогда, когда он прошёл.
+    if (event.endAt > event.startAt) return event.endAt <= now;
+    // Конца нет — показываем полчаса от начала (решение пользователя
+    // 09.09.2026). Прежнее правило считало такое событие прошедшим в ту же
+    // минуту, как оно началось: конец «не позже начала» формально уже позади.
+    // Придумывать событию длительность мы не вправе, а полчаса — не
+    // длительность, а срок, на который оно остаётся на виду.
+    return now > event.startAt + NO_END_VISIBLE_MS;
+  };
   const pastEvents = (events || []).filter(isPast);
   const visibleEvents = showPast ? (events || []) : (events || []).filter((event) => !isPast(event));
 
