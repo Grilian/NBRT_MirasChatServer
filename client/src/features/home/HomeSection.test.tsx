@@ -246,3 +246,30 @@ describe('«сколько у меня есть» до ближайшего со
     expect(untilLabel(now + 21 * 60_000, now)).toBe('через 21 минуту');
   });
 });
+
+test('расписание показывает то, что впереди, а прошедшее прячет за кнопку', async () => {
+  // Жалоба с прода 09.09.2026: двадцать одно мероприятие превращало «Главную»
+  // в бесконечную ленту, и «Требует внимания» уезжало за нижний край. К
+  // середине дня половина списка — уже история.
+  const hour = 3600_000;
+  mockedApi.get.mockImplementation((url: string) => (url === '/tasks'
+    ? Promise.resolve({ data: [] })
+    : Promise.resolve({
+      data: {
+        events: [
+          { id: 1, event_id: 1, title: 'Уже прошло', starts_at: Date.now() - 3 * hour, ends_at: Date.now() - 2 * hour, occurrence_start: Date.now() - 3 * hour },
+          { id: 2, event_id: 2, title: 'Ещё впереди', starts_at: Date.now() + hour, ends_at: Date.now() + 2 * hour, occurrence_start: Date.now() + hour },
+        ],
+        birthdays: [],
+      },
+    })));
+
+  setup(0);
+
+  await waitFor(() => expect(screen.getByText('Ещё впереди')).toBeInTheDocument());
+  expect(screen.queryByText('Уже прошло')).toBeNull();
+
+  // Прошедшее не удалено — за ним иногда возвращаются.
+  fireEvent.click(screen.getByRole('button', { name: 'Показать прошедшие (1)' }));
+  expect(screen.getByText('Уже прошло')).toBeInTheDocument();
+});

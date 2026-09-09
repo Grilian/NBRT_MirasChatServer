@@ -704,16 +704,39 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               приложениям устанавливать пакеты без своего диалога. Поэтому здесь,
               в отличие от десктопа, кнопка обязательна — она открывает ссылку на
               APK, дальше скачивание и установку ведёт сам Android. */}
-          {mobileUpdate && (
+          {/* На телефоне раздел показывался ТОЛЬКО когда есть обновление — а
+              когда его нет, вкладка «Приложение» оставалась пустым экраном
+              (жалоба с прода 09.09.2026). Версия и состояние проверки нужны
+              человеку как раз тогда, когда обновления нет: чтобы понять, что
+              он на свежем, а не что раздел сломан. */}
+          {isNativeMobile && (
             <>
               <div className="settings-section-title">Приложение</div>
               <div className="settings-group">
-                <button type="button" className="settings-row" onClick={() => openMobileUpdate(mobileUpdate.url)}>
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
-                  <span className="label">Доступна версия {mobileUpdate.versionName}</span>
-                  <span className="value is-action">Обновить</span>
-                </button>
+                <div className="settings-row static">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M11 18h2" /></svg>
+                  <span className="label">Установленная версия</span>
+                  <span className="value">{appVersion ?? APP_VERSION}</span>
+                </div>
+                {mobileUpdate ? (
+                  <button type="button" className="settings-row" onClick={() => openMobileUpdate(mobileUpdate.url)}>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12" /><path d="m7 12 5 5 5-5" /><path d="M5 21h14" /></svg>
+                    <span className="label">Доступна версия {mobileUpdate.versionName}</span>
+                    <span className="value is-action">Обновить</span>
+                  </button>
+                ) : (
+                  <div className="settings-row static">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
+                    <span className="label">Обновлений нет</span>
+                    <span className="value">Установлена последняя</span>
+                  </div>
+                )}
               </div>
+              <p className="settings-hint">
+                Android не даёт приложениям ставить обновления молча, поэтому
+                новая версия скачивается и устанавливается через системный
+                диалог.
+              </p>
             </>
           )}
           {/* После обновления навигации шапка списка чатов на широком экране

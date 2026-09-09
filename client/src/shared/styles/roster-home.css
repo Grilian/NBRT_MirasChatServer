@@ -138,9 +138,13 @@ button.home-tab:hover { color: var(--ink); }
 /* ---- Три плитки сводки ---- */
 /* auto-fit + minmax: на широком экране три в ряд, на узком — одна под другой,
    без второго набора правил в медиазапросе. */
+/* ТРИ в ряд всегда, включая телефон: раньше при узком экране плитки вставали
+   столбиком и съедали пол-экрана до того, как человек дошёл до расписания
+   («на главном экране потеря пространства», 09.09.2026). Значки прежнего
+   размера — ужимается раскладка, а не содержимое. */
 .home-stats {
   display: grid; gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .home-stat {
   display: flex; align-items: center; gap: var(--space-3);
@@ -265,6 +269,15 @@ button.home-tab:hover { color: var(--ink); }
 .home-event.is-past .home-event-time { color: var(--ink-faint); }
 .home-event.is-past .home-event-title { color: var(--ink-muted); }
 
+/* Прошедшее сегодня свёрнуто: на «Главную» заходят с вопросом «что дальше».
+   Кнопка тихая — это не действие дня, а возможность вернуться. */
+.home-schedule-past {
+  flex: none; align-self: flex-start; margin-top: var(--space-2);
+  padding: 4px 2px; border: none; background: none; cursor: pointer;
+  color: var(--accent); font: 500 var(--text-sm)/1.3 var(--font-ui);
+}
+.home-schedule-past:hover { text-decoration: underline; }
+
 .home-attention {
   display: flex; align-items: center; gap: var(--space-3); width: 100%;
   padding: var(--space-3); cursor: pointer; text-align: left; color: inherit;
@@ -328,6 +341,14 @@ button.home-tab:hover { color: var(--ink); }
      то в страницу. */
   .home-col-side, .home-schedule { overflow: visible; }
   .home-schedule { flex: none; }
+
+  /* Плитки на телефоне — столбиком внутри себя: значок, число, подпись. В
+     строку по горизонтали они бы не поместились втроём, а вертикально ужатая
+     плитка занимает 110px ширины и не режет ни одну подпись. */
+  .home-stats { gap: var(--space-2); }
+  .home-stat { flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-3); }
+  .home-stat .home-go { display: none; }
+  .home-stat-count { font-size: var(--text-lg); }
 }
 
 /* ===== Окно статуса ===== */

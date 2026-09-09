@@ -239,6 +239,8 @@ const HomeSection: React.FC<Props> = ({
   // «Сейчас» обязано двигаться само: «Главную» держат открытой весь день, и
   // подпись, застывшая на утреннем часе, врёт заметнее, чем её отсутствие.
   const [now, setNow] = useState(() => Date.now());
+  /** Прошедшее сегодня — свёрнуто: на «Главную» заходят с вопросом «что дальше». */
+  const [showPast, setShowPast] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), NOW_TICK_MS);
     return () => clearInterval(timer);
@@ -251,6 +253,22 @@ const HomeSection: React.FC<Props> = ({
   // ближайшему) событию ОДИН раз, когда список пришёл. Иначе человек, зашедший
   // в четыре часа дня, видит утро и должен листать до себя. Повторно не
   // трогаем: увести список из-под руки в момент чтения хуже, чем не угадать.
+  /**
+   * Расписание показывает то, что ВПЕРЕДИ, а прошедшее прячет за кнопку.
+   *
+   * На дне с двадцатью мероприятиями «Главная» превращалась в бесконечную
+   * ленту, и «Требует внимания» уезжало за нижний край экрана (жалоба с прода
+   * 09.09.2026). При этом к четырём часам дня половина списка — уже история:
+   * она отвечает на вопрос «что было», а на «Главную» заходят с вопросом «что
+   * дальше». Прошедшее не удалено, а свёрнуто: за ним иногда возвращаются.
+   *
+   * Идущее сейчас и события на весь день остаются наверху всегда: это и есть
+   * ответ про «прямо сейчас».
+   */
+  const isPast = (event: DayEvent) => !event.allDay && event.endAt <= now;
+  const pastEvents = (events || []).filter(isPast);
+  const visibleEvents = showPast ? (events || []) : (events || []).filter((event) => !isPast(event));
+
   const runningEvent = (events || []).find((event) => isRunningAt(event.startAt, event.endAt, event.allDay, now));
   const focusId = runningEvent?.id ?? nextEvent?.id ?? null;
   const focusRow = useRef<HTMLLIElement | null>(null);
@@ -343,9 +361,12 @@ const HomeSection: React.FC<Props> = ({
           {events !== null && events.length === 0 && (
             <p className="home-panel-note">На сегодня ничего не назначено.</p>
           )}
-          {events !== null && events.length > 0 && (
+          {events !== null && events.length > 0 && visibleEvents.length === 0 && (
+            <p className="home-panel-note">На сегодня всё — мероприятия закончились.</p>
+          )}
+          {events !== null && visibleEvents.length > 0 && (
             <ul className="home-schedule">
-              {events.map((event) => (
+              {visibleEvents.map((event) => (
                 <li key={event.id} ref={event.id === focusId ? focusRow : undefined}>
                   <button
                     type="button"
@@ -372,6 +393,17 @@ const HomeSection: React.FC<Props> = ({
                 </li>
               ))}
             </ul>
+          )}
+          {pastEvents.length > 0 && (
+            <button
+              type="button"
+              className="home-schedule-past"
+              onClick={() => setShowPast((value) => !value)}
+            >
+              {showPast
+                ? 'Скрыть прошедшие'
+                : `Показать прошедшие (${pastEvents.length})`}
+            </button>
           )}
         </section>
 
