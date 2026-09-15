@@ -227,25 +227,32 @@ test('файлы делятся на документы, изображения,
   assert.equal(byName['запись'], 'music');
 });
 
-// ===== Окно истории «от сообщения» =====
+// ===== Окно истории вокруг сообщения и листание в обе стороны =====
 
-test('история отдаёт окно от указанного сообщения до низа ленты', async () => {
+test('окно вокруг сообщения берёт историю с обеих сторон от него', async () => {
   const { a, chatId } = seedChat('window');
   const insert = db.prepare('INSERT INTO messages (chat_id, sender_id, text) VALUES (?, ?, ?)');
   const ids = [];
   for (let i = 0; i < 120; i += 1) ids.push(Number(insert.run(chatId, a, `строка ${i}`).lastInsertRowid));
 
-  const target = ids[5];
-  const { data } = await request(`/api/messages/${chatId}?from=${target}`, { token: tokenFor(a) });
+  const target = ids[60];
+  const { data } = await request(`/api/messages/${chatId}?around=${target}&limit=20`, { token: tokenFor(a) });
 
-  assert.equal(data.truncated, false);
-  assert.equal(data.messages[0].id, target, 'окно начинается не с искомого сообщения');
-  assert.equal(data.messages[data.messages.length - 1].id, ids[ids.length - 1], 'низ ленты потерян');
-  // Выше искомого ещё есть история — значит подгрузка вверх обязана остаться.
-  assert.equal(data.hasMore, true);
+  assert.ok(data.messages.some((m) => m.id === target), 'искомого сообщения нет в окне');
+  assert.ok(data.messages[0].id < target, 'выше искомого ничего не взяли');
+  assert.ok(data.messages[data.messages.length - 1].id > target, 'ниже искомого ничего не взяли');
+  assert.equal(data.hasMoreUp, true);
+  assert.equal(data.hasMoreDown, true);
+
+  const sorted = [...data.messages].sort((x, y) => x.id - y.id);
+  assert.deepEqual(data.messages.map((m) => m.id), sorted.map((m) => m.id), 'окно отдано не по порядку');
 });
 
-test('слишком далёкое сообщение честно помечается обрезанным, а не отдаёт дыру', async () => {
+test('далёкое сообщение открывается окном, а не отказом', async () => {
+  // Прежняя выдача брала «от сообщения и до низа ленты» с пределом в 500 строк
+  // и всё, что дальше, отдавала пустым с признаком truncated: подгружать вниз
+  // клиент не умел. Ровно этот случай — переход к старому сообщению в живом
+  // чате — и был основным для Следов.
   const { a, chatId } = seedChat('far');
   const insert = db.prepare('INSERT INTO messages (chat_id, sender_id, text) VALUES (?, ?, ?)');
   let first = null;
@@ -254,7 +261,33 @@ test('слишком далёкое сообщение честно помеча
     if (first === null) first = id;
   }
 
-  const { data } = await request(`/api/messages/${chatId}?from=${first}`, { token: tokenFor(a) });
-  assert.equal(data.truncated, true);
-  assert.equal(data.messages.length, 0, 'обрезанное окно всё равно отдано — в ленте будет дыра');
+  const { data } = await request(`/api/messages/${chatId}?around=${first}`, { token: tokenFor(a) });
+  assert.ok(data.messages.some((m) => m.id === first), 'до сообщения так и не добрались');
+  assert.equal(data.hasMoreUp, false, 'выше самого первого сообщения ничего быть не может');
+  assert.equal(data.hasMoreDown, true);
+  assert.equal(data.truncated, undefined, 'признак обрезки должен был исчезнуть вместе с режимом');
+});
+
+test('страница вниз продолжает ленту и молчит про верх', async () => {
+  const { a, chatId } = seedChat('after');
+  const insert = db.prepare('INSERT INTO messages (chat_id, sender_id, text) VALUES (?, ?, ?)');
+  const ids = [];
+  for (let i = 0; i < 40; i += 1) ids.push(Number(insert.run(chatId, a, `вниз ${i}`).lastInsertRowid));
+
+  const { data } = await request(`/api/messages/${chatId}?after=${ids[10]}&limit=5`, { token: tokenFor(a) });
+
+  assert.deepEqual(data.messages.map((m) => m.id), ids.slice(11, 16));
+  assert.equal(data.hasMoreDown, true);
+  assert.equal(data.hasMoreUp, undefined, 'страница вниз не знает, что делается выше, и не должна отвечать за это');
+});
+
+test('последняя страница знает, что ниже неё ничего нет', async () => {
+  const { a, chatId } = seedChat('tail');
+  const insert = db.prepare('INSERT INTO messages (chat_id, sender_id, text) VALUES (?, ?, ?)');
+  for (let i = 0; i < 60; i += 1) insert.run(chatId, a, `хвост ${i}`);
+
+  const { data } = await request(`/api/messages/${chatId}?limit=20`, { token: tokenFor(a) });
+  assert.equal(data.messages.length, 20);
+  assert.equal(data.hasMoreUp, true);
+  assert.equal(data.hasMoreDown, false);
 });

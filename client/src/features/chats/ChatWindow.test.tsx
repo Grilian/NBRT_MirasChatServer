@@ -517,7 +517,7 @@ test('аппаратный «Назад» снимает выделение, а 
       currentUserId={1}
       showAuthors={false}
       onScrollTop={() => {}}
-      hasMore={false}
+      hasMoreUp={false}
       loadingMore={false}
       unreadCount={0}
       onStartEdit={() => {}}

@@ -30,6 +30,32 @@ test('keeps the same visible message in place after history is prepended', () =>
   expect(container.scrollTop).toBe(220);
 });
 
+test('оставляет человека там, куда он долистал, пока ехала страница', () => {
+  // Инерционный бросок на телефоне продолжается всё время ожидания ответа.
+  // Прежняя версия возвращала якорное сообщение в положение НА МОМЕНТ ЗАПРОСА
+  // и отматывала весь этот путь назад — это и выглядело как скачок ленты.
+  const container = document.createElement('div');
+  const first = document.createElement('div');
+  first.dataset.msgId = '10';
+  container.append(first);
+  Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 600 });
+  container.scrollTop = 20;
+
+  const snapshot = captureScrollAnchor(container);
+
+  // Пока ответ едет, человек листает дальше. Высота при этом не меняется, и
+  // снимок, обновляемый на каждом событии прокрутки, остаётся верным.
+  container.scrollTop = 300;
+
+  const older = document.createElement('div');
+  older.dataset.msgId = '9';
+  container.prepend(older);
+  Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 800 });
+
+  expect(restoreScrollAnchor(container, snapshot)).toBe(true);
+  expect(container.scrollTop).toBe(500);
+});
+
 test('does not consume the history anchor when content only grows at the bottom', () => {
   const container = document.createElement('div');
   const message = document.createElement('div');

@@ -91,6 +91,30 @@ test('входящее в открытый чат попадает в ленту
   });
 });
 
+test('входящее НЕ дописывается к окну вокруг старого сообщения', async () => {
+  // Лента может стоять не на хвосте переписки, а на окне вокруг старого
+  // сообщения (переход к источнику, вложению, цитате). Между этим окном и
+  // новым входящим лежат ещё не загруженные страницы, и приклеить его к концу
+  // окна значило бы выдать ленту с дырой за непрерывную. Счётчик при этом
+  // обязан сработать как обычно: сообщение пришло, просто показывать его
+  // здесь пока негде.
+  api.reply('/messages/general', {
+    messages: [message({ id: 1, chat_id: 'general', text: 'старое' })],
+    hasMoreUp: true,
+    hasMoreDown: true,
+  });
+  await mount();
+  await act(async () => { props.ChatList.onSelectChat('general'); });
+  await waitFor(() => expect(props.ChatWindow.hasMoreDown).toBe(true));
+
+  await act(async () => {
+    socket.fire('chat_message', message({ id: 999, chat_id: 'general', text: 'самое свежее' }));
+  });
+
+  await waitFor(() => expect(props.ChatList.unreadCounts.general).toBe(1));
+  expect(props.ChatWindow.messages.map((m: any) => m.text)).not.toContain('самое свежее');
+});
+
 test('открытый чат при НЕ сфокусированном окне всё равно считается непрочитанным', async () => {
   // Ключевое правило, и оно неочевидное: «чат открыт» — ещё не «человек это
   // видит». Свёрнутое в трей окно с открытым чатом раньше считалось

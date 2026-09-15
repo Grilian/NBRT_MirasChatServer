@@ -161,7 +161,7 @@ const DEFAULT_GET: Array<[string, any]> = [
   ['/messages/meta/last', {}],
   ['/messages/meta/recent', []],
   ['/messages/threads', { messages: [] }],
-  ['/messages/', { messages: [], hasMore: false }],
+  ['/messages/', { messages: [], hasMoreUp: false, hasMoreDown: false }],
 ];
 
 export interface FakeApi {

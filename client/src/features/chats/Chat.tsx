@@ -44,7 +44,7 @@ import NotificationStack, { ToastNotification } from '@/features/notifications/N
 import api from '@/shared/api/client';
 import type { ChatGroupSummary, LastMessage, Message, User } from '@/shared/api/types';
 import {
-  archiveAttachment, clearChat, fetchHistory, fetchHistoryBefore, fetchHistoryFrom,
+  archiveAttachment, clearChat, fetchHistory, fetchHistoryAfter, fetchHistoryAround, fetchHistoryBefore,
   fetchLastMessages, fetchRecentChats, fetchUnread, markChatOpened, markThreadRead,
   setChatMuted, uploadFile, uploadImage,
   fetchPinnedChats, pinChat, unpinChat, fetchMutedChats,
@@ -341,7 +341,20 @@ const Chat: React.FC = () => {
   const [editingMessage, setEditingMessage] = useState<EditingMessage | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [comments, setComments] = useState<Record<number, { username: string; display_name: string | null; comment: string }>>({});
-  const [hasMore, setHasMore] = useState(true);
+  // Два независимых предела, а не один: лента может стоять на окне вокруг
+  // старого сообщения, и тогда непрочитанные страницы есть с ОБЕИХ сторон.
+  const [hasMoreUp, setHasMoreUp] = useState(true);
+  const [hasMoreDown, setHasMoreDown] = useState(false);
+  // Обработчик входящих читает это из замыкания сокета — через ref, как и
+  // остальное живое состояние.
+  const hasMoreDownRef = useRef(false);
+  hasMoreDownRef.current = hasMoreDown;
+
+  /** Применить страницу, не трогая ту сторону, про которую она молчит. */
+  const applyPageLimits = (page: { hasMoreUp?: boolean; hasMoreDown?: boolean }) => {
+    if (page.hasMoreUp !== undefined) setHasMoreUp(page.hasMoreUp);
+    if (page.hasMoreDown !== undefined) setHasMoreDown(page.hasMoreDown);
+  };
 
   // Переход к сообщению из карточки вложений. Два разных состояния, и путать
   // их нельзя: focusMessageId — «прокрутить к этому», pendingFocusRef — «когда
@@ -1465,7 +1478,7 @@ const Chat: React.FC = () => {
             // уже чужая и применять её нельзя.
             if (resumeRef.current.activeChat !== liveActiveChat) return;
             setMessages(data.messages);
-            setHasMore(data.hasMore);
+            applyPageLimits(data);
           })
           .catch(console.error);
       }
@@ -1512,7 +1525,13 @@ const Chat: React.FC = () => {
       // перезапуск приложения сам себя чинил именно потому, что React-стейт
       // просто пересоздавался с нуля — а на самом деле дублировалось само
       // событие, а не запись в БД.
-      if (isActiveChat) {
+      // Дописывать можно только к загруженному ХВОСТУ переписки. Если лента
+      // стоит на окне вокруг старого сообщения, между ним и новым входящим
+      // лежат ещё не загруженные страницы, и приклеить его к концу окна значило
+      // бы нарисовать ленту с дырой, выдав её за непрерывную. Сообщение никуда
+      // не денется — оно приедет вместе со страницей, когда человек долистает
+      // вниз или нажмёт «вниз».
+      if (isActiveChat && !hasMoreDownRef.current) {
         setMessages(prev => prev.some(m => (
           m.id === message.id
           || (!!message.client_message_id && m.client_message_id === message.client_message_id)
@@ -1763,35 +1782,22 @@ const Chat: React.FC = () => {
       let cancelled = false;
 
       setMessages([]);
-      setHasMore(true);
+      setHasMoreUp(true);
+      setHasMoreDown(false);
       loadingMoreRef.current = false;
-      // Переход к вложению: грузим окно «от сообщения и до низа», а не
-      // последнюю страницу — иначе искомого в ленте просто нет, и прокручивать
-      // будет не к чему.
+      // Переход к сообщению: грузим окно ВОКРУГ него, а не последнюю страницу —
+      // иначе искомого в ленте просто нет, и прокручивать будет не к чему.
+      // Насколько оно старое, больше не важно: ниже окна лента догрузится сама.
       const focusTarget = pendingFocusRef.current;
       pendingFocusRef.current = null;
       const load = focusTarget !== null
-        ? fetchHistoryFrom(activeChat, focusTarget)
+        ? fetchHistoryAround(activeChat, focusTarget)
         : fetchHistory(activeChat);
       load
         .then((data) => {
           if (cancelled) return;
-          // Сообщение слишком далеко: окно вышло бы больше предела, и лента
-          // получилась бы с дырой. Показываем конец переписки как обычно и
-          // говорим об этом прямо, а не молча открываем не то место.
-          if (data.truncated) {
-            setAttachmentNotice('Сообщение слишком далеко в истории — пролистайте переписку вверх');
-            fetchHistory(activeChat)
-              .then((fallback) => {
-                if (cancelled) return;
-                setMessages(fallback.messages);
-                setHasMore(fallback.hasMore);
-              })
-              .catch(console.error);
-            return;
-          }
           setMessages(data.messages);
-          setHasMore(data.hasMore);
+          applyPageLimits(data);
           if (focusTarget !== null) setFocusMessageId(focusTarget);
         })
         .catch(console.error);
@@ -1836,7 +1842,7 @@ const Chat: React.FC = () => {
   // перезахода в приложение (перезаход просто перечитывал историю с сервера).
   // Ref обновляется синхронно, поэтому второй вызов отсекается сразу.
   const loadMoreMessages = async () => {
-    if (!activeChat || loadingMoreRef.current || !hasMore || messages.length === 0) return;
+    if (!activeChat || loadingMoreRef.current || !hasMoreUp || messages.length === 0) return;
 
     const oldestId = messages[0].id;
     loadingMoreRef.current = true;
@@ -1851,13 +1857,54 @@ const Chat: React.FC = () => {
           const fresh = data.messages.filter((m: Message) => !known.has(m.id));
           return fresh.length ? [...fresh, ...prev] : prev;
         });
-        setHasMore(data.hasMore);
+        applyPageLimits(data);
       }
     } catch (e) {
       console.error('Ошибка загрузки:', e);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
+    }
+  };
+
+  // Подгрузка вниз. Нужна только когда лента стоит на окне вокруг старого
+  // сообщения: при обычном открытии чата низ загружен и hasMoreDown = false.
+  // Защёлка та же самая — две страницы разом ленту порвут одинаково, с какой
+  // стороны их ни дописывай.
+  const loadMoreMessagesDown = async () => {
+    if (!activeChat || loadingMoreRef.current || !hasMoreDown || messages.length === 0) return;
+
+    const newestId = messages[messages.length - 1].id;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const data = await fetchHistoryAfter(activeChat, newestId);
+      setMessages(prev => {
+        const known = new Set(prev.map(m => m.id));
+        const fresh = data.messages.filter((m: Message) => !known.has(m.id));
+        return fresh.length ? [...prev, ...fresh] : prev;
+      });
+      applyPageLimits(data);
+    } catch (e) {
+      console.error('Ошибка загрузки:', e);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  };
+
+  // Кнопка «вниз», когда низ переписки не загружен: прокручивать некуда,
+  // перечитываем последнюю страницу целиком. Догонять хвост страницами было бы
+  // тем же десятком запросов подряд, от которых ушли в окне вокруг сообщения.
+  const jumpToLatestMessages = async () => {
+    if (!activeChat) return;
+    try {
+      const data = await fetchHistory(activeChat);
+      setMessages(data.messages);
+      applyPageLimits(data);
+      setFocusMessageId(null);
+    } catch (e) {
+      console.error('Ошибка загрузки:', e);
     }
   };
 
@@ -2068,7 +2115,8 @@ const Chat: React.FC = () => {
     // по старой геометрии, а настоящая история приедет чуть позже.
     if (chatId !== activeChat) {
       setMessages([]);
-      setHasMore(true);
+      setHasMoreUp(true);
+      setHasMoreDown(false);
       loadingMoreRef.current = false;
     }
     setActiveChat(chatId);
@@ -2503,14 +2551,10 @@ const Chat: React.FC = () => {
         setFocusMessageId(messageId);
         return;
       }
-      fetchHistoryFrom(targetChat, messageId)
+      fetchHistoryAround(targetChat, messageId)
         .then((data) => {
-          if (data.truncated) {
-            setAttachmentNotice('Сообщение слишком далеко в истории — пролистайте переписку вверх');
-            return;
-          }
           setMessages(data.messages);
-          setHasMore(data.hasMore);
+          applyPageLimits(data);
           setFocusMessageId(messageId);
         })
         .catch(() => setAttachmentNotice('Не удалось открыть сообщение'));
@@ -3675,7 +3719,11 @@ const Chat: React.FC = () => {
             showAuthors={activeChat === GENERAL_CHAT_ID || activeChatMeta?.section === 'group'}
             onDeleteMessages={requestDelete}
             onScrollTop={loadMoreMessages}
-            hasMore={hasMore}
+            onScrollBottom={loadMoreMessagesDown}
+            onJumpToLatest={jumpToLatestMessages}
+            onRequestMessage={(id) => { if (activeChat) handleOpenMessage(activeChat, id); }}
+            hasMoreUp={hasMoreUp}
+            hasMoreDown={hasMoreDown}
             loadingMore={loadingMore}
             unreadCount={activeChat ? unreadCounts[activeChat] : 0}
             onStartEdit={(id, text) => setEditingMessage({ id, text })}

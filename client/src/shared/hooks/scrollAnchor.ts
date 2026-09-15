@@ -1,9 +1,17 @@
 export interface ScrollAnchorSnapshot {
+  /** Верхнее сообщение на момент снимка — по нему видно, что страница реально пришла. */
   firstMessageId: string | null;
-  anchorMessageId: string | null;
-  anchorOffset: number;
+  /**
+   * Высота содержимого ДО того, как страница встала в ленту.
+   *
+   * Обновляется на каждом событии прокрутки, пока ответ едет, — и это главное
+   * в снимке. Прежняя версия запоминала положение якорного сообщения в момент
+   * ЗАПРОСА и после ответа возвращала его туда же: всё, что человек успевал
+   * пролистать за время ожидания (а на телефоне это инерционный бросок),
+   * отматывалось назад. Прирост высоты от такого ожидания не зависит — он
+   * прибавляется к ТЕКУЩЕЙ позиции, какой бы она ни стала.
+   */
   scrollHeight: number;
-  scrollTop: number;
 }
 
 export function didAppendNewestMessage(
@@ -19,38 +27,21 @@ export function didAppendNewestMessage(
 const messageNodes = (container: HTMLElement): HTMLElement[] =>
   Array.from(container.querySelectorAll<HTMLElement>('[data-msg-id]'));
 
-/** Сохраняет сообщение, которое пользователь видит у верхней границы ленты. */
 export function captureScrollAnchor(container: HTMLElement): ScrollAnchorSnapshot {
-  const nodes = messageNodes(container);
-  const containerRect = container.getBoundingClientRect();
-  const anchor = nodes.find((node) => node.getBoundingClientRect().bottom > containerRect.top) || null;
-
   return {
-    firstMessageId: nodes[0]?.dataset.msgId || null,
-    anchorMessageId: anchor?.dataset.msgId || null,
-    anchorOffset: anchor ? anchor.getBoundingClientRect().top - containerRect.top : 0,
+    firstMessageId: messageNodes(container)[0]?.dataset.msgId || null,
     scrollHeight: container.scrollHeight,
-    scrollTop: container.scrollTop,
   };
 }
 
 /**
- * Восстанавливает положение только после реального добавления сообщений сверху.
- * Изменение высоты снизу (например, новое входящее сообщение) не расходует якорь.
+ * Восстанавливает положение только после реального добавления сообщений СВЕРХУ.
+ * Изменение высоты снизу (новое входящее, страница вниз) якорь не расходует:
+ * там содержимое не съезжает и поправлять нечего.
  */
 export function restoreScrollAnchor(container: HTMLElement, snapshot: ScrollAnchorSnapshot): boolean {
-  const nodes = messageNodes(container);
-  if ((nodes[0]?.dataset.msgId || null) === snapshot.firstMessageId) return false;
+  if ((messageNodes(container)[0]?.dataset.msgId || null) === snapshot.firstMessageId) return false;
 
-  const anchor = snapshot.anchorMessageId
-    ? nodes.find((node) => node.dataset.msgId === snapshot.anchorMessageId)
-    : null;
-
-  if (anchor) {
-    const currentOffset = anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    container.scrollTop += currentOffset - snapshot.anchorOffset;
-  } else {
-    container.scrollTop = snapshot.scrollTop + Math.max(0, container.scrollHeight - snapshot.scrollHeight);
-  }
+  container.scrollTop += Math.max(0, container.scrollHeight - snapshot.scrollHeight);
   return true;
 }

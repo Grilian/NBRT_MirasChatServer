@@ -33,7 +33,20 @@ interface ChatWindowProps {
   /** Показывать имя автора над сообщением — нужно только в общем чате */
   showAuthors?: boolean;
   onScrollTop?: () => void;
-  hasMore?: boolean;
+  /** Догрузить страницу НИЖЕ — лента может стоять на окне вокруг старого сообщения. */
+  onScrollBottom?: () => void;
+  hasMoreUp?: boolean;
+  hasMoreDown?: boolean;
+  /**
+   * Вернуться к самому низу переписки, когда он не загружен.
+   *
+   * Прокрутить туда нечего: под последним загруженным сообщением лежит не дно
+   * ленты, а следующая страница. Кнопка «вниз» в этом случае обязана
+   * перезагрузить хвост, а не ехать к краю уже загруженного.
+   */
+  onJumpToLatest?: () => void;
+  /** Подгрузить окно вокруг сообщения, которого нет в ленте (цитата выше истории). */
+  onRequestMessage?: (id: number) => void;
   loadingMore?: boolean;
   /** Непрочитанные в этом чате — цифра на кнопке «вниз», как в Telegram */
   unreadCount?: number;
@@ -197,7 +210,8 @@ function buildRows(messages: Message[]): RenderedRow[] {
 }
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
-  chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, hasMore, loadingMore, unreadCount,
+  chatId, messages: rawMessages, currentUserId, showAuthors, onScrollTop, onScrollBottom,
+  hasMoreUp, hasMoreDown, onJumpToLatest, onRequestMessage, loadingMore, unreadCount,
   focusMessageId, onFocusHandled, onNotice,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, stickerCatalog = {}, onToggleReaction, onRemoveReaction,
@@ -546,34 +560,59 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!messagesContainerRef.current) return;
 
     const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+    // «Внизу» — это дно ПЕРЕПИСКИ, а не дно загруженного куска. Пока ниже есть
+    // непрочитанные страницы, лента не должна ни прилипать к краю, ни уезжать
+    // туда от нового входящего: человек стоит на окне вокруг старого
+    // сообщения, и рывок в конец переписки — последнее, чего он ждёт.
+    const isAtBottom = distanceToBottom < 50 && !hasMoreDown;
     shouldScrollRef.current = isAtBottom;
     setShouldScrollToBottom(isAtBottom);
     // Порог был 300px — на коротком экране до него попросту не долистать, и
     // кнопка не появлялась вовсе. Хватает одного «экранчика» отступа от низа.
-    setShowJumpButton(scrollHeight - scrollTop - clientHeight > 120);
+    setShowJumpButton(distanceToBottom > 120 || !!hasMoreDown);
 
-    if (!initialPinRef.current && scrollTop < 150 && onScrollTop && hasMore && !loadingMore) {
+    // Снимок высоты держим свежим всё время, пока страница едет: прирост
+    // прибавится к текущему положению, а не к тому, где человек был в момент
+    // запроса (см. scrollAnchor).
+    if (pendingRestoreRef.current) pendingRestoreRef.current.scrollHeight = scrollHeight;
+
+    if (!initialPinRef.current && scrollTop < 150 && onScrollTop && hasMoreUp && !loadingMore) {
       pendingRestoreRef.current = captureScrollAnchor(messagesContainerRef.current);
       onScrollTop();
+    }
+
+    // Вниз якорь не нужен: страница встаёт под уже показанным, ничего не
+    // съезжает и поправлять нечего.
+    if (!initialPinRef.current && distanceToBottom < 150 && onScrollBottom && hasMoreDown && !loadingMore) {
+      onScrollBottom();
     }
   };
 
   const jumpToBottom = () => {
+    // Низ переписки не загружен — прокручивать некуда, нужен запрос.
+    if (hasMoreDown && onJumpToLatest) {
+      onJumpToLatest();
+      return;
+    }
     shouldScrollRef.current = true;
     setShouldScrollToBottom(true);
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Клик по цитате уводит к исходному сообщению. Если оно ещё не подгружено
-  // (осталось выше по истории) — подсвечивать нечего, молча ничего не делаем:
-  // дотягивать историю до произвольного id пришлось бы отдельной ручкой.
+  // Клик по цитате уводит к исходному сообщению. Пока окна вокруг сообщения не
+  // было, цитата на всё, что осталось выше загруженного, молча не работала:
+  // «дотягивать историю до произвольного id пришлось бы отдельной ручкой». Ручка
+  // появилась вместе с двусторонней подгрузкой — просим окно и не молчим.
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const jumpToMessage = (id: number) => {
     const node = messagesContainerRef.current?.querySelector(`[data-msg-id="${id}"]`);
-    if (!node) return;
+    if (!node) {
+      onRequestMessage?.(id);
+      return;
+    }
     node.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setHighlightedId(id);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);

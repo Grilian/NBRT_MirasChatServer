@@ -13,7 +13,7 @@ export const HISTORY_PAGE_SIZE = 50;
 
 /** Последняя страница переписки — то, что видно при открытии чата. */
 export async function fetchHistory(chatId: string): Promise<HistoryPage> {
-  const { data } = await api.get(`/messages/${chatId}?limit=${HISTORY_PAGE_SIZE}&offset=0`);
+  const { data } = await api.get(`/messages/${chatId}?limit=${HISTORY_PAGE_SIZE}`);
   return normalizePage(data);
 }
 
@@ -23,25 +23,25 @@ export async function fetchHistoryBefore(chatId: string, beforeId: number): Prom
   return normalizePage(data);
 }
 
-/**
- * Окно «от сообщения и до низа ленты» — переход к вложению из карточки чата.
- *
- * Листать до него постранично значило бы десяток запросов подряд. Окно
- * оставляет НИЗ ленты загруженным, поэтому обычная прокрутка и подгрузка вверх
- * продолжают работать. Слишком далёкое сообщение приходит с `truncated`.
- */
-export async function fetchHistoryFrom(chatId: string, messageId: number): Promise<HistoryPage> {
-  const { data } = await api.get(`/messages/${chatId}?from=${messageId}`);
+/** Страница ниже уже загруженного — подгрузка при прокрутке вниз. */
+export async function fetchHistoryAfter(chatId: string, afterId: number): Promise<HistoryPage> {
+  const { data } = await api.get(`/messages/${chatId}?limit=${HISTORY_PAGE_SIZE}&after=${afterId}`);
   return normalizePage(data);
 }
 
 /**
- * Старая форма ответа — голый массив без `hasMore`. Приводим к одной форме
- * здесь, чтобы вызывающий код не разбирался в этом каждый раз заново.
+ * Окно ВОКРУГ сообщения — переход к источнику, вложению или цитате.
+ *
+ * Половина страницы выше искомого, половина ниже. Низ ленты при этом НЕ
+ * загружен, и это нормально: подгрузка работает в обе стороны.
  */
-function normalizePage(data: HistoryPage | Message[]): HistoryPage {
-  if (Array.isArray(data)) return { messages: data, hasMore: false };
-  return { messages: data.messages || [], hasMore: !!data.hasMore, truncated: data.truncated };
+export async function fetchHistoryAround(chatId: string, messageId: number): Promise<HistoryPage> {
+  const { data } = await api.get(`/messages/${chatId}?limit=${HISTORY_PAGE_SIZE}&around=${messageId}`);
+  return normalizePage(data);
+}
+
+function normalizePage(data: HistoryPage): HistoryPage {
+  return { messages: data.messages || [], hasMoreUp: data.hasMoreUp, hasMoreDown: data.hasMoreDown };
 }
 
 /** Превью последних сообщений всех чатов — строки списка. */

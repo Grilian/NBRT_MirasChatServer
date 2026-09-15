@@ -229,7 +229,7 @@ test('negative history limit cannot disable pagination', async () => {
   const { response, data } = await request('/api/messages/general?limit=-1', { token: tokenFor(userId) });
   assert.equal(response.status, 200);
   assert.equal(data.messages.length, 50);
-  assert.equal(data.hasMore, true);
+  assert.equal(data.hasMoreUp, true);
 });
 
 test('editing an event persists its target calendar scope', async () => {

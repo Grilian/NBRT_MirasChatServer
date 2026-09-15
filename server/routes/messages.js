@@ -108,11 +108,6 @@ const CHAT_FILE_TOO_LARGE_MESSAGE =
   'Система работает в тестовом режиме, пока большие файлы отправлять нельзя. '
   + 'Предельный размер — 50 МБ.';
 
-// Предел окна «от сообщения до низа» (см. параметр ?from). Пятьсот сообщений
-// — это заведомо больше любой разумной дистанции между вложением из карточки
-// и концом переписки, и заведомо меньше того, что заметно затормозит ленту.
-const FROM_WINDOW_LIMIT = 500;
-
 const chatFileUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: CHAT_FILE_MAX_BYTES },
@@ -497,23 +492,21 @@ router.get('/:chatId', verifyToken, (req, res) => {
       ? Math.min(requestedLimit, 100)
       : 50;
 
-    // Постраничная подгрузка "вверх" идёт по id последнего известного клиенту
-    // сообщения, а не по offset. С offset докрутка истории разъезжалась:
-    // пока человек читает, в чат приходят новые сообщения, все смещаются на
-    // одну позицию, и следующая страница либо повторяла уже показанное, либо
-    // перепрыгивала через непоказанное. Курсор по id от таких сдвигов не
-    // зависит. offset ещё принимаем — на нём сидят уже собранные мобильные
-    // сборки, которые обновляются не одновременно с сервером.
+    // Листание идёт курсором по id, а не по offset: пока человек читает, в чат
+    // приходят новые сообщения, все смещаются на позицию, и следующая страница
+    // либо повторяла уже показанное, либо перепрыгивала через непоказанное.
+    //
+    // Направлений три: `before` — страница выше, `after` — страница ниже,
+    // `around` — окно ВОКРУГ сообщения (переход к источнику, вложению, цитате).
+    // Раньше вместо `around` было окно «от сообщения и до самого низа» с
+    // пределом в 500 строк: клиент не умел подгружать вниз, и низ ленты
+    // обязан был быть загружен целиком, иначе в ленте оказывалась дыра. Всё,
+    // что дальше предела, честно отдавалось пустым с признаком `truncated` —
+    // то есть переход к старому сообщению просто не работал. Теперь клиент
+    // грузит в обе стороны, и упираться в предел незачем.
     const before = Number.parseInt(req.query.before, 10);
-    const requestedOffset = Number.parseInt(req.query.offset, 10);
-    const offset = Number.isInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
-    const useCursor = Number.isInteger(before);
-
-    // Окно «от сообщения до низа». Предел выбран так, чтобы одно нажатие
-    // «перейти к сообщению» оставалось одним запросом, а не выгрузкой всего
-    // архива в память браузера.
-    const from = Number.parseInt(req.query.from, 10);
-    const useFrom = Number.isInteger(from);
+    const after = Number.parseInt(req.query.after, 10);
+    const around = Number.parseInt(req.query.around, 10);
 
     // ORDER BY id, а не created_at: у сообщений, записанных в одну секунду,
     // created_at совпадает (точность SQLite CURRENT_TIMESTAMP — секунда), и
@@ -536,7 +529,7 @@ router.get('/:chatId', verifyToken, (req, res) => {
     // Одна выборка на три случая (курсор вверх, offset, окно «от сообщения»)
     // вместо трёх почти одинаковых запросов: раньше их было два, и любое
     // новое поле приходилось добавлять в каждый — про один регулярно забывали.
-    const historyQuery = (condition, tail) => `
+    const historyQuery = (condition, order) => `
       SELECT m.id, m.text, m.file_path, m.file_width, m.file_height, m.sticker_id, m.sticker_fallback,
              m.document_path, m.document_name, m.document_size, m.document_mime,
              m.attachment_archived_at, m.sender_id, m.created_at, m.status, m.edited_at, m.deleted, m.read_at,
@@ -553,34 +546,53 @@ router.get('/:chatId', verifyToken, (req, res) => {
       LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ?
       WHERE m.chat_id = ? AND m.thread_root_id IS NULL ${condition}
         AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-      ORDER BY m.id DESC
-      ${tail}
+      ORDER BY m.id ${order}
+      LIMIT ?
     `;
 
-    let truncated = false;
-    let messages;
-    if (useFrom) {
-      // Окно «от сообщения и до конца» — для перехода к вложению из карточки
-      // человека: сообщение может быть далеко выше загруженной страницы, и
-      // листать до него постранично значило бы десяток запросов подряд.
-      // Низ ленты при этом остаётся загруженным, то есть обычная прокрутка и
-      // подгрузка вверх продолжают работать как раньше.
-      messages = db.prepare(historyQuery('AND m.id >= ?', 'LIMIT ?'))
-        .all(req.userId, chatId, from, req.userId, FROM_WINDOW_LIMIT + 1);
-      // Если сообщений «от него и ниже» больше окна, честно говорим об этом:
-      // отдать обрезанное окно молча значило бы показать ленту с дырой.
-      truncated = messages.length > FROM_WINDOW_LIMIT;
-      if (truncated) messages = [];
-    } else if (useCursor) {
-      messages = db.prepare(historyQuery('AND m.id < ?', 'LIMIT ?'))
-        .all(req.userId, chatId, before, req.userId, limit);
-    } else {
-      messages = db.prepare(historyQuery('', 'LIMIT ? OFFSET ?'))
-        .all(req.userId, chatId, req.userId, limit, offset);
-    }
+    // Страница в одну сторону. Спрашиваем на строку больше запрошенного и
+    // наружу её не отдаём: она отвечает ровно на вопрос «есть ли там ещё», и
+    // отдельного COUNT для этого не нужно.
+    const page = (condition, order, count, cursor) => {
+      const cursorParams = cursor === undefined ? [] : [cursor];
+      const rows = db.prepare(historyQuery(condition, order))
+        .all(req.userId, chatId, ...cursorParams, req.userId, count + 1);
+      const hasMore = rows.length > count;
+      if (hasMore) rows.length = count;
+      return { rows, hasMore };
+    };
 
-    // Переворачиваем чтобы старые были в начале
-    messages.reverse();
+    // Каждый режим отвечает только за то, что реально знает: страница вверх
+    // ничего не сообщает о низе ленты, страница вниз — о верхе. Приписывать им
+    // false значило бы гасить у клиента подгрузку в ту сторону, про которую
+    // ответ не спрашивали.
+    let messages;
+    let hasMoreUp;
+    let hasMoreDown;
+
+    if (Number.isInteger(around)) {
+      // Половина страницы выше искомого (вместе с ним самим), половина ниже.
+      const half = Math.max(1, Math.floor(limit / 2));
+      const up = page('AND m.id <= ?', 'DESC', half, around);
+      const down = page('AND m.id > ?', 'ASC', half, around);
+      messages = [...up.rows.reverse(), ...down.rows];
+      hasMoreUp = up.hasMore;
+      hasMoreDown = down.hasMore;
+    } else if (Number.isInteger(before)) {
+      const up = page('AND m.id < ?', 'DESC', limit, before);
+      messages = up.rows.reverse();
+      hasMoreUp = up.hasMore;
+    } else if (Number.isInteger(after)) {
+      const down = page('AND m.id > ?', 'ASC', limit, after);
+      messages = down.rows;
+      hasMoreDown = down.hasMore;
+    } else {
+      // Открытие чата — последняя страница. Ниже неё по определению ничего нет.
+      const up = page('', 'DESC', limit);
+      messages = up.rows.reverse();
+      hasMoreUp = up.hasMore;
+      hasMoreDown = false;
+    }
 
     // Удалённое сообщение хранится в БД целиком (обязательство по закону —
     // быть готовыми предоставить переписку по требованию), но клиенту из
@@ -631,21 +643,14 @@ router.get('/:chatId', verifyToken, (req, res) => {
     const reactionsByMessage = reactionsForMessages(messages.map((m) => m.id));
     for (const m of messages) m.reactions = reactionsByMessage[m.id] || [];
 
-    // Есть ли что-то ещё выше самого старого из отданных. Скрытые лично этим
-    // человеком не считаем: иначе «загрузить ещё» обещало бы страницу, которая
-    // после фильтрации окажется пустой, и прокрутка вверх упиралась бы в
-    // бесконечную «Загрузку…».
-    const oldestId = messages.length ? messages[0].id : null;
-    const hasMore = oldestId === null
-      ? false
-      : db.prepare(`
-          SELECT 1 FROM messages m
-          WHERE m.chat_id = ? AND m.id < ? AND m.thread_root_id IS NULL
-            AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-          LIMIT 1
-        `).get(chatId, oldestId, req.userId) !== undefined;
-
-    res.json({ messages, hasMore, truncated });
+    // Скрытые лично этим человеком в счёт «есть ли ещё» не идут — они
+    // отфильтрованы тем же запросом, которым набиралась страница. Иначе
+    // «загрузить ещё» обещало бы страницу, которая после фильтрации окажется
+    // пустой, и прокрутка упиралась бы в бесконечную «Загрузку…».
+    const body = { messages };
+    if (hasMoreUp !== undefined) body.hasMoreUp = hasMoreUp;
+    if (hasMoreDown !== undefined) body.hasMoreDown = hasMoreDown;
+    res.json(body);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
