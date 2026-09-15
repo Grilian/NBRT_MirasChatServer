@@ -109,8 +109,110 @@ function attachTraceCounts(messages, userId) {
   }
 }
 
+/**
+ * Вид сохранённого объекта — для фильтров раздела.
+ *
+ * Считается по самому сообщению, а не хранится в следе: сообщение могут
+ * отредактировать, а вложение убрать, и запомненный при сохранении вид разошёлся
+ * бы с тем, что человек видит сейчас.
+ */
+function kindOf(row) {
+  if (!row) return 'messages';
+  if (row.file_path) return 'images';
+  if (row.document_path) return 'files';
+  if (row.text && /https?:\/\//i.test(row.text)) return 'links';
+  return 'messages';
+}
+
+/**
+ * Следы человека — с ЖИВЫМ состоянием каждого.
+ *
+ * Содержимое читается из messages в момент запроса и только при праве его
+ * видеть: в самом следе содержимого нет (см. схему), и это не оптимизация, а
+ * то, что не даёт удалённому и закрытому утечь через список.
+ *
+ * Состояний четыре:
+ *   ok        — источник на месте, доступ есть;
+ *   cleaned   — «след подчищен»: строки нет вовсе либо стоит deleted;
+ *   hidden    — человек скрыл это сообщение У СЕБЯ. Отдельно от cleaned:
+ *               у остальных оно живо, и валить это в «удалено» значило бы
+ *               соврать. Скрытое кем-то ДРУГИМ на этот след не влияет никак;
+ *   forbidden — доступа к исходному месту больше нет (вышел из группы).
+ */
+function listTraces(userId, { kind = 'all' } = {}) {
+  const { isParticipant } = require('./chatParticipants');
+  const { chatMeta } = require('./threads');
+
+  const rows = db.prepare(`
+    SELECT origin_message_id, origin_chat_id, note, created_at
+    FROM message_traces
+    WHERE user_id = ?
+    ORDER BY created_at DESC, origin_message_id DESC
+  `).all(userId);
+
+  const items = rows.map((trace) => {
+    const source = db.prepare(`
+      SELECT m.id, m.chat_id, m.text, m.file_path, m.document_path, m.document_name,
+             m.created_at, m.deleted, m.deleted_by, m.attachment_archived_at,
+             COALESCE(u.display_name, u.username) AS author,
+             COALESCE(du.display_name, du.username) AS deleted_by_name
+      FROM messages m
+      JOIN users u ON u.id = m.sender_id
+      LEFT JOIN users du ON du.id = m.deleted_by
+      WHERE m.id = ?
+    `).get(trace.origin_message_id);
+
+    const base = {
+      origin_message_id: trace.origin_message_id,
+      origin_chat_id: trace.origin_chat_id,
+      note: trace.note,
+      created_at: trace.created_at,
+      kind: kindOf(source),
+    };
+
+    if (!source || source.deleted) {
+      return {
+        ...base,
+        kind: 'messages',
+        state: 'cleaned',
+        // Кто подчистил — только когда это действительно известно. Для
+        // исчезнувшей строки неизвестно ничего, и придумывать нечего.
+        deleted_by_name: source ? source.deleted_by_name : null,
+      };
+    }
+
+    const hidden = db.prepare(
+      'SELECT 1 FROM message_hidden WHERE message_id = ? AND user_id = ?'
+    ).get(source.id, userId) !== undefined;
+    if (hidden) return { ...base, state: 'hidden' };
+
+    // Право проверяется СЕЙЧАС, а не в момент сохранения: вышел из группы —
+    // перестал ходить в свой же след.
+    if (!isParticipant(source.chat_id, userId)) return { ...base, state: 'forbidden' };
+
+    const chat = chatMeta(source.chat_id, userId);
+    return {
+      ...base,
+      state: 'ok',
+      chat: { id: source.chat_id, name: chat.name, kind: chat.kind, avatar_path: chat.avatar_path },
+      author: source.author,
+      text: source.text || '',
+      file_path: source.attachment_archived_at ? null : source.file_path,
+      document_name: source.attachment_archived_at ? null : source.document_name,
+      attachment_archived: !!source.attachment_archived_at,
+      message_created_at: source.created_at,
+    };
+  });
+
+  if (kind === 'all') return items;
+  if (kind === 'notes') return items.filter((item) => !!item.note);
+  return items.filter((item) => item.kind === kind);
+}
+
 module.exports = {
   MAX_NOTE_LENGTH,
+  kindOf,
+  listTraces,
   resolveOrigin,
   normalizeNote,
   setTrace,

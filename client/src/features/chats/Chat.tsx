@@ -36,6 +36,7 @@ import ConnectionStrip from '@/app/ConnectionStrip';
 import SectionLoading from '@/app/SectionLoading';
 import SectionStub from '@/app/SectionStub';
 const FilesSection = React.lazy(() => import('@/features/files/FilesSection'));
+const TracesSection = React.lazy(() => import('@/features/traces/TracesSection'));
 import HomeSection, { HomeCalendarTarget } from '@/features/home/HomeSection';
 const TasksPanel = React.lazy(() => import('@/features/tasks/TasksPanel'));
 const CalendarSection = React.lazy(() => import('@/features/calendar/CalendarSection'));
@@ -3660,8 +3661,19 @@ const Chat: React.FC = () => {
         </main>
       )}
 
+      {section === 'traces' && (
+        <main className="section-host">
+          <Suspense fallback={<SectionLoading />}>
+            <TracesSection
+              onOpenMessage={(chatId, messageId) => { goToSection('chats'); handleOpenMessage(chatId, messageId); }}
+              onOpenThread={(rootId) => { goToSection('chats'); openThreadInbox(rootId); }}
+            />
+          </Suspense>
+        </main>
+      )}
+
       {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks'
-        && section !== 'documents' && section !== 'home' && section !== 'people' && (
+        && section !== 'documents' && section !== 'traces' && section !== 'home' && section !== 'people' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>

@@ -311,6 +311,7 @@ function softDeleteThread(rootId, deletedBy) {
 
 module.exports = {
   ThreadError,
+  chatMeta,
   isThreadParticipant,
   rootForUser,
   threadSummary,

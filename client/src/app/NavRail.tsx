@@ -11,6 +11,7 @@ export type SectionId =
   | 'spaces'
   | 'calendar'
   | 'tasks'
+  | 'traces'
   | 'documents'
   | 'settings';
 
@@ -68,6 +69,13 @@ export const SECTIONS: SectionMeta[] = [
     icon: <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></svg>,
   },
   {
+    // Рядом с «Файлами»: оба — личный срез по всем перепискам, а не переписка.
+    // Лапка тут та же, что под сообщением: знак Следов один на всё приложение.
+    id: 'traces', label: 'Следы', ready: true, tone: '#9a7fb0',
+    summary: 'Сохранённые источники: откуда это взялось и где искать оригинал.',
+    icon: <svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="7" cy="9" rx="2.1" ry="2.7" /><ellipse cx="12" cy="6.6" rx="2.1" ry="2.8" /><ellipse cx="17" cy="9" rx="2.1" ry="2.7" /><path d="M12 11.2c2.6 0 5 2.4 5 4.7 0 1.7-1.3 2.9-3 2.9-.8 0-1.4-.3-2-.3s-1.2.3-2 .3c-1.7 0-3-1.2-3-2.9 0-2.3 2.4-4.7 5-4.7Z" /></svg>,
+  },
+  {
     id: 'documents', label: 'Файлы', ready: true, tone: '#a58b68',
     summary: 'Ваши файлы из всех переписок: поиск, сортировка, занятое место и удаление.',
     icon: <svg {...stroke}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5" /></svg>,
@@ -86,7 +94,9 @@ export function sectionById(id: SectionId): SectionMeta {
 // Тип "Интернет" — самостоятельная регистрация с улицы, не сотрудник. Ему
 // незачем видеть пространства, задачи и документы; календарь остаётся, но
 // общий слой в нём и так фильтрует сервер.
-const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['home', 'chats', 'people', 'calendar', 'documents', 'settings'];
+// Следы аккаунту «Интернет» доступны: это его собственные пометки в его же
+// переписке, ничего сверх доступного они не открывают.
+const INTERNET_VISIBLE_SECTIONS: SectionId[] = ['home', 'chats', 'people', 'calendar', 'traces', 'documents', 'settings'];
 
 export function isSectionAllowedFor(accountType: string | undefined, id: SectionId): boolean {
   return accountType !== 'internet' || INTERNET_VISIBLE_SECTIONS.includes(id);

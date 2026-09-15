@@ -184,3 +184,90 @@ test('снять можно и подчищенный след', () => {
   removeTrace(originId, reader);
   assert.equal(hasTrace(originId, reader), false);
 });
+
+// ===== Список раздела: четыре состояния следа =====
+
+const { listTraces } = require('../services/traces');
+
+test('живой след отдаёт содержимое, подчищенный — нет', () => {
+  const author = createUser('list_author');
+  const reader = createUser('list_reader');
+  const aliveId = insert('general', author, 'живое сообщение');
+  const goneId = insert('general', author, 'секрет, который удалят');
+  setTrace(aliveId, 'general', reader, null);
+  setTrace(goneId, 'general', reader, null);
+
+  db.prepare('UPDATE messages SET deleted = 1, deleted_by = ? WHERE id = ?').run(author, goneId);
+
+  const items = listTraces(reader);
+  const alive = items.find((i) => i.origin_message_id === aliveId);
+  const gone = items.find((i) => i.origin_message_id === goneId);
+
+  assert.equal(alive.state, 'ok');
+  assert.equal(alive.text, 'живое сообщение');
+  assert.equal(alive.chat.name, 'Общий чат');
+
+  assert.equal(gone.state, 'cleaned');
+  assert.equal(gone.text, undefined, 'текст удалённого утёк через список Следов');
+  assert.ok(gone.deleted_by_name, 'кто подчистил — известно, но не показано');
+});
+
+test('скрытое у себя — отдельное состояние, а не «удалено»', () => {
+  // У остальных сообщение живо, и называть это удалением значило бы соврать.
+  const author = createUser('hidden_author');
+  const reader = createUser('hidden_reader');
+  const messageId = insert('general', author, 'скрою у себя');
+  setTrace(messageId, 'general', reader, null);
+  db.prepare('INSERT INTO message_hidden (message_id, user_id, hidden_at) VALUES (?, ?, ?)').run(messageId, reader, Date.now());
+
+  const item = listTraces(reader).find((i) => i.origin_message_id === messageId);
+  assert.equal(item.state, 'hidden');
+  assert.equal(item.text, undefined);
+});
+
+test('чужое скрытие на мой след не влияет', () => {
+  const author = createUser('other_hidden_author');
+  const reader = createUser('other_hidden_reader');
+  const messageId = insert('general', author, 'кто-то другой скрыл это у себя');
+  setTrace(messageId, 'general', reader, null);
+  db.prepare('INSERT INTO message_hidden (message_id, user_id, hidden_at) VALUES (?, ?, ?)').run(messageId, author, Date.now());
+
+  const item = listTraces(reader).find((i) => i.origin_message_id === messageId);
+  assert.equal(item.state, 'ok');
+});
+
+test('потеря доступа к исходному месту закрывает содержимое, но не сам след', () => {
+  const a = createUser('access_a');
+  const b = createUser('access_b');
+  const outsider = createUser('access_outsider');
+  const chatId = `chat_${Math.min(a, b)}_${Math.max(a, b)}`;
+  const messageId = insert(chatId, a, 'переписка двоих');
+  // След у постороннего мог появиться законно — через переданный след.
+  setTrace(messageId, chatId, outsider, 'зачем-то сохранил');
+
+  const item = listTraces(outsider).find((i) => i.origin_message_id === messageId);
+  assert.equal(item.state, 'forbidden');
+  assert.equal(item.text, undefined, 'содержимое закрытого чата утекло в список');
+  assert.equal(item.note, 'зачем-то сохранил', 'своя заметка принадлежит человеку и остаётся');
+});
+
+test('фильтры разбирают следы по виду содержимого и по заметкам', () => {
+  const author = createUser('kind_author');
+  const reader = createUser('kind_reader');
+  const plain = insert('general', author, 'просто текст');
+  const link = insert('general', author, 'смотри https://example.org/doc');
+  const image = Number(db.prepare(
+    "INSERT INTO messages (chat_id, sender_id, text, file_path) VALUES ('general', ?, '', '/uploads/users/1/images/a.webp')"
+  ).run(author).lastInsertRowid);
+
+  setTrace(plain, 'general', reader, 'вернуться позже');
+  setTrace(link, 'general', reader, null);
+  setTrace(image, 'general', reader, null);
+
+  const ids = (kind) => listTraces(reader, { kind }).map((i) => i.origin_message_id);
+  assert.deepEqual(ids('links'), [link]);
+  assert.deepEqual(ids('images'), [image]);
+  assert.deepEqual(ids('messages'), [plain]);
+  assert.deepEqual(ids('notes'), [plain]);
+  assert.equal(ids('all').length, 3);
+});

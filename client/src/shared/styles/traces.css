@@ -1,0 +1,83 @@
+/* Раздел «Следы» — сохранённое происхождение (docs/decisions/traces.md).
+   Лежит в общих стилях, а не рядом с разделом: раздел грузится отдельным
+   куском, а классы состояний («подчищен», «нет доступа») должны быть
+   оформлены сразу, ещё до первого захода в раздел. */
+
+.traces-section {
+  display: flex; flex-direction: column; min-height: 0; height: 100%;
+  padding: 18px 22px 0; gap: 12px; overflow: hidden;
+}
+.traces-section .section-head h2 { margin: 0; font-size: 21px; font-weight: 650; }
+.traces-section .section-sub { margin: 3px 0 0; color: var(--ink-muted); font-size: 13px; }
+
+.traces-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.traces-filter {
+  padding: 6px 13px; border-radius: 999px; cursor: pointer; font-size: 13px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink-muted);
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.traces-filter:hover { background: var(--row-hover); }
+.traces-filter.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.traces-notice {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-md, 10px);
+  background: var(--paper-raised); font-size: 13px;
+}
+.traces-notice span { flex: 1; min-width: 0; }
+
+.traces-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-bottom: 18px; }
+.traces-empty { padding: 28px 12px; text-align: center; }
+
+.traces-row {
+  display: flex; align-items: flex-start; gap: 12px; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-md, 10px);
+  background: var(--paper-raised);
+}
+/* Сломанный след не прячем и не гасим до неразличимости: он остаётся записью,
+   с которой человек вправе что-то сделать — хотя бы снять или дописать
+   заметку. Приглушается только рамка, чтобы отличался от живого. */
+.traces-row.is-broken { background: var(--paper); border-style: dashed; }
+.traces-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.traces-row-head { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-muted); }
+.traces-row-chat { font-weight: 600; color: var(--ink); }
+.traces-row-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.traces-row-time { margin-left: auto; flex: none; }
+.traces-row-text {
+  font-size: 14px; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.traces-row-broken { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.traces-row-broken strong { font-weight: 600; }
+.traces-row-broken span { color: var(--ink-muted); }
+/* Заметка приватная, и видно это по оформлению: она отделена от содержимого
+   источника полосой, а не смешана с ним в один текст. */
+.traces-row-note {
+  margin-top: 2px; padding-left: 9px; border-left: 2px solid var(--accent);
+  color: var(--ink-muted); font-size: 13px; font-style: italic;
+}
+.traces-row-actions { flex: none; display: flex; flex-direction: column; gap: 6px; }
+/* Своя кнопка, а не общая «вторичная»: общей в проекте нет — .btn-secondary
+   существует только как контекстная доводка в двух местах. */
+.trace-action {
+  padding: 6px 12px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+  transition: background var(--ease), border-color var(--ease);
+}
+.trace-action:hover { background: var(--row-hover); border-color: var(--accent); }
+.trace-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.trace-note-form { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; }
+.trace-note-form textarea {
+  width: 100%; resize: vertical; padding: 10px 12px; font: inherit;
+  border: 1px solid var(--line); border-radius: var(--radius-md, 10px);
+  background: var(--paper); color: var(--ink);
+}
+.trace-note-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 760px) {
+  .traces-section { padding: 14px 14px 0; }
+  .traces-row { flex-direction: column; gap: 9px; }
+  .traces-row-actions { flex-direction: row; align-self: stretch; }
+  .traces-row-actions .trace-action { flex: 1; }
+}

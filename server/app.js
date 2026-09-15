@@ -24,6 +24,7 @@ const tasksRoutes = require('./routes/tasks');
 const emojiRoutes = require('./routes/emoji');
 const stickerRoutes = require('./routes/stickers');
 const filesRoutes = require('./routes/files');
+const tracesRoutes = require('./routes/traces');
 const notificationSettingsRoutes = require('./routes/notificationSettings');
 
 // Сборка HTTP-части. Отделена от точки входа, потому что смешивать «какие
@@ -57,6 +58,7 @@ app.use('/api/emoji', emojiRoutes);
 app.use('/api/stickers', stickerRoutes);
 // Личное хранилище: раздел «Файлы» на рельсе.
 app.use('/api/files', filesRoutes);
+app.use('/api/traces', tracesRoutes);
 app.use('/api/notification-settings', notificationSettingsRoutes);
 
 // Раздача загруженных аватаров — просто статика, без отдельной авторизации
