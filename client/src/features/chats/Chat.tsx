@@ -59,6 +59,7 @@ import { deleteGroupMessages, fetchGroups } from '@/features/groups/api';
 import { deleteOwnAccount, fetchMe, fetchModeratedGroups } from '@/features/settings/api';
 import { fetchThreadInbox, fetchThreadSummary } from '@/features/threads/api';
 import { nameFor } from '@/shared/lib/user';
+import { DIARY_NAME } from '@/shared/lib/diary';
 import { renderUnreadBadge } from '@/shared/platform/badgeIcon';
 import { describeStatus } from '@/features/status/statusMeta';
 import { WritePolicy, WRITE_BLOCKED_HINT } from '@/shared/lib/writePolicy';
@@ -659,7 +660,7 @@ const Chat: React.FC = () => {
   // управления (одно на всех). До первого ответа /users/me берём из
   // localStorage — иначе при запуске он моргал бы дефолтным названием.
   const [selfChatId, setSelfChatId] = useState(localStorage.getItem('selfChatId') || '');
-  const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Избранное');
+  const selfChatName = DIARY_NAME;
   // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
   const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
 
@@ -1091,10 +1092,8 @@ const Chat: React.FC = () => {
         setCurrentStatusExpiresAt(data.status_expires_at || null);
         setCurrentStatusCustom(data.status_custom || null);
         setSelfChatId(data.self_chat_id || '');
-        setSelfChatName(data.self_chat_name || 'Избранное');
         setReactionEmoji(Array.isArray(data.reaction_emoji) ? data.reaction_emoji : []);
         localStorage.setItem('selfChatId', data.self_chat_id || '');
-        localStorage.setItem('selfChatName', data.self_chat_name || 'Избранное');
         localStorage.setItem('username', data.username);
         localStorage.setItem('displayName', data.display_name);
         localStorage.setItem('avatarPath', data.avatar_path || '');
@@ -2038,7 +2037,7 @@ const Chat: React.FC = () => {
   // Закрепление чата. Ручки и таблица на сервере называются `favorites` —
   // это прежнее название той же самой отметки, переименована только та её
   // часть, которую видит человек: «избранное» путалось с личным чатом
-  // «Избранное», куда пересылают сообщения.
+  // «Дневник» — личные записи человека.
   const toggleFavorite = async (chatId: string) => {
     try {
       if (favorites.includes(chatId)) {

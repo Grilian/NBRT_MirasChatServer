@@ -34,33 +34,11 @@ function setUpdateNotBefore(ms) {
   setSetting(UPDATE_NOT_BEFORE, ms === null ? null : String(ms));
 }
 
-// Название личного чата «для себя». Одно на всех: это не персональная
-// настройка, а то, как эта штука называется в организации — «Избранное»,
-// «Облако» или «Архив» — и в клиентах она должна называться одинаково.
-const SELF_CHAT_NAME = 'self_chat_name';
-// Слово «Следы» этот чат держал с 07.09.2026 как заглушку под будущий механизм
-// происхождения. Механизм пришёл (`docs/decisions/traces.md`) и забрал имя себе:
-// личный чат — это копии и заметки, След — ссылка на источник, и двух «Следов»
-// в одном интерфейсе быть не может. Сущность прежняя: ни таблицы, ни ручки, ни
-// идентификатор `self_<id>` не менялись, поменялось только слово.
-const DEFAULT_SELF_CHAT_NAME = 'Избранное';
-const SELF_CHAT_NAME_MAX = 40;
-
-function getSelfChatName() {
-  const raw = getSetting(SELF_CHAT_NAME);
-  return raw && raw.trim() ? raw.trim() : DEFAULT_SELF_CHAT_NAME;
-}
-
-function setSelfChatName(name) {
-  const trimmed = String(name || '').trim();
-  if (!trimmed) {
-    setSetting(SELF_CHAT_NAME, null); // пусто — возвращаемся к названию по умолчанию
-    return DEFAULT_SELF_CHAT_NAME;
-  }
-  if (trimmed.length > SELF_CHAT_NAME_MAX) throw new Error('Название слишком длинное');
-  setSetting(SELF_CHAT_NAME, trimmed);
-  return trimmed;
-}
+// Настройки названия личного чата больше нет: имя фиксировано и живёт
+// константой DIARY_NAME в services/chatParticipants. Организация выбирала слово
+// («Избранное», «Облако», «Архив»), пока смысл чата был размытым — «место, куда
+// складывают». Складывание чужого ушло к Следам, осталось одно значение:
+// личные записи, вкладка «Дневник». Выбирать больше нечего.
 
 // Когда админ последний раз разбирал вкладку «Интернет». Всё, что
 // зарегистрировалось позже, помечается как New — это метка «ещё не смотрели»,
@@ -138,9 +116,6 @@ module.exports = {
   setUpdateNotBefore,
   getReactionEmoji,
   setReactionEmoji,
-  getSelfChatName,
-  setSelfChatName,
-  DEFAULT_SELF_CHAT_NAME,
   getInternetSeenAt,
   setInternetSeenAt,
 };

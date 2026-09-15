@@ -11,10 +11,9 @@ import DepartmentsPanel from './panels/DepartmentsPanel';
 import UpdateSchedulePanel from './panels/UpdateSchedulePanel';
 import GoogleCalendarPanel from './panels/GoogleCalendarPanel';
 import ReactionsPanel from './panels/ReactionsPanel';
-import SelfChatPanel from './panels/SelfChatPanel';
 import { Group, UserRow } from './types';
 
-type Tab = 'users' | 'internet' | 'groups' | 'departments' | 'emoji' | 'stickers' | 'reactions' | 'selfchat' | 'google' | 'updates';
+type Tab = 'users' | 'internet' | 'groups' | 'departments' | 'emoji' | 'stickers' | 'reactions' | 'google' | 'updates';
 
 /**
  * Разделы панели — оглавлением слева, а не десятью вкладками в ряд.
@@ -49,7 +48,6 @@ const NAV_GROUPS: { label: string; items: { id: Tab; label: string }[] }[] = [
   {
     label: 'Приложение',
     items: [
-      { id: 'selfchat', label: 'Избранное' },
       { id: 'google', label: 'Google Календарь' },
       { id: 'updates', label: 'Обновления' },
     ],
@@ -174,7 +172,6 @@ export default function SuperAdminApp() {
           {tab === 'emoji' && <EmojiCatalogPanel />}
           {tab === 'stickers' && <StickerPacksPanel />}
           {tab === 'reactions' && <ReactionsPanel />}
-          {tab === 'selfchat' && <SelfChatPanel />}
           {tab === 'google' && <GoogleCalendarPanel users={users} />}
           {tab === 'updates' && (
             <>

@@ -183,7 +183,7 @@ function matchesFilter(chat: Chat, filter: ChatFilter): boolean {
   const isNews = chat.section === 'general' || !!chat.announcementsOnly;
   if (filter === 'news') return isNews;
   if (filter === 'groups') return chat.section === 'group' && !isNews;
-  // «Личные» — переписка с человеком и своё «Избранное»: это тоже личное
+  // «Личные» — переписка с человеком и свой «Дневник»: это тоже личное
   // пространство, и прятать его в «Все чаты» значило бы терять к нему путь.
   return chat.section === 'staff' || chat.section === 'self';
 }

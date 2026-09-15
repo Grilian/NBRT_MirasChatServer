@@ -138,7 +138,6 @@ export const ME = {
   role: null,
   account_type: 'staff',
   self_chat_id: 'self_1',
-  self_chat_name: 'Избранное',
   reaction_emoji: ['👍', '❤️'],
   muted: false,
   status_preset: null,

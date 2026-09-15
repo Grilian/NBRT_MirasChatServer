@@ -992,7 +992,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     } : null;
 
     const forwardSelf: MenuItem | null = onForwardToSelf && !msg.poll ? {
-      kind: 'action', key: 'forward-self', label: `Сохранить в «${selfChatName || 'Избранное'}»`,
+      kind: 'action', key: 'forward-self', label: `Сохранить в «${selfChatName || 'Дневник'}»`,
       icon: icon('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'),
       onClick: () => { setMenuFor(null); onForwardToSelf([msg.id]); },
     } : null;

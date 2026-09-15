@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import ChatList, { Chat } from './ChatList';
 
 const chats: Chat[] = [
-  { id: 'self_1', name: 'Избранное', section: 'self', groupLabel: null },
+  { id: 'self_1', name: 'Дневник', section: 'self', groupLabel: null },
   { id: 'chat_1_2', name: 'Анна', section: 'staff', groupLabel: null, userId: 2 },
 ];
 
@@ -195,7 +195,7 @@ const PREVIEW_CHATS: Chat[] = [
   { id: 'group_5', name: 'Отдел', section: 'group', groupLabel: null },
   { id: 'group_7', name: 'Объявления', section: 'group', groupLabel: null, announcementsOnly: true },
   { id: 'general', name: 'Общий чат', section: 'general', groupLabel: null },
-  { id: 'self_1', name: 'Избранное', section: 'self', groupLabel: null },
+  { id: 'self_1', name: 'Дневник', section: 'self', groupLabel: null },
 ];
 
 // Сообщение должно быть «сегодняшним» независимо от даты прогона теста —
@@ -328,10 +328,10 @@ test('фильтры отбирают список, не превращаясь 
   // не собирается (ловится только production-сборкой, тесты его переживают).
   const names = () => Array.from(document.querySelectorAll('.row-name span')).map((n) => n.textContent);
 
-  expect(names()).toEqual(expect.arrayContaining(['Анна', 'Отдел', 'Объявления', 'Общий чат', 'Избранное']));
+  expect(names()).toEqual(expect.arrayContaining(['Анна', 'Отдел', 'Объявления', 'Общий чат', 'Дневник']));
 
   fireEvent.click(screen.getByRole('tab', { name: 'Личные' }));
-  expect(names()).toEqual(['Анна', 'Избранное']);
+  expect(names()).toEqual(['Анна', 'Дневник']);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Группы' }));
   expect(names()).toEqual(['Отдел']);

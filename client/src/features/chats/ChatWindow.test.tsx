@@ -531,7 +531,7 @@ test('аппаратный «Назад» снимает выделение, а 
       onToggleReaction={() => {}}
       onRemoveReaction={() => {}}
       onForwardToSelf={() => {}}
-      selfChatName="Избранное"
+      selfChatName="Дневник"
     />,
   );
 

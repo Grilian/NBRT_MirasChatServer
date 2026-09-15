@@ -1,9 +1,8 @@
 const express = require('express');
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
-const { isParticipant, selfChatId } = require('../services/chatParticipants');
+const { isParticipant, selfChatId, DIARY_NAME } = require('../services/chatParticipants');
 const { fileCategory } = require('../utils/fileCategory');
-const { getSelfChatName } = require('../services/appSettings');
 
 const router = express.Router();
 
@@ -21,7 +20,7 @@ const router = express.Router();
 /** Человекочитаемое имя чата, где лежит файл. */
 function chatLabel(chatId, userId) {
   if (chatId === 'general') return { name: 'Общий чат', kind: 'general' };
-  if (chatId === selfChatId(userId)) return { name: getSelfChatName(), kind: 'self' };
+  if (chatId === selfChatId(userId)) return { name: DIARY_NAME, kind: 'self' };
 
   const group = /^group_(\d+)$/.exec(String(chatId));
   if (group) {

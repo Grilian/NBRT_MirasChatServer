@@ -9,7 +9,6 @@ const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { applyModeration, notifyModerated } = require('../services/userModeration');
 const {
   getUpdateNotBefore, setUpdateNotBefore,
-  getSelfChatName, setSelfChatName,
   getInternetSeenAt, setInternetSeenAt,
   getReactionEmoji, setReactionEmoji,
 } = require('../services/appSettings');
@@ -399,23 +398,6 @@ router.put('/internet-seen', verifySuperAdmin, (req, res) => {
   res.json({ seenAt: now });
 });
 
-// ===== Личный чат «Избранное / Облако / Архив» =====
-//
-// Название одно на всю организацию, а не персональная настройка: это способ
-// называть одну и ту же сущность, и в клиентах она должна называться
-// одинаково у всех. Сам чат заводить не нужно — он существует у каждого по
-// определению (chat_id вида self_<id>, см. services/chatParticipants.js).
-router.get('/self-chat', verifySuperAdmin, (req, res) => {
-  res.json({ name: getSelfChatName() });
-});
-
-router.put('/self-chat', verifySuperAdmin, (req, res) => {
-  try {
-    res.json({ name: setSelfChatName(req.body.name) });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
 
 // ===== Отделы =====
 // Отдельно от групп: группа — категория с правами (на «Администрация»/«Админы»

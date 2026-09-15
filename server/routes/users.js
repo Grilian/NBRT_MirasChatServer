@@ -13,7 +13,7 @@ const { deleteAvatarFile, deleteUploadedFile } = require('../utils/files');
 const { archiveAndDeleteUser } = require('../services/accountArchive');
 const { clearExpiredStatuses } = require('../services/statusExpiry');
 const { selfChatId } = require('../services/chatParticipants');
-const { getSelfChatName, getReactionEmoji } = require('../services/appSettings');
+const { getReactionEmoji } = require('../services/appSettings');
 const userStorage = require('../services/userStorage');
 const router = express.Router();
 
@@ -147,11 +147,9 @@ router.get('/me', verifyToken, (req, res) => {
       status_custom: user.status_custom || null,
       status_expires_at: user.status_expires_at || null,
       created_at: user.created_at || null,
-      // Личный чат «для себя»: его chat_id и название, заданное в панели.
-      // Отдаём отсюда, чтобы клиенту не понадобился отдельный запрос ради
-      // одной строки — этот ответ он и так забирает при каждом входе.
+      // Личный чат «для себя» — хранилище дневника. Названия тут больше нет:
+      // оно фиксировано (DIARY_NAME) и настройкой быть перестало.
       self_chat_id: selfChatId(user.id),
-      self_chat_name: getSelfChatName(),
       // Базовые реакции — тоже настройка на всю организацию, и нужна клиенту
       // сразу при открытии чата, а не отдельным запросом.
       reaction_emoji: getReactionEmoji(),

@@ -58,4 +58,12 @@ function selfChatId(userId) {
   return `self_${Number(userId)}`;
 }
 
-module.exports = { parseAdminChatId, participantsForChatId, isParticipant, selfChatId };
+// Название ФИКСИРОВАНО и настройкой больше не является.
+//
+// Раньше его задавала организация («Избранное», «Облако», «Архив»), потому что
+// смысл у чата был размытый — «место, куда складывают». Теперь смысл один:
+// личные записи человека, вкладка «Дневник» в разделе «Следы». Сохранение
+// чужого содержимого целиком ушло к Следам, и выбирать тут больше нечего.
+const DIARY_NAME = 'Дневник';
+
+module.exports = { parseAdminChatId, participantsForChatId, isParticipant, selfChatId, DIARY_NAME };
