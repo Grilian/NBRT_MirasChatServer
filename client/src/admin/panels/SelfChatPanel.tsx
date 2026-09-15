@@ -38,13 +38,18 @@ export default function SelfChatPanel() {
 
   return (
     <div className="sa-card sa-card--compact">
-      <h2>Следы / Избранное / Облако</h2>
+      <h2>Избранное / Облако / Архив</h2>
       {error && <p className="form-error">{error}</p>}
 
       <p className="sa-hint">
-        Это одна и та же сущность — личный чат, куда человек складывает заметки и
-        пересылает сообщения. Видит его только владелец. Название общее для всех:
-        сейчас — «{saved}».
+        Личный чат, куда человек складывает заметки и пересылает сообщения копиями.
+        Видит его только владелец. Название общее для всех: сейчас — «{saved}».
+      </p>
+
+      <p className="sa-hint">
+        Со «Следами» не связан: След — это ссылка на источник, а не копия, и живёт
+        он в своём разделе. Называть этот чат «Следами» не нужно — в интерфейсе
+        окажется два разных «Следа».
       </p>
 
       <form onSubmit={save} className="sa-inline-form">
@@ -52,7 +57,7 @@ export default function SelfChatPanel() {
           type="text"
           value={name}
           maxLength={40}
-          placeholder="Следы"
+          placeholder="Избранное"
           onChange={(e) => { setName(e.target.value); setStatus(''); }}
         />
         <button type="submit" className="btn-primary">Сохранить</button>

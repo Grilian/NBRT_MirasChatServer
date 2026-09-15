@@ -168,9 +168,9 @@ interface DirectoryUser {
 
 const GENERAL_CHAT_ID = 'general';
 
-/** Подпись блока «Ветки + Следы» наверху списка. Одна на два места: заголовок
- *  рисует ChatList над строкой веток, а строка «Следы» приходит с ним же —
- *  разойдись они, над списком появились бы два одинаковых заголовка подряд. */
+/** Подпись блока «Ветки + личный чат» наверху списка. Одна на два места:
+ *  заголовок рисует ChatList над строкой веток, а строка личного чата приходит
+ *  с ним же — разойдись они, над списком появились бы два заголовка подряд. */
 export const QUICK_ACCESS_LABEL = 'Быстрый доступ';
 
 // Синтетический "чат" для уведомлений о задачах: тосты и системные уведомления
@@ -645,7 +645,7 @@ const Chat: React.FC = () => {
   // управления (одно на всех). До первого ответа /users/me берём из
   // localStorage — иначе при запуске он моргал бы дефолтным названием.
   const [selfChatId, setSelfChatId] = useState(localStorage.getItem('selfChatId') || '');
-  const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Следы');
+  const [selfChatName, setSelfChatName] = useState(localStorage.getItem('selfChatName') || 'Избранное');
   // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
   const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
 
@@ -1077,10 +1077,10 @@ const Chat: React.FC = () => {
         setCurrentStatusExpiresAt(data.status_expires_at || null);
         setCurrentStatusCustom(data.status_custom || null);
         setSelfChatId(data.self_chat_id || '');
-        setSelfChatName(data.self_chat_name || 'Следы');
+        setSelfChatName(data.self_chat_name || 'Избранное');
         setReactionEmoji(Array.isArray(data.reaction_emoji) ? data.reaction_emoji : []);
         localStorage.setItem('selfChatId', data.self_chat_id || '');
-        localStorage.setItem('selfChatName', data.self_chat_name || 'Следы');
+        localStorage.setItem('selfChatName', data.self_chat_name || 'Избранное');
         localStorage.setItem('username', data.username);
         localStorage.setItem('displayName', data.display_name);
         localStorage.setItem('avatarPath', data.avatar_path || '');
@@ -2447,15 +2447,12 @@ const Chat: React.FC = () => {
     }
 
     setForwardIds(null);
-    // След оставляют, не отрываясь от переписки, — туда не переключаемся.
+    // Копию себе кладут, не отрываясь от переписки, — туда не переключаемся.
     if (openTarget) handleSelectChat(targetChatId);
     else pushToast({
       chatId: 'forwarded-to-self',
       title: selfChatName,
-      // «След оставлен» — формулировка концепции. Она короче «Сообщение
-      // переслано» и, главное, называет действие тем же словом, что и пункт
-      // меню: человек видит подтверждение того, что нажал.
-      body: toSend.length > 1 ? `Оставлено следов: ${toSend.length}` : 'След оставлен',
+      body: toSend.length > 1 ? `Сохранено: ${toSend.length}` : 'Сохранено',
       avatarPath: null,
     });
   };
@@ -2731,7 +2728,7 @@ const Chat: React.FC = () => {
   ).sort((a, b) => a.localeCompare(b, 'ru'));
 
   function groupRank(c: { id: string; section: ChatSection; groupLabel: string | null }) {
-    // «Следы» — самый верх, рядом с «Ветками»: вместе они образуют блок
+    // Личный чат — самый верх, рядом с «Ветками»: вместе они образуют блок
     // быстрого доступа. Это не переписка с человеком, а личное хранилище, и
     // место ему не по свежести последнего сообщения.
     if (c.section === 'self') return -3;
@@ -2760,7 +2757,7 @@ const Chat: React.FC = () => {
   // правилам группировки и свежести. Общий чат специального места больше не имеет.
   const allChats: RosterChat[] = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
-    // «Следы» — обычная личная переписка по месту в списке: её позицию
+    // Личный чат — обычная личная переписка по месту в списке: её позицию
     // определяет последнее сообщение, а не специальное закрепление.
     ...(selfChatId ? [{
       id: selfChatId,
@@ -3266,6 +3263,7 @@ const Chat: React.FC = () => {
           statusCustom={currentStatusCustom}
           customEmoji={customEmoji}
           favoritesAvailable={!!selfChatId}
+          selfChatName={selfChatName}
           onClose={() => setAppMenuOpen(false)}
           onOpenProfile={openOwnProfilePreview}
           onOpenStatus={() => setStatusSheetOpen(true)}

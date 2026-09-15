@@ -63,7 +63,7 @@ interface ChatWindowProps {
   onToggleReaction?: (messageId: number, emoji: string) => void;
   /** Снять реакцию конкретного человека (своя — всегда, чужая — под своим). */
   onRemoveReaction?: (messageId: number, userId: number) => void;
-  /** Оставить след — переслать в личный чат сохранённых сообщений одним нажатием. */
+  /** Отправить копию в личный чат одним нажатием, не выбирая его в списке. */
   onForwardToSelf?: (ids: number[]) => void;
   /** Название личного чата из панели управления — оно в пункте меню. */
   selfChatName?: string;
@@ -933,8 +933,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     // Название берём из панели управления: там его меняют на «Облако» или
     // «Архив», и пункт меню обязан называть чат так же, как список чатов.
+    // Пока пункт назывался «Оставить след», проп не использовался вовсе и
+    // переименование чата до меню не доезжало.
     const forwardSelf: MenuItem | null = onForwardToSelf && !msg.poll ? {
-      kind: 'action', key: 'forward-self', label: 'Оставить след',
+      kind: 'action', key: 'forward-self', label: `Сохранить в «${selfChatName || 'Избранное'}»`,
       icon: icon('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'),
       onClick: () => { setMenuFor(null); onForwardToSelf([msg.id]); },
     } : null;

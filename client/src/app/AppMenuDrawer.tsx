@@ -15,6 +15,8 @@ interface AppMenuDrawerProps {
   statusCustom?: string | null;
   customEmoji?: CustomEmojiMap;
   favoritesAvailable: boolean;
+  /** Как личный чат назвали в этой организации — слово задаётся в панели. */
+  selfChatName: string;
   onClose: () => void;
   onOpenProfile: () => void;
   onOpenStatus: () => void;
@@ -43,6 +45,7 @@ function isDarkNow(): boolean {
 
 const AppMenuDrawerBody: React.FC<AppMenuDrawerProps> = ({
   open, username, avatarPath, online, statusPreset, statusCustom, customEmoji = {}, favoritesAvailable,
+  selfChatName,
   onClose, onOpenProfile, onOpenStatus, onOpenChats, onOpenTasks, onCreateGroup, onOpenContacts,
   onOpenFavorites, onOpenSettings,
 }) => {
@@ -154,7 +157,7 @@ const AppMenuDrawerBody: React.FC<AppMenuDrawerProps> = ({
             </button>
             <button type="button" className="app-menu-item" onClick={() => run(onOpenFavorites)} disabled={!favoritesAvailable}>
               <span className="app-menu-item-icon is-favorites">{icon('M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z')}</span>
-              <span className="app-menu-item-body"><span>Следы</span></span>
+              <span className="app-menu-item-body"><span>{selfChatName}</span></span>
             </button>
           </div>
 

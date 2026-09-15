@@ -49,7 +49,7 @@ const NAV_GROUPS: { label: string; items: { id: Tab; label: string }[] }[] = [
   {
     label: 'Приложение',
     items: [
-      { id: 'selfchat', label: 'Следы' },
+      { id: 'selfchat', label: 'Избранное' },
       { id: 'google', label: 'Google Календарь' },
       { id: 'updates', label: 'Обновления' },
     ],
