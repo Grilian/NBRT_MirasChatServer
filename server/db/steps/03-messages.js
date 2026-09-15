@@ -136,9 +136,39 @@ module.exports = (db) => {
   } catch (e) {
     // Таблиц уже нет
   }
+  // Ссылка на ПЕРВОИСТОЧНИК пересланного или переданного следом сообщения.
+  //
+  // Пара forwarded_from_* — это снимки строками, по ним никуда не перейдёшь и
+  // ничего не посчитаешь. Ссылка по id нужна сразу двум механикам: счётчику
+  // обычных пересылок и Следам. Ссылка в данных ОДНА, потребителя ДВА, и
+  // разделяет их origin_via: 'forward' — обычная пересылка, 'trace' — передача
+  // из Следов. Смешивать счётчики нельзя ни в одном запросе (traces.md).
+  //
+  // Цепочка схлопывается при ЗАПИСИ: origin = источник.origin_message_id ??
+  // источник.id. Переслали пересланное — первоисточник остался прежним, и на
+  // выдаче рекурсии нет.
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN origin_message_id INTEGER`);
+  } catch (e) {
+    // Колонка уже есть
+  }
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN origin_via TEXT`);
+  } catch (e) {
+    // Колонка уже есть
+  }
+
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_sender_client_id
     ON messages(sender_id, client_message_id)
     WHERE client_message_id IS NOT NULL
+  `);
+
+  // Счётчик пересылок идёт по этой колонке пачкой на страницу истории —
+  // без индекса это скан таблицы на каждое открытие чата.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_origin
+    ON messages(origin_message_id)
+    WHERE origin_message_id IS NOT NULL
   `);
 };

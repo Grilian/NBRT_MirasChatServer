@@ -27,6 +27,7 @@ process.env.SUPERADMIN_PASSWORD = 'socket-test-password';
 const db = require('../db');
 const messagesHandler = require('../socket/handlers/messages');
 const reactionsHandler = require('../socket/handlers/reactions');
+const tracesHandler = require('../socket/handlers/traces');
 const readsHandler = require('../socket/handlers/reads');
 const typingHandler = require('../socket/handlers/typing');
 const presenceHandler = require('../socket/handlers/presence');
@@ -68,7 +69,7 @@ function makeSocket(userId) {
     listens: (event) => !!(listeners[event] && listeners[event].length),
   };
   const ctx = makeCtx();
-  for (const handler of [presenceHandler, messagesHandler, reactionsHandler, readsHandler, typingHandler]) {
+  for (const handler of [presenceHandler, messagesHandler, reactionsHandler, tracesHandler, readsHandler, typingHandler]) {
     handler.register(socket, ctx);
   }
   return socket;
@@ -324,7 +325,7 @@ test('все события, на которые рассчитывает кли
   for (const event of [
     'user_online', 'chat_message', 'message_edit', 'message_delete',
     'message_read', 'message_delivered', 'mark_chat_read', 'mark_all_read',
-    'reaction_set', 'reaction_remove', 'typing', 'stop_typing',
+    'reaction_set', 'reaction_remove', 'trace_set', 'trace_remove', 'typing', 'stop_typing',
     'app_state', 'message_notified', 'disconnect',
   ]) {
     assert.ok(socket.listens(event), `нет обработчика '${event}'`);
@@ -351,5 +352,79 @@ test('база по умолчанию лежит в корне server, а не 
     fallback[1],
     /__dirname,\s*'\.\.'/,
     'путь по умолчанию обязан подниматься из db/ в корень server/',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Следы
+// ---------------------------------------------------------------------------
+
+test('пересылка запоминает первоисточник ссылкой, а не только подписью', async () => {
+  const author = createUser('origin_author');
+  const reader = createUser('origin_reader');
+  const chatId = privateChat(author, reader);
+  const originId = Number(db.prepare(
+    "INSERT INTO messages (chat_id, sender_id, text) VALUES ('general', ?, 'исходное')"
+  ).run(author).lastInsertRowid);
+
+  await send(makeSocket(author), {
+    chatId, text: 'копия', forwardedFromName: 'Автор', forwardedFromChat: 'Общий чат', forwardedFromId: originId,
+  });
+
+  const copy = db.prepare('SELECT origin_message_id, origin_via FROM messages WHERE chat_id = ? ORDER BY id DESC').get(chatId);
+  assert.equal(copy.origin_message_id, originId);
+  assert.equal(copy.origin_via, 'forward');
+});
+
+test('первоисточник из чужого чата подбором id не проставить', async () => {
+  // Иначе ссылку на сообщение закрытой переписки можно было бы завести, просто
+  // угадав номер, — и счётчик пересылок в ней вырос бы от постороннего.
+  const a = createUser('secret_a');
+  const b = createUser('secret_b');
+  const outsider = createUser('outsider');
+  const secretId = Number(db.prepare(
+    'INSERT INTO messages (chat_id, sender_id, text) VALUES (?, ?, ?)'
+  ).run(privateChat(a, b), a, 'не для чужих').lastInsertRowid);
+
+  const target = privateChat(outsider, a);
+  await send(makeSocket(outsider), { chatId: target, text: 'подобрал', forwardedFromId: secretId });
+
+  const row = db.prepare('SELECT origin_message_id FROM messages WHERE chat_id = ? ORDER BY id DESC').get(target);
+  assert.equal(row.origin_message_id, null, 'ссылка на чужое сообщение проставилась');
+});
+
+test('наследить на копию — значит наследить на первоисточник', async () => {
+  const author = createUser('paw_author');
+  const reader = createUser('paw_reader');
+  const chatId = privateChat(author, reader);
+  const originId = Number(db.prepare(
+    "INSERT INTO messages (chat_id, sender_id, text) VALUES ('general', ?, 'полезное')"
+  ).run(author).lastInsertRowid);
+  const copyId = Number(db.prepare(
+    'INSERT INTO messages (chat_id, sender_id, text, origin_message_id, origin_via) VALUES (?, ?, ?, ?, ?)'
+  ).run(chatId, author, 'копия', originId, 'forward').lastInsertRowid);
+
+  await makeSocket(reader).fire('trace_set', { messageId: copyId });
+
+  const row = db.prepare('SELECT origin_message_id, origin_chat_id FROM message_traces WHERE user_id = ?').get(reader);
+  assert.equal(row.origin_message_id, originId);
+  assert.equal(row.origin_chat_id, 'general');
+  // Счётчик обновляется в комнате ИСХОДНОГО чата, а не того, где нажали.
+  assert.ok(sent.some(([to, event]) => to === 'general' && event === 'traces_changed'));
+});
+
+test('наследить на сообщение чужого чата нельзя', async () => {
+  const a = createUser('trace_secret_a');
+  const b = createUser('trace_secret_b');
+  const outsider = createUser('trace_outsider');
+  const hiddenId = Number(db.prepare(
+    'INSERT INTO messages (chat_id, sender_id, text) VALUES (?, ?, ?)'
+  ).run(privateChat(a, b), a, 'чужое').lastInsertRowid);
+
+  await makeSocket(outsider).fire('trace_set', { messageId: hiddenId });
+
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM message_traces WHERE origin_message_id = ?').get(hiddenId).n,
+    0,
   );
 });

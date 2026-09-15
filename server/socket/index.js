@@ -7,6 +7,7 @@ const handlers = [
   require('./handlers/threads'),
   require('./handlers/reads'),
   require('./handlers/reactions'),
+  require('./handlers/traces'),
   require('./handlers/polls'),
   require('./handlers/typing'),
 ];

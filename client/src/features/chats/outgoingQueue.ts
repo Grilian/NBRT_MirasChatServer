@@ -9,6 +9,15 @@ export interface OutgoingPayload {
   replyToId?: number;
   forwardedFromName?: string;
   forwardedFromChat?: string;
+  /**
+   * Что именно переслали — id, а не подпись.
+   *
+   * Подписи forwardedFrom* остаются снимками для показа, а по этой ссылке
+   * сервер сам вычисляет первоисточник и считает пересылки со Следами. Своему
+   * значению сервер не верит: он перепроверяет доступ к исходному чату и
+   * решает origin сам (см. traces.md).
+   */
+  forwardedFromId?: number;
   poll?: unknown;
   /**
    * Стикер — самостоятельный тип сообщения, отправляется сразу тапом в

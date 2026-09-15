@@ -146,6 +146,10 @@ function archiveAndDeleteUser(id, { allowMirror = false } = {}) {
     db.prepare('DELETE FROM message_hidden WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM thread_hidden WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM message_reactions WHERE user_id = ?').run(id);
+    // Только СВОИ следы уходящего. Чужие следы на его сообщения остаются и
+    // становятся подчищенными сами собой, когда исчезнут строки сообщений, —
+    // внешнего ключа у message_traces нет именно ради этого.
+    db.prepare('DELETE FROM message_traces WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM chat_group_writers WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM chat_group_members WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM device_tokens WHERE user_id = ?').run(id);

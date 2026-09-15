@@ -397,6 +397,34 @@ module.exports = (db) => {
 
     CREATE INDEX IF NOT EXISTS idx_message_reactions_user ON message_reactions(user_id);
 
+    -- Следы: осознанно сохранённое происхождение объекта (docs/decisions/traces.md).
+    -- PRIMARY KEY (origin_message_id, user_id) — след принадлежит человеку, и
+    -- повторное «Наследить» не плодит строк.
+    --
+    -- Внешнего ключа на messages тут НЕТ, и это не забывчивость: в отличие от
+    -- реакций, след обязан ПЕРЕЖИТЬ исходное сообщение и показать «след
+    -- подчищен». Мягкое удаление строку оставляет, но удаление аккаунта и
+    -- группы стирает сообщения физически (accountArchive), и с ON DELETE
+    -- CASCADE след молча исчез бы вместо того, чтобы объяснить, что случилось.
+    -- Ровно по той же причине нет ключа у messages.reply_to_id.
+    --
+    -- Содержимого здесь не хранится сознательно: снимок текста был бы копией
+    -- переписки в обход правила «удалённое не отдаётся ни одной выдачей».
+    -- origin_chat_id — метаданные «где это было», их хватает, чтобы нарисовать
+    -- карточку «нет доступа», ничего не раскрыв.
+    CREATE TABLE IF NOT EXISTS message_traces (
+      origin_message_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      origin_chat_id TEXT NOT NULL,
+      object_type TEXT NOT NULL DEFAULT 'message',
+      note TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (origin_message_id, user_id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_message_traces_user ON message_traces(user_id, created_at);
+
     -- Задачи-поручения. Отдельно от календарных «задач» (is_task на событии,
     -- привязаны к дате): здесь может быть несколько причастных, а не только
     -- владелец события, и видимость строго по составу task_participants —

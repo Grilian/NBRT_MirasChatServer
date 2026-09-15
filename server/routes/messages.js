@@ -8,6 +8,7 @@ const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const { isParticipant, participantsForChatId, selfChatId } = require('../services/chatParticipants');
 const { reactionsForMessages } = require('../services/reactions');
+const { attachTraceCounts } = require('../services/traces');
 const { attachPollsToMessages } = require('../services/polls');
 const { touchRecentChat, listRecentChats } = require('../services/recentChats');
 const userStorage = require('../services/userStorage');
@@ -642,6 +643,10 @@ router.get('/:chatId', verifyToken, (req, res) => {
     // Реакции — одним запросом на всю страницу, а не по запросу на сообщение.
     const reactionsByMessage = reactionsForMessages(messages.map((m) => m.id));
     for (const m of messages) m.reactions = reactionsByMessage[m.id] || [];
+
+    // Следы и пересылки — тоже пачкой и тоже под конкретного зрителя:
+    // traced_by_me зависит от того, кто спрашивает.
+    attachTraceCounts(messages, req.userId);
 
     // Скрытые лично этим человеком в счёт «есть ли ещё» не идут — они
     // отфильтрованы тем же запросом, которым набиралась страница. Иначе

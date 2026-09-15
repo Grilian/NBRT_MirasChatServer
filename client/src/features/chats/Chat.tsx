@@ -2491,6 +2491,7 @@ const Chat: React.FC = () => {
         fileHeight: msg.file_height || undefined,
         forwardedFromName: nameFor(msg),
         forwardedFromChat: sourceName,
+        forwardedFromId: msg.id,
       });
     }
 

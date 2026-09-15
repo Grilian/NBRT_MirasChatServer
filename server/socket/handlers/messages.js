@@ -178,6 +178,25 @@ function register(socket, ctx) {
       ? data.forwardedFromChat.trim().slice(0, 100)
       : null;
 
+    // Ссылка на первоисточник — в отличие от подписи выше, по ней уже ХОДЯТ и
+    // её СЧИТАЮТ, поэтому она берётся из базы, а не с клиента: клиент
+    // присылает только id того, что переслали, а origin и вид связи решает
+    // сервер. Цепочка схлопывается здесь же: переслали пересланное —
+    // первоисточник остаётся прежним, и рекурсии на выдаче не будет.
+    let originMessageId = null;
+    let originVia = null;
+    const forwardedFromId = Number.parseInt(data.forwardedFromId, 10);
+    if (Number.isInteger(forwardedFromId)) {
+      const source = db.prepare('SELECT id, chat_id, origin_message_id FROM messages WHERE id = ?')
+        .get(forwardedFromId);
+      // Переслать можно только то, что человеку видно. Иначе ссылку на
+      // первоисточник в закрытом чате можно было бы проставить подбором id.
+      if (source && isParticipant(source.chat_id, senderId)) {
+        originMessageId = source.origin_message_id || source.id;
+        originVia = data.originVia === 'trace' ? 'trace' : 'forward';
+      }
+    }
+
     if (isFlooding(socket)) {
       socket.emit('message_blocked', { reason: 'rate_limit', chatId: data.chatId });
       respond({ ok: false, error: 'rate_limit' });
@@ -217,8 +236,9 @@ function register(socket, ctx) {
         INSERT INTO messages
           (chat_id, sender_id, text, file_path, file_width, file_height, status, sender_ip,
            reply_to_id, forwarded_from_name, forwarded_from_chat, client_message_id, force_notification,
-           sticker_id, sticker_fallback, document_path, document_name, document_size, document_mime)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           sticker_id, sticker_fallback, document_path, document_name, document_size, document_mime,
+           origin_message_id, origin_via)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       // Сообщение и опрос — одна атомарная операция: нельзя оставить в ленте
       // текст вопроса без вариантов, если вставка опроса оборвалась.
@@ -226,7 +246,8 @@ function register(socket, ctx) {
         const result = stmt.run(
           data.chatId, senderId, finalText, filePath, fileWidth, fileHeight, 'sent', clientIpOf(socket),
           finalReplyTo, forwardedFromName, forwardedFromChat, clientMessageId, forceNotification ? 1 : 0,
-          stickerId, stickerFallback, documentPath, documentName, documentSize, documentMime
+          stickerId, stickerFallback, documentPath, documentName, documentSize, documentMime,
+          originMessageId, originVia
         );
         const poll = pollDraft
           ? insertPoll(result.lastInsertRowid, data.chatId, senderId, pollDraft)
