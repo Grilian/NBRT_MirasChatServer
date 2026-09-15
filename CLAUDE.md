@@ -44,6 +44,7 @@ docs/        Решения, план работ, деплой, открытые
 | Android: жесты, клавиатура, «Назад» | `docs/decisions/mobile.md` |
 | Десктоп: окно, прокси, Linux | `docs/decisions/desktop.md` |
 | Ветки | `docs/decisions/threads.md` |
+| Следы: происхождение, счётчики, пагинация под переход | `docs/decisions/traces.md` |
 | Сеансы, отзыв токенов, выход везде | `docs/decisions/sessions.md` |
 | Задачи | `docs/decisions/tasks.md` |
 | Уведомления и очередь отправки | `docs/decisions/notifications.md` |
