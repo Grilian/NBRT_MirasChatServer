@@ -131,7 +131,7 @@ test('название события попадает в разметку ЦЕ�
     : Promise.resolve({
       data: {
         events: [{
-          id: 9, event_id: 9, starts_at: at(14), occurrence_start: at(14),
+          id: 9, event_id: 9, starts_at: soon, ends_at: soon + HOUR, occurrence_start: soon,
           title: 'Экскурсия «Храмы и мечети Казани» для учеников старших классов',
         }],
         birthdays: [],
