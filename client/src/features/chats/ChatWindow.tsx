@@ -76,12 +76,8 @@ interface ChatWindowProps {
   onToggleReaction?: (messageId: number, emoji: string) => void;
   /** Снять реакцию конкретного человека (своя — всегда, чужая — под своим). */
   onRemoveReaction?: (messageId: number, userId: number) => void;
-  /** Отправить копию в личный чат одним нажатием, не выбирая его в списке. */
-  onForwardToSelf?: (ids: number[]) => void;
   /** Наследить или снять след — запись о происхождении, а не копия. */
   onToggleTrace?: (messageId: number, next: boolean) => void;
-  /** Название личного чата из панели управления — оно в пункте меню. */
-  selfChatName?: string;
   onVotePoll?: (pollId: number, optionIds: number[]) => void;
   onAddPollOption?: (pollId: number, text: string) => void;
   onStopPoll?: (pollId: number) => void;
@@ -217,7 +213,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   focusMessageId, onFocusHandled, onNotice,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, stickerCatalog = {}, onToggleReaction, onRemoveReaction,
-  onForwardToSelf, onToggleTrace, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
+  onToggleTrace, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
   uploadProgress,
   onOpenThread,
 }) => {
@@ -991,12 +987,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       onClick: () => { setMenuFor(null); onToggleTrace(msg.id, !msg.traced_by_me); },
     } : null;
 
-    const forwardSelf: MenuItem | null = onForwardToSelf && !msg.poll ? {
-      kind: 'action', key: 'forward-self', label: `Сохранить в «${selfChatName || 'Дневник'}»`,
-      icon: icon('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'),
-      onClick: () => { setMenuFor(null); onForwardToSelf([msg.id]); },
-    } : null;
-
     const remove: MenuItem = {
       kind: 'action', key: 'delete', label: 'Удалить', danger: true,
       icon: icon('M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'),
@@ -1025,11 +1015,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     const order = isNativeMobile
       ? (mine
-        ? [stopPollItem, readInfo, editedInfo, openThread, reply, copy, task, forward, trace, forwardSelf, edit, remove]
-        : [openThread, reply, copy, task, forward, trace, forwardSelf, remove])
+        ? [stopPollItem, readInfo, editedInfo, openThread, reply, copy, task, forward, trace, edit, remove]
+        : [openThread, reply, copy, task, forward, trace, remove])
       : (mine
-        ? [stopPollItem, openThread, reply, edit, copy, task, forward, trace, forwardSelf, remove, select, readInfo, editedInfo]
-        : [openThread, reply, copy, task, forward, trace, forwardSelf, remove, select]);
+        ? [stopPollItem, openThread, reply, edit, copy, task, forward, trace, remove, select, readInfo, editedInfo]
+        : [openThread, reply, copy, task, forward, trace, remove, select]);
 
     return order.filter((item): item is MenuItem => item !== null);
   };

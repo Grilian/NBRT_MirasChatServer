@@ -31,7 +31,9 @@ const mountWith = async (items: unknown[], props: Record<string, unknown> = {}) 
   get.mockImplementation((url: string) => (url.startsWith('/traces?')
     ? Promise.resolve({ data: { items } })
     : Promise.resolve({ data: {} })));
-  const view = render(<TracesSection onOpenMessage={() => {}} {...props} />);
+  const view = render(
+    <TracesSection tab="traces" onTabChange={() => {}} onOpenMessage={() => {}} {...props} />,
+  );
   await waitFor(() => expect(screen.queryByText('Загрузка…')).not.toBeInTheDocument());
   return view;
 };
@@ -125,4 +127,34 @@ test('заметка сохраняется и сразу видна в стро
 
   expect(put).toHaveBeenCalledWith('/traces/1/note', { note: 'вернуться после рефакторинга' });
   expect(await screen.findByText('вернуться после рефакторинга')).toBeInTheDocument();
+});
+
+test('вкладка «Дневник» показывает ленту записей вместо списка следов', async () => {
+  // Дневник — бывшее «Избранное»: там лежат собственные записи человека, и
+  // после переделки механики они остались здесь же, рядом со Следами, а не
+  // отдельным чатом в списке.
+  await mountWith([trace({})], {
+    tab: 'diary',
+    diary: <div data-testid="diary">лента дневника</div>,
+  });
+
+  expect(screen.getByTestId('diary')).toBeInTheDocument();
+  expect(screen.queryByText('исходное сообщение')).not.toBeInTheDocument();
+  // Фильтры по видам относятся к следам и на дневнике не нужны.
+  expect(screen.queryByText('С заметками')).not.toBeInTheDocument();
+});
+
+test('на вкладке «Дневник» список следов не запрашивается', async () => {
+  get.mockImplementation(() => Promise.resolve({ data: { items: [] } }));
+  render(
+    <TracesSection
+      tab="diary"
+      onTabChange={() => {}}
+      onOpenMessage={() => {}}
+      diary={<div>лента</div>}
+    />,
+  );
+  await act(async () => { await Promise.resolve(); });
+
+  expect(get.mock.calls.filter((call: any[]) => String(call[0]).startsWith('/traces?'))).toHaveLength(0);
 });

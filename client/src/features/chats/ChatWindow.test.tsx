@@ -530,8 +530,6 @@ test('аппаратный «Назад» снимает выделение, а 
       reactionEmoji={[]}
       onToggleReaction={() => {}}
       onRemoveReaction={() => {}}
-      onForwardToSelf={() => {}}
-      selfChatName="Дневник"
     />,
   );
 

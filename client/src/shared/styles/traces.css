@@ -10,6 +10,27 @@
 .traces-section .section-head h2 { margin: 0; font-size: 21px; font-weight: 650; }
 .traces-section .section-sub { margin: 3px 0 0; color: var(--ink-muted); font-size: 13px; }
 
+/* Вкладки раздела: «Следы» и «Дневник». Подчёркиванием, а не пилюлями, — ниже
+   стоят фильтры-пилюли, и два одинаковых по виду ряда читались бы как один. */
+.traces-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); }
+.traces-tab {
+  padding: 8px 2px 9px; border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 14px; color: var(--ink-muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.traces-tab:hover { color: var(--ink); }
+.traces-tab.is-active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Дневник — та же лента и тот же композер, что в переписке, поэтому ему нужна
+   та же геометрия: колонка, где прокручивается только лента. min-height: 0
+   обязателен — без него flex-ребёнок не сжимается, и прокрутка уезжает наружу,
+   утаскивая поле ввода за нижний край экрана. */
+.traces-diary {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  margin: 0 -22px; border-top: 1px solid var(--line);
+}
+.traces-diary .conv-body { flex: 1; min-height: 0; }
+
 .traces-filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .traces-filter {
   padding: 6px 13px; border-radius: 999px; cursor: pointer; font-size: 13px;
@@ -77,6 +98,7 @@
 
 @media (max-width: 760px) {
   .traces-section { padding: 14px 14px 0; }
+  .traces-diary { margin: 0 -14px; }
   .traces-row { flex-direction: column; gap: 9px; }
   .traces-row-actions { flex-direction: row; align-self: stretch; }
   .traces-row-actions .trace-action { flex: 1; }
