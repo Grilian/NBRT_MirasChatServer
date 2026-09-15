@@ -78,6 +78,8 @@ interface ChatWindowProps {
   onRemoveReaction?: (messageId: number, userId: number) => void;
   /** Отправить копию в личный чат одним нажатием, не выбирая его в списке. */
   onForwardToSelf?: (ids: number[]) => void;
+  /** Наследить или снять след — запись о происхождении, а не копия. */
+  onToggleTrace?: (messageId: number, next: boolean) => void;
   /** Название личного чата из панели управления — оно в пункте меню. */
   selfChatName?: string;
   onVotePoll?: (pollId: number, optionIds: number[]) => void;
@@ -215,7 +217,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   focusMessageId, onFocusHandled, onNotice,
   onStartEdit, editingId, onDeleteMessage, onDeleteMessages, onCreateTask,
   onStartReply, onForward, reactionEmoji, customEmoji = {}, stickerCatalog = {}, onToggleReaction, onRemoveReaction,
-  onForwardToSelf, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
+  onForwardToSelf, onToggleTrace, selfChatName, onVotePoll, onAddPollOption, onStopPoll, onRetryOutgoing, onCancelOutgoing,
   uploadProgress,
   onOpenThread,
 }) => {
@@ -974,6 +976,21 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     // «Архив», и пункт меню обязан называть чат так же, как список чатов.
     // Пока пункт назывался «Оставить след», проп не использовался вовсе и
     // переименование чата до меню не доезжало.
+    // «Наследить» — не копия и не пересылка: запись о ПРОИСХОЖДЕНИИ. Поэтому
+    // пункт отдельный и стоит рядом с пересылкой, а не вместо неё.
+    const trace: MenuItem | null = onToggleTrace && !msg.poll ? {
+      kind: 'action',
+      key: 'trace',
+      label: msg.traced_by_me ? 'Снять след' : 'Наследить',
+      icon: icon(
+        'M7 6.3c1 0 1.8 1.1 1.8 2.5S8 11.3 7 11.3 5.2 10.2 5.2 8.8 6 6.3 7 6.3Z',
+        'M17 6.3c1 0 1.8 1.1 1.8 2.5s-.8 2.5-1.8 2.5-1.8-1.1-1.8-2.5S16 6.3 17 6.3Z',
+        'M12 4c1 0 1.8 1.1 1.8 2.5S13 9 12 9s-1.8-1.1-1.8-2.5S11 4 12 4Z',
+        'M12 12c2.4 0 4.5 2.2 4.5 4.3 0 1.5-1.2 2.6-2.7 2.6-.7 0-1.3-.3-1.8-.3s-1.1.3-1.8.3c-1.5 0-2.7-1.1-2.7-2.6C7.5 14.2 9.6 12 12 12Z',
+      ),
+      onClick: () => { setMenuFor(null); onToggleTrace(msg.id, !msg.traced_by_me); },
+    } : null;
+
     const forwardSelf: MenuItem | null = onForwardToSelf && !msg.poll ? {
       kind: 'action', key: 'forward-self', label: `Сохранить в «${selfChatName || 'Избранное'}»`,
       icon: icon('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'),
@@ -1008,11 +1025,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     const order = isNativeMobile
       ? (mine
-        ? [stopPollItem, readInfo, editedInfo, openThread, reply, copy, task, forward, forwardSelf, edit, remove]
-        : [openThread, reply, copy, task, forward, forwardSelf, remove])
+        ? [stopPollItem, readInfo, editedInfo, openThread, reply, copy, task, forward, trace, forwardSelf, edit, remove]
+        : [openThread, reply, copy, task, forward, trace, forwardSelf, remove])
       : (mine
-        ? [stopPollItem, openThread, reply, edit, copy, task, forward, forwardSelf, remove, select, readInfo, editedInfo]
-        : [openThread, reply, copy, task, forward, forwardSelf, remove, select]);
+        ? [stopPollItem, openThread, reply, edit, copy, task, forward, trace, forwardSelf, remove, select, readInfo, editedInfo]
+        : [openThread, reply, copy, task, forward, trace, forwardSelf, remove, select]);
 
     return order.filter((item): item is MenuItem => item !== null);
   };
@@ -1466,7 +1483,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     иначе фон пузыря съедал бы верхнюю кромку плашек.
                     Реакция — с аватаром поставившего (в спеке именно так, не
                     просто счётчик); клик открывает детальный список. */}
-                {(!!msg.reactions?.length || showThreadLink) && (
+                {(!!msg.reactions?.length || showThreadLink || !!msg.trace_count || !!msg.forward_count) && (
                 <div className="msg-underrow">
                 {!!msg.reactions?.length && (
                   <div className="msg-reactions">
@@ -1512,6 +1529,41 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         </span>
                       );
                     })}
+                  </div>
+                )}
+
+                {/* Служебные показатели — СПРАВА, реакции остаются слева
+                    (эскиз концепции). Показываются только при ненулевом
+                    счётчике: постоянные кнопки-действия на каждом пузыре,
+                    которые рисует эскиз, мы не заводим — на телефоне это
+                    лишняя плотность и случайные нажатия, а «Наследить» и
+                    «Ответить в ветке» и так живут в меню сообщения. */}
+                {(!!msg.trace_count || !!msg.forward_count) && (
+                  <div className="msg-service">
+                    {!!msg.trace_count && (
+                      <span
+                        className={'service-chip trace-chip' + (msg.traced_by_me ? ' is-mine' : '')}
+                        title={msg.traced_by_me ? 'Вы наследили это сообщение' : 'Сохранили в Следы'}
+                      >
+                        {/* Лапка — единственный знак Следов. */}
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <ellipse cx="7" cy="9" rx="2.1" ry="2.7" />
+                          <ellipse cx="12" cy="6.6" rx="2.1" ry="2.8" />
+                          <ellipse cx="17" cy="9" rx="2.1" ry="2.7" />
+                          <path d="M12 11.2c2.6 0 5 2.4 5 4.7 0 1.7-1.3 2.9-3 2.9-.8 0-1.4-.3-2-.3s-1.2.3-2 .3c-1.7 0-3-1.2-3-2.9 0-2.3 2.4-4.7 5-4.7Z" />
+                        </svg>
+                        <span className="service-chip-count">{msg.trace_count}</span>
+                      </span>
+                    )}
+                    {!!msg.forward_count && (
+                      <span className="service-chip forward-chip" title="Пересылали">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="m15 17 5-5-5-5" />
+                          <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+                        </svg>
+                        <span className="service-chip-count">{msg.forward_count}</span>
+                      </span>
+                    )}
                   </div>
                 )}
 

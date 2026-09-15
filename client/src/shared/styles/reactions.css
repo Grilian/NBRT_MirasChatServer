@@ -19,6 +19,28 @@
 .msg.mine .msg-underrow { justify-content: flex-end; }
 .msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; }
 .msg.mine .msg-reactions { justify-content: flex-end; }
+
+/* Следы и пересылки — служебные показатели, и они стоят СПРАВА, отдельно от
+   реакций (эскиз концепции «Следы»). Разводит их margin-left: auto, а не
+   отдельный контейнер на всю строку: при десятке реакций строка переносится,
+   и жёсткая раскладка «слева/справа» развалилась бы вместе с переносом.
+   Показатели разные по смыслу, поэтому и различаются знаком: лапка — Следы,
+   стрелка — обычные пересылки. Смешивать их нельзя (docs/decisions/traces.md). */
+.msg-service { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.msg.mine .msg-service { margin-left: auto; }
+.service-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px 2px 7px; border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--paper-raised); color: var(--ink-muted);
+  font-size: 12px; line-height: 1; cursor: default;
+}
+.service-chip-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Свой след виден сразу: цифра одна на всех, а «мой он или нет» — личное. */
+.trace-chip.is-mine {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
 .reaction-chip {
   position: relative; display: inline-flex; align-items: center; gap: 3px;
   background: var(--paper-raised); border: 1px solid var(--line); border-radius: var(--radius-pill);

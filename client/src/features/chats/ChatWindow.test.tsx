@@ -588,3 +588,61 @@ describe('круг загрузки вложения', () => {
     expect(document.querySelector('.image-upload-progress')).toBeNull();
   });
 });
+
+describe('Следы под сообщением', () => {
+  const traced = {
+    id: 7, text: 'полезное', sender_id: 2, username: 'user',
+    created_at: '2026-09-15T10:00:00.000Z',
+  };
+
+  const renderWith = (extra: Record<string, unknown>, props: Record<string, unknown> = {}) => render(
+    <ChatWindow
+      chatId="test"
+      messages={[{ ...traced, ...extra }] as any}
+      currentUserId={1}
+      onStartEdit={() => {}}
+      onDeleteMessage={() => {}}
+      {...props}
+    />,
+  );
+
+  test('при нулевом счётчике лапки нет вовсе', () => {
+    // Осознанное отступление от эскиза: там под каждым сообщением стоят
+    // постоянные кнопки-действия. На телефоне это лишняя плотность и случайные
+    // нажатия, а «Наследить» живёт в меню сообщения.
+    const { container } = renderWith({ trace_count: 0, forward_count: 0 });
+    expect(container.querySelector('.trace-chip')).toBeNull();
+    expect(container.querySelector('.msg-service')).toBeNull();
+  });
+
+  test('счётчики Следов и пересылок — разные показатели, а не один', () => {
+    const { container } = renderWith({ trace_count: 3, forward_count: 5 });
+    expect(container.querySelector('.trace-chip .service-chip-count')!.textContent).toBe('3');
+    expect(container.querySelector('.forward-chip .service-chip-count')!.textContent).toBe('5');
+  });
+
+  test('свой след отмечен, чужие — нет', () => {
+    const mine = renderWith({ trace_count: 2, traced_by_me: true });
+    expect(mine.container.querySelector('.trace-chip')!.className).toContain('is-mine');
+    mine.unmount();
+
+    const notMine = renderWith({ trace_count: 2, traced_by_me: false });
+    expect(notMine.container.querySelector('.trace-chip')!.className).not.toContain('is-mine');
+  });
+
+  test('пункт меню зовётся «Наследить», а на уже наслеженном — «Снять след»', () => {
+    const calls: Array<[number, boolean]> = [];
+    const fresh = renderWith({}, { onToggleTrace: (id: number, next: boolean) => calls.push([id, next]) });
+    fireEvent.contextMenu(screen.getByText('полезное'));
+    fireEvent.click(screen.getByText('Наследить'));
+    expect(calls).toEqual([[7, true]]);
+    fresh.unmount();
+
+    renderWith({ traced_by_me: true, trace_count: 1 }, {
+      onToggleTrace: (id: number, next: boolean) => calls.push([id, next]),
+    });
+    fireEvent.contextMenu(screen.getByText('полезное'));
+    fireEvent.click(screen.getByText('Снять след'));
+    expect(calls[1]).toEqual([7, false]);
+  });
+});

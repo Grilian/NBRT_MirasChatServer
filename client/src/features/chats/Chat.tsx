@@ -1302,6 +1302,22 @@ const Chat: React.FC = () => {
       setMessages(prev => prev.map(m => (m.id === data.message_id ? { ...m, reactions: data.reactions } : m)));
     });
 
+    // Счётчик Следов приходит по ПЕРВОИСТОЧНИКУ: наследить могли и на копии в
+    // другом чате, но цифра меняется там, где сообщение появилось.
+    newSocket.on('traces_changed', (data: { chat_id: string; message_id: number; trace_count: number }) => {
+      setMessages(prev => prev.map(m => (m.id === data.message_id ? { ...m, trace_count: data.trace_count } : m)));
+    });
+
+    // Своё «наследил/снял» — отдельным ответом себе: в общем счётчике этого не
+    // видно, а лапка обязана сразу показать, что след именно твой.
+    newSocket.on('trace_result', (data: { message_id: number; origin_message_id: number; traced: boolean }) => {
+      setMessages(prev => prev.map(m => (
+        m.id === data.origin_message_id || m.id === data.message_id
+          ? { ...m, traced_by_me: data.traced }
+          : m
+      )));
+    });
+
     // «Удалить только у себя»: сообщение остаётся у всех остальных, поэтому
     // событие приходит только в свою же комнату. Убираем его из ленты совсем —
     // в отличие от deleted, где строка ещё живёт со снятым содержимым.
@@ -2682,6 +2698,26 @@ const Chat: React.FC = () => {
     socket?.emit('reaction_remove', { messageId, userId });
   };
 
+  // Следы. Как и с реакциями, своё состояние не угадываем: первоисточник
+  // вычисляет сервер (наследить можно на копию), и ответ traces_changed /
+  // trace_result приходит в том числе себе.
+  //
+  // Без связи «Наследить» молча не сработает — человек будет уверен, что
+  // сохранил. Поэтому отказ виден сразу, а в очередь отправки это действие не
+  // ставим: след не сообщение, отложенный на час он бессмыслен.
+  const handleToggleTrace = (messageId: number, next: boolean) => {
+    if (!socket?.connected) {
+      pushToast({
+        chatId: 'trace-offline',
+        title: 'Нет связи',
+        body: next ? 'След не сохранён — попробуйте ещё раз' : 'След не снят — попробуйте ещё раз',
+        avatarPath: null,
+      });
+      return;
+    }
+    socket.emit(next ? 'trace_set' : 'trace_remove', { messageId });
+  };
+
   const handleTyping = () => {
     if (!socket || !activeChat) return;
 
@@ -3746,6 +3782,7 @@ const Chat: React.FC = () => {
             onToggleReaction={handleToggleReaction}
             onRemoveReaction={handleRemoveReaction}
             onForwardToSelf={selfChatId ? (ids) => forwardTo(ids, selfChatId, false) : undefined}
+            onToggleTrace={handleToggleTrace}
             selfChatName={selfChatName}
             onVotePoll={handleVotePoll}
             onAddPollOption={handleAddPollOption}
