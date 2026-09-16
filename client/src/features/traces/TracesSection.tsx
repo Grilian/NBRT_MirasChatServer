@@ -29,16 +29,6 @@ interface TracesSectionProps {
   onOpenMessage: (chatId: string, messageId: number) => void;
   /** Открыть ветку — ответы вырезаны из ленты, и в них ведёт свой путь. */
   onOpenThread?: (rootId: number) => void;
-  tab: TracesTab;
-  onTabChange: (tab: TracesTab) => void;
-  /**
-   * Лента дневника целиком — приходит готовым куском из Chat.tsx.
-   *
-   * Собирать её здесь нельзя: это настоящая переписка с вложениями, правкой и
-   * очередью отправки, и все нити к ней (сокет, загрузка истории, композер)
-   * сходятся в Chat.tsx. Раздел отвечает только за то, ГДЕ она показана.
-   */
-  diary?: React.ReactNode;
 }
 
 /** Почему идти некуда. Формулировки разные не для красоты: причины разные. */
@@ -57,9 +47,7 @@ const STATE_COPY: Record<string, { title: string; hint: string }> = {
   },
 };
 
-const TracesSection: React.FC<TracesSectionProps> = ({
-  onOpenMessage, onOpenThread, tab, onTabChange, diary,
-}) => {
+const TracesSection: React.FC<TracesSectionProps> = ({ onOpenMessage, onOpenThread }) => {
   const [kind, setKind] = useState<TraceKind>('all');
   const [items, setItems] = useState<TraceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,10 +66,7 @@ const TracesSection: React.FC<TracesSectionProps> = ({
     }
   }, []);
 
-  // Дневник не трогает список следов, и перезапрашивать его при возврате на
-  // вкладку незачем — но и держать несвежим тоже: следы могли подчистить, пока
-  // человек писал заметку.
-  useEffect(() => { if (tab === 'traces') load(kind); }, [kind, tab, load]);
+  useEffect(() => { load(kind); }, [kind, load]);
 
   // Право проверяется ЗДЕСЬ, а не при показе списка: между открытием раздела и
   // нажатием человека могли вывести из группы, а сообщение — удалить.
@@ -129,44 +114,6 @@ const TracesSection: React.FC<TracesSectionProps> = ({
 
   return (
     <div className="traces-section">
-      <div className="section-head">
-        <h2>Следы</h2>
-        <p className="section-sub">
-          {tab === 'traces'
-            ? 'Сохранённые источники: откуда это взялось и где искать оригинал.'
-            : 'Ваши записи. Видите их только вы.'}
-        </p>
-      </div>
-
-      {/* Дневник — вкладка, а не отдельный чат в списке. Раньше это и был тот
-          самый личный чат: пока Следы были заглушкой, в него складывали и
-          копии чужих сообщений, и собственные заметки. Копии забрал механизм
-          Следов, записи остались — и остались здесь же, рядом. */}
-      <div className="traces-tabs" role="tablist" aria-label="Разделы Следов">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'traces'}
-          className={'traces-tab' + (tab === 'traces' ? ' is-active' : '')}
-          onClick={() => onTabChange('traces')}
-        >
-          Следы
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'diary'}
-          className={'traces-tab' + (tab === 'diary' ? ' is-active' : '')}
-          onClick={() => onTabChange('diary')}
-        >
-          Дневник
-        </button>
-      </div>
-
-      {tab === 'diary' && <div className="traces-diary">{diary}</div>}
-
-      {tab === 'traces' && (
-      <>
       <div className="traces-filters" role="tablist" aria-label="Вид следов">
         {FILTERS.map((filter) => (
           <button
@@ -261,8 +208,6 @@ const TracesSection: React.FC<TracesSectionProps> = ({
           );
         })}
       </div>
-      </>
-      )}
 
       {/* Окно — через общий примитив, иначе оно не попадёт ни в «Назад», ни в
           Escape, ни в режим клавиатуры Android. */}

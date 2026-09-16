@@ -60,7 +60,7 @@ import { deleteGroupMessages, fetchGroups } from '@/features/groups/api';
 import { deleteOwnAccount, fetchMe, fetchModeratedGroups } from '@/features/settings/api';
 import { fetchThreadInbox, fetchThreadSummary } from '@/features/threads/api';
 import { nameFor } from '@/shared/lib/user';
-import { DIARY_NAME } from '@/shared/lib/diary';
+import { DIARY_NAME, TRACES_NAME } from '@/shared/lib/diary';
 import { renderUnreadBadge } from '@/shared/platform/badgeIcon';
 import { describeStatus } from '@/features/status/statusMeta';
 import { WritePolicy, WRITE_BLOCKED_HINT } from '@/shared/lib/writePolicy';
@@ -670,6 +670,10 @@ const Chat: React.FC = () => {
    * загрузка истории, отправка и правка работают так же, как в обычном чате.
    */
   const [tracesTab, setTracesTab] = useState<TracesTab>('traces');
+  /** Открыта поверхность Следов — та же область, что переписка, но своё содержимое. */
+  const isTracesSurface = !!selfChatId && activeChat === selfChatId;
+  /** На вкладке «Следы» вместо ленты сообщений — список источников. */
+  const tracesListOpen = isTracesSurface && tracesTab === 'traces';
   // Базовые реакции задаются в панели управления и приезжают вместе с профилем.
   const [reactionEmoji, setReactionEmoji] = useState<string[]>([]);
 
@@ -1797,22 +1801,6 @@ const Chat: React.FC = () => {
 
   useEffect(() => { setActiveThread(null); }, [activeChat]);
 
-  // Дневник — это чат self_<id>, показанный внутри раздела. Поэтому вход на
-  // вкладку делает его активным, а уход с неё возвращает активным то, что было
-  // открыто в чатах: иначе следующий заход в «Чаты» открывал бы дневник,
-  // которого в списке чатов больше нет.
-  useEffect(() => {
-    if (section !== 'traces') return;
-    if (tracesTab === 'diary' && selfChatId && activeChat !== selfChatId) setActiveChat(selfChatId);
-    if (tracesTab === 'traces' && selfChatId && activeChat === selfChatId) setActiveChat(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, tracesTab, selfChatId]);
-
-  useEffect(() => {
-    if (section === 'traces') return;
-    if (selfChatId && activeChat === selfChatId) setActiveChat(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section]);
 
   // Загрузка истории при смене чата
   useEffect(() => {
@@ -2857,9 +2845,16 @@ const Chat: React.FC = () => {
   // правилам группировки и свежести. Общий чат специального места больше не имеет.
   const allChats: RosterChat[] = [
     { id: GENERAL_CHAT_ID, name: 'Общий чат', section: 'general' as ChatSection, groupLabel: null as string | null },
-    // Дневника в списке чатов НЕТ. Он не переписка: собеседника нет, непрочитанного
-    // не бывает, а место в списке он занимал по свежести наравне с живыми людьми.
-    // Единственный вход — вкладка в разделе «Следы» (docs/decisions/traces.md).
+    // «Следы» — строка в списке чатов, а не раздел рельса: до отдельного
+    // раздела приходилось добираться через нижнюю панель, а сохранённое нужно
+    // ровно тогда, когда человек уже в переписке. Открывается той же областью,
+    // что чат, и переключается в шапке между Следами и Дневником.
+    ...(selfChatId ? [{
+      id: selfChatId,
+      name: TRACES_NAME,
+      section: 'self' as ChatSection,
+      groupLabel: null as string | null,
+    }] : []),
     ...chatGroups.map(g => ({
       id: g.chat_id,
       name: g.name,
@@ -3366,7 +3361,7 @@ const Chat: React.FC = () => {
           onOpenTasks={() => setTasksModalOpen(true)}
           onCreateGroup={() => setCreateGroupOpen(true)}
           onOpenContacts={() => setPeopleOpen(true)}
-          onOpenFavorites={() => { setTracesTab('diary'); goToSection('traces'); }}
+          onOpenFavorites={() => { if (selfChatId) { setTracesTab('diary'); handleSelectChat(selfChatId); } }}
           onOpenSettings={() => setSettingsModalOpen(true)}
         />
       )}
@@ -3674,60 +3669,8 @@ const Chat: React.FC = () => {
         </main>
       )}
 
-      {section === 'traces' && (
-        <main className="section-host">
-          <Suspense fallback={<SectionLoading />}>
-            <TracesSection
-              tab={tracesTab}
-              onTabChange={setTracesTab}
-              onOpenMessage={(chatId, messageId) => { goToSection('chats'); handleOpenMessage(chatId, messageId); }}
-              onOpenThread={(rootId) => { goToSection('chats'); openThreadInbox(rootId); }}
-              diary={activeChat === selfChatId ? (
-                <>
-                  {/* Та же лента и тот же композер, что в переписке: в
-                      дневнике 45 записей из 113 — картинки, и урезанное поле
-                      ввода было бы потерей возможности, а не упрощением.
-                      Реакции, пересылка и ветки сюда не передаются осознанно:
-                      собеседника нет, реагировать не на кого. */}
-                  <ChatWindow
-                    chatId={selfChatId}
-                    messages={visibleMessages}
-                    currentUserId={currentUserId}
-                    onScrollTop={loadMoreMessages}
-                    onScrollBottom={loadMoreMessagesDown}
-                    onJumpToLatest={jumpToLatestMessages}
-                    hasMoreUp={hasMoreUp}
-                    hasMoreDown={hasMoreDown}
-                    loadingMore={loadingMore}
-                    onStartEdit={(id, text) => setEditingMessage({ id, text })}
-                    editingId={editingMessage?.id ?? null}
-                    onDeleteMessage={(id) => requestDelete([id])}
-                    onDeleteMessages={requestDelete}
-                    customEmoji={customEmoji}
-                    stickerCatalog={stickerCatalog}
-                    onRetryOutgoing={retryOutgoing}
-                    onCancelOutgoing={cancelOutgoing}
-                  />
-                  <MessageInput
-                    onSend={handleSendMessage}
-                    placeholder="Запись в дневник"
-                    customEmoji={customEmoji}
-                    editing={editingMessage}
-                    onSubmitEdit={handleEditMessage}
-                    onCancelEdit={() => setEditingMessage(null)}
-                    onRequestEditLast={requestEditLast}
-                    onSendSticker={handleSendSticker}
-                    onSendFile={handleSendFile}
-                  />
-                </>
-              ) : <SectionLoading />}
-            />
-          </Suspense>
-        </main>
-      )}
-
       {!isChats && section !== 'settings' && section !== 'calendar' && section !== 'tasks'
-        && section !== 'documents' && section !== 'traces' && section !== 'home' && section !== 'people' && (
+        && section !== 'documents' && section !== 'home' && section !== 'people' && (
         <main className="section-host">
           <SectionStub section={activeSection} onBack={() => goToSection('chats')} />
         </main>
@@ -3754,7 +3697,33 @@ const Chat: React.FC = () => {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg>
             </button>
 
-            {activeChatMeta ? (
+            {/* У Следов вместо собеседника — переключатель: это одна
+                поверхность с двумя видами содержимого, а не два разных чата.
+                Он стоит в шапке именно потому, что попадают сюда из списка
+                чатов, а не из рельса: сохранённое нужно ровно тогда, когда
+                человек уже в переписке. */}
+            {isTracesSurface ? (
+              <div className="conv-traces-switch" role="tablist" aria-label="Следы и Дневник">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tracesTab === 'traces'}
+                  className={'conv-traces-tab' + (tracesTab === 'traces' ? ' is-active' : '')}
+                  onClick={() => setTracesTab('traces')}
+                >
+                  Следы
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tracesTab === 'diary'}
+                  className={'conv-traces-tab' + (tracesTab === 'diary' ? ' is-active' : '')}
+                  onClick={() => setTracesTab('diary')}
+                >
+                  Дневник
+                </button>
+              </div>
+            ) : activeChatMeta ? (
               <button
                 type="button"
                 className="conv-head-identity"
@@ -3788,8 +3757,6 @@ const Chat: React.FC = () => {
                     </div>
                   ) : activeChatMeta.section === 'group' ? (
                     <div className="status">{activeChatMeta.memberCount} участников</div>
-                  ) : activeChatMeta.section === 'self' ? (
-                    <div className="status is-broadcast">заметки и пересылки, видите только вы</div>
                   ) : (
                     <div className={'status' + (activeChatMeta.section === 'general' ? ' is-broadcast' : (activeChatMeta.online ? '' : ' is-offline'))}>
                       {activeChatMeta.section === 'general' ? 'рассылка на всех сотрудников' : (activeChatMeta.online ? 'в сети' : 'не в сети')}
@@ -3812,6 +3779,14 @@ const Chat: React.FC = () => {
               (app/ConnectionStrip): в шапке переписки её видел только тот, кто
               сидит в чате, а остальные разделы молча переставали отвечать. */}
 
+          {tracesListOpen ? (
+            <Suspense fallback={<SectionLoading />}>
+              <TracesSection
+                onOpenMessage={handleOpenMessage}
+                onOpenThread={(rootId) => openThreadInbox(rootId)}
+              />
+            </Suspense>
+          ) : (
           <ChatWindow
             chatId={activeChat}
             messages={visibleMessages}
@@ -3865,6 +3840,7 @@ const Chat: React.FC = () => {
               setActiveThread({ rootId, autoFocus });
             }}
           />
+          )}
           {muted && (
             <div className="muted-banner">
               Ваш аккаунт временно ограничен — отправка сообщений недоступна.
@@ -3875,6 +3851,9 @@ const Chat: React.FC = () => {
               {WRITE_BLOCKED_HINT[activeChatMeta.writePolicy || 'nobody']}
             </div>
           )}
+          {/* В список следов писать нечего — это ссылки на чужие источники, а
+              не переписка. На вкладке «Дневник» поле остаётся: там записи. */}
+          {!tracesListOpen && (
           <MessageInput
             onSend={handleSendMessage}
             onTyping={handleTyping}
@@ -3909,6 +3888,7 @@ const Chat: React.FC = () => {
             onSendSticker={handleSendSticker}
             onSendFile={handleSendFile}
           />
+          )}
         </main>
       ))}
       {/* Сведения о чате, профиль и участники — МОДАЛЬНОЕ окно на любой

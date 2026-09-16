@@ -7,7 +7,7 @@
 // своём месте потому, что иначе кнопка уводила экран из-под открытого окна,
 // а окно оставалось висеть поверх уже другого экрана.
 
-import { render, act, waitFor } from '@testing-library/react';
+import { render, act, waitFor, screen } from '@testing-library/react';
 import { makeSocket, makeApi, stub, props, resetProps, setViewport, MOBILE_VIEWPORT, FakeSocket, FakeApi } from './Chat.harness';
 
 let socket: FakeSocket;
@@ -25,6 +25,7 @@ vi.mock('@/features/calendar/CalendarSection', () => ({ default: stub('CalendarS
 vi.mock('@/features/files/FilesSection', () => ({ default: stub('FilesSection') }));
 vi.mock('@/features/contacts/PeopleSection', () => ({ default: stub('PeopleSection') }));
 vi.mock('@/features/tasks/TasksPanel', () => ({ default: stub('TasksPanel') }));
+vi.mock('@/features/traces/TracesSection', () => ({ default: stub('TracesSection') }));
 vi.mock('@/features/threads/ThreadPanel', () => ({ default: stub('ThreadPanel') }));
 vi.mock('@/features/threads/ThreadInbox', () => ({ default: stub('ThreadInbox') }));
 vi.mock('@/features/notifications/NotificationStack', () => ({ default: stub('NotificationStack') }));
@@ -223,4 +224,47 @@ test('ветка закрывается раньше самой переписк
 
   await back();
   await waitFor(() => expect(props.NavRail.active).toBe('chats'));
+});
+
+// ---------------------------------------------------------------------------
+// Следы
+// ---------------------------------------------------------------------------
+
+/**
+ * Свой chat_id приезжает в /users/me, но тот запрос уходит только после
+ * рукопожатия сокета, которого на этом стенде нет. Кладём его так, как он
+ * лежит у вернувшегося человека, — из localStorage состояние и поднимается.
+ */
+const seedSelfChat = () => localStorage.setItem('selfChatId', 'self_1');
+
+test('«Следы» открываются строкой из списка чатов, а не разделом рельса', async () => {
+  // Отдельным разделом до них приходилось добираться через нижнюю панель, а
+  // сохранённое нужно ровно тогда, когда человек уже в переписке.
+  seedSelfChat();
+  await mount();
+
+  expect(props.ChatList.chats.find((c: any) => c.id === 'self_1').name).toBe('Следы');
+  expect(props.NavRail.active).toBe('chats');
+});
+
+test('на вкладке «Следы» список источников занимает место ленты сообщений', async () => {
+  seedSelfChat();
+  await mount();
+  await act(async () => { props.ChatList.onSelectChat('self_1'); });
+
+  expect(props.TracesSection).toBeTruthy();
+  // Ни ленты, ни поля ввода: в список ссылок писать нечего.
+  expect(props.ChatWindow).toBeFalsy();
+  expect(props.MessageInput).toBeFalsy();
+});
+
+test('переключатель в шапке возвращает ленту дневника вместе с полем ввода', async () => {
+  seedSelfChat();
+  await mount();
+  await act(async () => { props.ChatList.onSelectChat('self_1'); });
+
+  await act(async () => { screen.getByRole('tab', { name: 'Дневник' }).click(); });
+
+  expect(props.ChatWindow).toBeTruthy();
+  expect(props.MessageInput).toBeTruthy();
 });

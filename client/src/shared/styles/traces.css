@@ -1,35 +1,31 @@
-/* Раздел «Следы» — сохранённое происхождение (docs/decisions/traces.md).
-   Лежит в общих стилях, а не рядом с разделом: раздел грузится отдельным
+/* «Следы» — сохранённое происхождение (docs/decisions/traces.md).
+   Стили лежат в общих, а не рядом с компонентом: список грузится отдельным
    куском, а классы состояний («подчищен», «нет доступа») должны быть
-   оформлены сразу, ещё до первого захода в раздел. */
+   оформлены сразу, ещё до первого открытия. */
 
+/* Список следов занимает ту же область, что лента переписки: Следы открывают
+   строкой из списка чатов, а не отдельным разделом. min-height: 0 обязателен —
+   без него flex-ребёнок не сжимается и прокрутка уезжает за нижний край. */
 .traces-section {
-  display: flex; flex-direction: column; min-height: 0; height: 100%;
-  padding: 18px 22px 0; gap: 12px; overflow: hidden;
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  padding: 14px 18px 0; gap: 12px; overflow: hidden;
 }
-.traces-section .section-head h2 { margin: 0; font-size: 21px; font-weight: 650; }
-.traces-section .section-sub { margin: 3px 0 0; color: var(--ink-muted); font-size: 13px; }
 
-/* Вкладки раздела: «Следы» и «Дневник». Подчёркиванием, а не пилюлями, — ниже
-   стоят фильтры-пилюли, и два одинаковых по виду ряда читались бы как один. */
-.traces-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); }
-.traces-tab {
-  padding: 8px 2px 9px; border: none; background: none; cursor: pointer;
-  font: inherit; font-size: 14px; color: var(--ink-muted);
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
+/* Переключатель «Следы / Дневник» в шапке вместо собеседника: у этой
+   поверхности собеседника нет, а два вида содержимого — есть. */
+.conv-traces-switch { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.conv-traces-tab {
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px;
+  border: 1px solid transparent; background: none; color: var(--ink-muted);
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
 }
-.traces-tab:hover { color: var(--ink); }
-.traces-tab.is-active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
-
-/* Дневник — та же лента и тот же композер, что в переписке, поэтому ему нужна
-   та же геометрия: колонка, где прокручивается только лента. min-height: 0
-   обязателен — без него flex-ребёнок не сжимается, и прокрутка уезжает наружу,
-   утаскивая поле ввода за нижний край экрана. */
-.traces-diary {
-  flex: 1; min-height: 0; display: flex; flex-direction: column;
-  margin: 0 -22px; border-top: 1px solid var(--line);
+.conv-traces-tab:hover { background: var(--row-hover); color: var(--ink); }
+.conv-traces-tab.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent); font-weight: 600;
 }
-.traces-diary .conv-body { flex: 1; min-height: 0; }
+.conv-traces-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .traces-filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .traces-filter {
@@ -97,8 +93,7 @@
 .trace-note-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 @media (max-width: 760px) {
-  .traces-section { padding: 14px 14px 0; }
-  .traces-diary { margin: 0 -14px; }
+  .traces-section { padding: 12px 12px 0; }
   .traces-row { flex-direction: column; gap: 9px; }
   .traces-row-actions { flex-direction: row; align-self: stretch; }
   .traces-row-actions .trace-action { flex: 1; }
