@@ -28,6 +28,10 @@
    стрелка — обычные пересылки. Смешивать их нельзя (docs/decisions/traces.md). */
 .msg-service { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .msg.mine .msg-service { margin-left: auto; }
+/* Со служебными показателями ряд становится расширенным, и зазор между двумя
+   половинами обязан читаться: вплотную лапка Следов выглядит ещё одной
+   реакцией, а не показателем другой природы. */
+.msg-underrow.is-expanded .msg-reactions + .msg-service { margin-left: 14px; }
 .service-chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px 2px 7px; border: 1px solid var(--line); border-radius: var(--radius-pill);
@@ -78,6 +82,14 @@
 }
 .reaction-add:hover { border-color: var(--accent); color: var(--accent); }
 .reaction-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Сообщению, под которым ряда нет (ни реакций, ни следов, ни пересылок, ни
+   ветки), заводить ряд ради одной этой кнопки нельзя: он растил бы КАЖДОЕ
+   сообщение на свою высоту. Кнопка садится у нижнего края пузыря, снаружи его
+   полей и внахлёст на кромку, — места в потоке не занимает совсем. Как только
+   под сообщением появится хоть один показатель, она уедет в ряд (см.
+   hasUnderrow в ChatWindow). */
+.reaction-add.is-floating { position: absolute; bottom: 0; right: -24px; z-index: 1; }
+.msg.mine .reaction-add.is-floating { right: auto; left: -24px; }
 .reaction-chip:hover { border-color: var(--border-strong, var(--accent)); }
 .reaction-chip.is-mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .reaction-chip .avatar { width: 18px; height: 18px; font-size: 8px; }

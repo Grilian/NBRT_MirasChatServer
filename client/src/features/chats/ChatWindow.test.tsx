@@ -254,10 +254,21 @@ describe('ChatWindow строка под пузырём', () => {
     />,
   );
 
-  test('кнопка «добавить реакцию» стоит в ряду, даже когда реакций ещё нет', () => {
+  // Ряд под сообщением не заводится ради одной кнопки: он растил бы КАЖДОЕ
+  // сообщение на свою высоту, а показать ему при этом нечего. Кнопка в этом
+  // случае садится плашкой на пузырь и высоты не добавляет.
+  test('без реакций и показателей ряда нет, а кнопка сидит на пузыре', () => {
     const { container } = withReactions();
-    expect(container.querySelector('.msg-reactions > .reaction-add')).toBeInTheDocument();
+    expect(container.querySelector('.msg-underrow')).toBeNull();
+    expect(container.querySelector('.bubble > .reaction-add.is-floating')).toBeInTheDocument();
     expect(container.querySelector('.reaction-chip')).toBeNull();
+  });
+
+  test('при показателе ряд появляется и кнопка уезжает в него', () => {
+    const { container } = withReactions({ onOpenThread: () => {} });
+    expect(container.querySelector('.msg-underrow.is-expanded')).toBeInTheDocument();
+    expect(container.querySelector('.reaction-add.is-floating')).toBeNull();
+    expect(container.querySelector('.msg-reactions > .reaction-add')).toBeInTheDocument();
   });
 
   test('кнопка открывает только ряд смайликов, без карточки пунктов', () => {

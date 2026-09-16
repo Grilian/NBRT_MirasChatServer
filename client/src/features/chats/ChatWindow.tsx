@@ -663,6 +663,34 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const canReact = (msg: Message) => !!reactionEmoji?.length && !!onToggleReaction
     && msg.status !== 'sending' && msg.status !== 'failed' && !msg.deleted;
 
+  /**
+   * Кнопка «добавить реакцию». Живёт в двух местах, но остаётся ОДНОЙ: в ряду
+   * под сообщением — рядом с реакциями, а у сообщения, под которым ряда нет
+   * вовсе, — плашкой у нижнего края пузыря (`floating`). Разводить их в две
+   * разметки нельзя: обе открывают один и тот же слой, и вторая копия
+   * разошлась бы с первой при первой же правке.
+   */
+  const renderReactionAdd = (msg: Message, floating = false) => (
+    <button
+      type="button"
+      className={'reaction-add' + (floating ? ' is-floating' : '')}
+      aria-label="Добавить реакцию"
+      title="Добавить реакцию"
+      onClick={(event) => {
+        event.stopPropagation();
+        if (selectMode) { toggleSelected(msg.id); return; }
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        openMenuAt(msg, rect.left, rect.bottom + 6, true);
+      }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
+        <path d="M9 9.5h.01M15 9.5h.01" />
+      </svg>
+    </button>
+  );
+
   const openMenuAt = (msg: Message, x: number, y: number, reactionsOnly = false) => {
     if (selectMode) return;
     const chatRect = messagesContainerRef.current?.getBoundingClientRect();
@@ -1201,6 +1229,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             && !(!mine && showAuthors && startsGroup)
             && !msg.forwarded_from_name
             && !msg.reply_to_id;
+          // Ряд под сообщением заводится только тогда, когда в нём есть что
+          // показать. Одна кнопка «добавить реакцию» поводом не считается:
+          // ради неё ряд растил бы КАЖДОЕ сообщение на свою высоту, а сказать
+          // ему при этом нечего. Служебные показатели разводят ряд на два
+          // вида: с ними он расширенный (реакции слева, следы и пересылки
+          // справа), без них — короткий, только реакции.
+          const hasService = !!msg.trace_count || !!msg.forward_count || showThreadLink;
+          const hasUnderrow = hasService || !!msg.reactions?.length;
           const className = [
             'msg',
             mine ? 'mine' : 'theirs',
@@ -1482,6 +1518,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         />
                       )}
                     </span>
+                    {/* Ряда под сообщением нет — вешать его ради одной кнопки
+                        значило бы растить каждое сообщение на целую строку.
+                        Тогда кнопка садится плашкой у нижнего края пузыря и
+                        высоты сообщению не добавляет; как только появится
+                        реакция, след, пересылка или ответ, она уедет в ряд. */}
+                    {!hasUnderrow && canReact(msg) && renderReactionAdd(msg, true)}
                 </div>
 
                 {/* Реакции и «Ответить» — ОДНА строка под пузырём, а не две.
@@ -1491,9 +1533,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     иначе фон пузыря съедал бы верхнюю кромку плашек.
                     Реакция — с аватаром поставившего (в спеке именно так, не
                     просто счётчик); клик открывает детальный список. */}
-                {(!!msg.reactions?.length || showThreadLink || !!msg.trace_count || !!msg.forward_count
-                  || canReact(msg)) && (
-                <div className="msg-underrow">
+                {hasUnderrow && (
+                <div className={'msg-underrow' + (hasService ? ' is-expanded' : '')}>
                 {(!!msg.reactions?.length || canReact(msg)) && (
                   <div className="msg-reactions">
                     {groupReactions(msg.reactions || []).map(({ emoji, list }) => {
@@ -1542,26 +1583,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         эскизе. Открывает ТОТ ЖЕ слой, что долгое нажатие, но
                         без карточки пунктов: одного ряда смайликов достаточно,
                         а позиционирование и закрытие уже разобраны там. */}
-                    {canReact(msg) && (
-                      <button
-                        type="button"
-                        className="reaction-add"
-                        aria-label="Добавить реакцию"
-                        title="Добавить реакцию"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (selectMode) { toggleSelected(msg.id); return; }
-                          const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                          openMenuAt(msg, rect.left, rect.bottom + 6, true);
-                        }}
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
-                          <circle cx="12" cy="12" r="9" />
-                          <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
-                          <path d="M9 9.5h.01M15 9.5h.01" />
-                        </svg>
-                      </button>
-                    )}
+                    {canReact(msg) && renderReactionAdd(msg)}
                   </div>
                 )}
 
@@ -1571,7 +1593,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     прежняя занимала под каждым сообщением с обсуждением
                     полосу с аватарами, словом «ответа» и временем последнего
                     ответа, и ряд переставал читаться как один ряд. */}
-                {(!!msg.trace_count || !!msg.forward_count || showThreadLink) && (
+                {hasService && (
                   <div className="msg-service">
                     {!!msg.trace_count && (
                       <span
