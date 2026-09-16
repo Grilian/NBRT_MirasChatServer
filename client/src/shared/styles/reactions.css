@@ -35,6 +35,19 @@
   font-size: 12px; line-height: 1; cursor: default;
 }
 .service-chip-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Ветка — единственный чип ряда, который нажимают, поэтому у неё курсор и
+   отклик на наведение. Лапка и стрелка только показывают число. */
+.thread-chip { position: relative; cursor: pointer; }
+.thread-chip:hover { border-color: var(--accent); color: var(--accent); }
+.thread-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Непрочитанные ответы — точка, а не вторая цифра: рядом уже стоит число
+   ответов, и «12» против «12» не говорит, что три из них новые. */
+.thread-chip.has-unread { border-color: var(--accent); color: var(--accent); }
+.thread-chip-dot {
+  position: absolute; top: -2px; right: -2px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 2px var(--paper-raised);
+}
 /* Свой след виден сразу: цифра одна на всех, а «мой он или нет» — личное. */
 .trace-chip.is-mine {
   border-color: var(--accent);

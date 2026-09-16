@@ -137,7 +137,7 @@ describe('ChatWindow threads', () => {
       />,
     );
 
-    fireEvent.click(getByRole('button', { name: 'Ответить' }));
+    fireEvent.click(getByRole('button', { name: 'Ответить в ветке' }));
     expect(onOpenThread).toHaveBeenCalledWith(1, true);
   });
 
@@ -161,6 +161,37 @@ describe('ChatWindow threads', () => {
 
     fireEvent.click(getByRole('button', { name: /2 ответа/ }));
     expect(onOpenThread).toHaveBeenCalledWith(1, false);
+  });
+
+  test('новые ответы отличаются не цифрой, а отдельной меткой', () => {
+    // Число ответов и так стоит в чипе: «12» против «12» не говорит, что три
+    // из них новые. Метка видна боковым зрением и места не занимает.
+    const withThread = (unread: number) => ({
+      ...message,
+      file_path: null,
+      thread: { reply_count: 12, unread_count: unread, last_reply_at: null, recent_authors: [] },
+    });
+    const draw = (unread: number) => render(
+      <ChatWindow
+        chatId="group_1"
+        messages={[withThread(unread)] as any}
+        currentUserId={1}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+        onOpenThread={() => {}}
+      />,
+    );
+
+    const quiet = draw(0);
+    expect(quiet.container.querySelector('.thread-chip-dot')).toBeNull();
+    expect(quiet.container.querySelector('.thread-chip')!.className).not.toContain('has-unread');
+    quiet.unmount();
+
+    const fresh = draw(3);
+    expect(fresh.container.querySelector('.thread-chip-dot')).toBeInTheDocument();
+    expect(fresh.container.querySelector('.thread-chip')!.className).toContain('has-unread');
+    // Само число ответов при этом прежнее — метка его не подменяет.
+    expect(fresh.container.querySelector('.thread-chip .service-chip-count')!.textContent).toBe('12');
   });
 
   test('keeps a personal-chat thread in the context menu without an inline entry', () => {
@@ -235,8 +266,9 @@ describe('ChatWindow строка под пузырём', () => {
     expect(row).toBeInTheDocument();
     // Обе части — прямые потомки одного ряда: разложенные по разным строкам,
     // они занимали двойную высоту и отрывали реакции от сообщения.
+    // Реакции слева, служебные чипы (в том числе ветка) — справа.
     expect(row.querySelector(':scope > .msg-reactions')).toBeInTheDocument();
-    expect(row.querySelector(':scope > .thread-link')).toBeInTheDocument();
+    expect(row.querySelector(':scope > .msg-service > .thread-chip')).toBeInTheDocument();
   });
 
   test('без реакций и без веток лишний ряд не создаётся', () => {

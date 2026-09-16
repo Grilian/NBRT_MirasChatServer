@@ -1523,12 +1523,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
 
                 {/* Служебные показатели — СПРАВА, реакции остаются слева
-                    (эскиз концепции). Показываются только при ненулевом
-                    счётчике: постоянные кнопки-действия на каждом пузыре,
-                    которые рисует эскиз, мы не заводим — на телефоне это
-                    лишняя плотность и случайные нажатия, а «Наследить» и
-                    «Ответить в ветке» и так живут в меню сообщения. */}
-                {(!!msg.trace_count || !!msg.forward_count) && (
+                    (эскиз концепции). Все одного размера и вида: иконка плюс
+                    число. Ветка здесь же, а не отдельной широкой строкой —
+                    прежняя занимала под каждым сообщением с обсуждением
+                    полосу с аватарами, словом «ответа» и временем последнего
+                    ответа, и ряд переставал читаться как один ряд. */}
+                {(!!msg.trace_count || !!msg.forward_count || showThreadLink) && (
                   <div className="msg-service">
                     {!!msg.trace_count && (
                       <span
@@ -1554,44 +1554,42 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         <span className="service-chip-count">{msg.forward_count}</span>
                       </span>
                     )}
+                    {showThreadLink && onOpenThread && (
+                      <button
+                        type="button"
+                        className={'service-chip thread-chip'
+                          + ((msg.thread?.unread_count || 0) > 0 ? ' has-unread' : '')}
+                        // Время последнего ответа и слово «ответа» уехали в
+                        // подсказку: в ряду им места нет, но при наведении они
+                        // по-прежнему отвечают на «когда там было движение».
+                        title={msg.thread?.reply_count
+                          ? `${threadReplyLabel(msg.thread.reply_count)}`
+                            + (msg.thread.last_reply_at ? `, последний в ${formatMoscowTime(msg.thread.last_reply_at)}` : '')
+                            + (msg.thread.unread_count ? `, новых: ${msg.thread.unread_count}` : '')
+                          : 'Ответить в ветке'}
+                        aria-label={msg.thread?.reply_count
+                          ? `${threadReplyLabel(msg.thread.reply_count)}${msg.thread.unread_count ? `, новых: ${msg.thread.unread_count}` : ''}`
+                          : 'Ответить в ветке'}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (selectMode) { toggleSelected(msg.id); return; }
+                          onOpenThread(msg.id, !msg.thread?.reply_count);
+                        }}
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+                        </svg>
+                        {!!msg.thread?.reply_count && (
+                          <span className="service-chip-count">{msg.thread.reply_count}</span>
+                        )}
+                        {/* Непрочитанное обязано отличаться НЕ цифрой: число
+                            ответов и так стоит рядом, и «12» против «12» не
+                            говорит, что три из них новые. Точка видна боковым
+                            зрением и не занимает места. */}
+                        {!!msg.thread?.unread_count && <span className="thread-chip-dot" aria-hidden="true" />}
+                      </button>
+                    )}
                   </div>
-                )}
-
-                {showThreadLink && onOpenThread && (
-                  <button
-                    type="button"
-                    className={'thread-link' + ((msg.thread?.unread_count || 0) > 0 ? ' has-unread' : '')}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (selectMode) { toggleSelected(msg.id); return; }
-                      onOpenThread(msg.id, !msg.thread?.reply_count);
-                    }}
-                  >
-                    {!!msg.thread?.reply_count && (
-                      <span className="thread-link-avatars" aria-hidden="true">
-                        {msg.thread.recent_authors.slice(0, 2).map((author) => (
-                          <Avatar
-                            key={author.id}
-                            name={author.display_name || author.username}
-                            avatarPath={author.avatar_path}
-                            size="sm"
-                          />
-                        ))}
-                      </span>
-                    )}
-                    <span className="thread-link-copy">
-                      <strong>{msg.thread?.reply_count ? threadReplyLabel(msg.thread.reply_count) : 'Ответить'}</strong>
-                      {!!msg.thread?.last_reply_at && (
-                        <span>последний ответ в {formatMoscowTime(msg.thread.last_reply_at)}</span>
-                      )}
-                    </span>
-                    {!!msg.thread?.unread_count && (
-                      <span className="thread-link-unread">{msg.thread.unread_count} новых</span>
-                    )}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
-                    </svg>
-                  </button>
                 )}
                 </div>
                 )}
