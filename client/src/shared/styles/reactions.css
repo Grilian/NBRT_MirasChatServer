@@ -67,6 +67,17 @@
 .reaction-chip-faces .avatar:not(:first-child) { margin-left: -7px; }
 .reaction-chip.is-mine .reaction-chip-faces .avatar { border-color: var(--bubble-in); }
 .reaction-chip-count { font-weight: 600; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+/* «Добавить реакцию» — контурная кнопка того же роста, что плашки реакций,
+   но без числа: ей нечего показывать, она только открывает ряд смайликов. */
+.reaction-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--paper-raised); color: var(--ink-muted);
+  transition: background var(--ease), border-color var(--ease), color var(--ease);
+}
+.reaction-add:hover { border-color: var(--accent); color: var(--accent); }
+.reaction-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .reaction-chip:hover { border-color: var(--border-strong, var(--accent)); }
 .reaction-chip.is-mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .reaction-chip .avatar { width: 18px; height: 18px; font-size: 8px; }

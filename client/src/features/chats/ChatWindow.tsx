@@ -252,6 +252,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     safeTop: number;
     safeBottom: number;
     maxHeight: number;
+    /**
+     * Открыт только ряд реакций, без карточки пунктов.
+     *
+     * Это тот же слой, что у контекстного меню, а не второй всплывающий
+     * элемент: позиционирование по краям экрана, закрытие внешним нажатием,
+     * Escape и аппаратный «Назад» уже разобраны здесь и работают. Второй слой
+     * означал бы вторую реализацию всего этого, расходящуюся с первой.
+     */
+    reactionsOnly?: boolean;
   } | null>(null);
   // Развёрнутый ряд реакций живёт только пока открыто меню: следующее
   // открытие должно начинаться с компактного вида, а не помнить прошлый.
@@ -645,7 +654,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // непустом сообщении; какие пункты в нём показать (только «Копировать»
   // или ещё и «Редактировать»/«Удалить»), решает уже сам рендер меню по
   // мере сравнения sender_id с currentUserId.
-  const openMenuAt = (msg: Message, x: number, y: number) => {
+  /**
+   * Есть ли на что ставить реакцию.
+   *
+   * Неотправленному сообщения на сервере ещё нет, а id у него временный — та
+   * же проверка стоит и у ряда реакций в меню.
+   */
+  const canReact = (msg: Message) => !!reactionEmoji?.length && !!onToggleReaction
+    && msg.status !== 'sending' && msg.status !== 'failed' && !msg.deleted;
+
+  const openMenuAt = (msg: Message, x: number, y: number, reactionsOnly = false) => {
     if (selectMode) return;
     const chatRect = messagesContainerRef.current?.getBoundingClientRect();
     const safeTop = Math.max(4, (chatRect?.top ?? 0) + 4);
@@ -654,7 +672,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       Math.min(window.innerHeight - 4, (chatRect?.bottom ?? window.innerHeight) - 4),
     );
     setReactionsExpanded(false);
-    setMenuFor({ id: msg.id, x, y, safeTop, safeBottom, maxHeight: safeBottom - safeTop });
+    setMenuFor({ id: msg.id, x, y, safeTop, safeBottom, maxHeight: safeBottom - safeTop, reactionsOnly });
   };
 
   const handleContextMenu = (e: React.MouseEvent, msg: Message) => {
@@ -1473,11 +1491,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     иначе фон пузыря съедал бы верхнюю кромку плашек.
                     Реакция — с аватаром поставившего (в спеке именно так, не
                     просто счётчик); клик открывает детальный список. */}
-                {(!!msg.reactions?.length || showThreadLink || !!msg.trace_count || !!msg.forward_count) && (
+                {(!!msg.reactions?.length || showThreadLink || !!msg.trace_count || !!msg.forward_count
+                  || canReact(msg)) && (
                 <div className="msg-underrow">
-                {!!msg.reactions?.length && (
+                {(!!msg.reactions?.length || canReact(msg)) && (
                   <div className="msg-reactions">
-                    {groupReactions(msg.reactions).map(({ emoji, list }) => {
+                    {groupReactions(msg.reactions || []).map(({ emoji, list }) => {
                       const isMine = list.some((r) => r.user.id === currentUserId);
                       return (
                         <span
@@ -1519,6 +1538,30 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                         </span>
                       );
                     })}
+                    {/* Кнопка «добавить реакцию» — сразу за реакциями, как на
+                        эскизе. Открывает ТОТ ЖЕ слой, что долгое нажатие, но
+                        без карточки пунктов: одного ряда смайликов достаточно,
+                        а позиционирование и закрытие уже разобраны там. */}
+                    {canReact(msg) && (
+                      <button
+                        type="button"
+                        className="reaction-add"
+                        aria-label="Добавить реакцию"
+                        title="Добавить реакцию"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (selectMode) { toggleSelected(msg.id); return; }
+                          const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                          openMenuAt(msg, rect.left, rect.bottom + 6, true);
+                        }}
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
+                          <path d="M9 9.5h.01M15 9.5h.01" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -1671,6 +1714,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 своего (чужой текст переписывать нельзя ни при каких правах),
                 удаление на любом: область (у себя/у всех) выбирается в диалоге
                 и окончательно решается сервером. */}
+            {!menuFor.reactionsOnly && (
             <div className="msg-context-menu">
               {buildMenuItems(menuMsg, menuMine).map((item) => (
                 item.kind === 'info' ? (
@@ -1688,6 +1732,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 )
               ))}
             </div>
+            )}
           </div>
         );
       })()}

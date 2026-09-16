@@ -241,6 +241,51 @@ describe('ChatWindow threads', () => {
 });
 
 describe('ChatWindow строка под пузырём', () => {
+  const withReactions = (props: Record<string, unknown> = {}) => render(
+    <ChatWindow
+      chatId="group_1"
+      messages={[{ ...message, file_path: null }] as any}
+      currentUserId={1}
+      onStartEdit={() => {}}
+      onDeleteMessage={() => {}}
+      reactionEmoji={['👍', '❤️']}
+      onToggleReaction={() => {}}
+      {...props}
+    />,
+  );
+
+  test('кнопка «добавить реакцию» стоит в ряду, даже когда реакций ещё нет', () => {
+    const { container } = withReactions();
+    expect(container.querySelector('.msg-reactions > .reaction-add')).toBeInTheDocument();
+    expect(container.querySelector('.reaction-chip')).toBeNull();
+  });
+
+  test('кнопка открывает только ряд смайликов, без карточки пунктов', () => {
+    // Слой тот же, что у долгого нажатия: позиционирование, закрытие внешним
+    // нажатием и «Назад» уже разобраны там, и второй реализации быть не должно.
+    const { container } = withReactions();
+
+    fireEvent.click(container.querySelector('.reaction-add') as HTMLElement);
+
+    expect(container.querySelector('.msg-menu-reactions')).toBeInTheDocument();
+    expect(container.querySelector('.msg-context-menu')).toBeNull();
+  });
+
+  test('без набора реакций кнопки нет вовсе', () => {
+    // Набор задаётся в панели управления и может быть пустым — тогда ставить
+    // нечего, и кнопка открывала бы пустой ряд.
+    const { container } = render(
+      <ChatWindow
+        chatId="group_1"
+        messages={[{ ...message, file_path: null }] as any}
+        currentUserId={1}
+        onStartEdit={() => {}}
+        onDeleteMessage={() => {}}
+      />,
+    );
+    expect(container.querySelector('.reaction-add')).toBeNull();
+  });
+
   test('реакции и «Ответить» стоят в одном ряду, а не двумя строками', () => {
     const { container } = render(
       <ChatWindow
